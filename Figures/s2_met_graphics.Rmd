@@ -1,0 +1,43 @@
+---
+title: "S2 MET Graphics"
+output: html_notebook
+---
+
+## Introduction
+
+This is a notebook of general figures and graphics for the S2 MET project.
+
+```{r}
+
+library(tidyverse)
+library(readxl)
+
+
+```
+
+
+
+## Collaborator Map
+
+```{r}
+
+library(maps)
+library(ggmap)
+library(mapdata)
+
+
+## Get a map of US
+# States
+states <- map_data("state")
+
+ggplot(data = states) + 
+  geom_polygon(aes(x = long, y = lat, group = group), fill = "grey", color = "white") +
+  coord_fixed(1.3) +
+  theme_classic()
+
+
+
+
+```
+
+

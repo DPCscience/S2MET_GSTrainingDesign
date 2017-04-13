@@ -1,0 +1,570 @@
+---
+title: "S2MET Predictions"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = "hide")
+```
+
+
+## Introduction
+
+This notebook will outline prediction results for the S2MET using different methods of incorporating environmental covariables.
+
+```{r}
+
+library(tidyverse)
+library(stringr)
+library(rrBLUP)
+library(readxl)
+library(EMMREML)
+
+# The head directory
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+# Prediction directory
+pred_dir <- file.path(proj_dir, "Predictions")
+
+# Other directories
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
+pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+
+
+## Load Data
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+
+# Load the phenotypic data
+load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
+load(file.path(pheno_dir, "S2_tidy_BLUE_all.RData"))
+
+# Load environmental data
+load(file.path(env_var_dir, "env_cov_mat.RData"))
+
+
+```
+
+
+## Entries
+
+```{r}
+
+# Load an entry file
+entry_file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
+entry_list <- read_excel(entry_file, sheet = "S2_MET")
+
+# Get rid of checks
+entries <- entry_list %>% 
+  filter(Class != "Check") %>%
+  select(Line) %>%
+  unlist()
+
+# Pull out the tp lines that intersect with the genotype data
+tp <- entries %>% 
+  str_subset("^[0-9]{2}") %>%
+  intersect(., row.names(s2_imputed_mat))
+
+vp <- entries %>% 
+  str_subset("^2MS") %>%
+  intersect(., row.names(s2_imputed_mat))
+
+# Keep only the relevant lines and only 2016 trials
+pheno <- S2.MET.BLUE %>%
+  filter(line_name %in% c(tp, vp),
+         year == 2016) %>%
+  # Change line_name and environment to factors
+  mutate_at(vars(line_name, environment), funs(as.factor))
+
+```
+
+## Matrix Construction
+
+```{r}
+
+# Rename the E matrix
+dimnames(E) <- dimnames(E) %>% 
+  map(str_replace, pattern = "16", replacement = "_2016")
+
+# Filter the genotype matrix
+M <- s2_imputed_mat[c(tp, vp),]
+
+# Calculate the additive relationship matrix
+A <- A.mat(M, min.MAF = 0, max.missing = 1)
+
+
+# Create the GXE matrix by taking the kronecker product of the environment matrix and the additive relationship matrix
+GE <- kronecker(A, E, make.dimnames = T)
+
+
+```
+
+
+## Model Breakdown
+
+Here is a description of the models that will be tested.
+
+#### Basic Quantitative Genetics Model
+
+The basic fitted model for a quantitative trait might be
+
+$$ y_{ij} = \mu + g_{i} + t_{j} + (gt)_{ij} + \epsilon_{ij} $$
+
+#### Basic Mixed Model
+
+The regular mixed model takes the form
+$$ y = X \beta + Zu + \epsilon $$
+
+where $X$ is the incidence matrix of fixed effects, $\beta$ is the vector of fixed effects, $Z$ is the incidence matrix of random effects, $u$ is the vector of random effects, and $\epsilon$ is the vector of residuals.
+
+
+$u$ is assumed to follow $u_i \sim MVN(0, A \sigma^2_u)$$
+
+$\epsilon$ is assumed to follow $\epsilon_i \sim MVN(0, R \sigma^2_\epsilon)$
+
+
+For the RR-BLUP model, $A$ is an identity matrix, while $Z$ is the marker matrix and $u$ are the marker effects. For the GBLUB model, $A$ is the realized genomic relationshop matrix, while $Z$ is an incidence matrix for genotypes and $u$ are the breeding values.
+
+
+With no fixed effects, we can turn $X \beta$ into a general intercept $\mu$
+
+In the G-BLUP model, we can turn $Zu$ into $G$
+
+
+#### Basic G-BLUP Model - One Environment
+
+For the normal G-BLUP model for genomic prediction in a single environment, the model takes the form:
+
+$$ y_{i} = \mu + G_{i} + \epsilon_i $$
+
+where $y_i$ is the phenotypic observation of the $i$th genotype, $\mu$ is the grand mean, $G_i$ is the genotypic random effect of genotype $i$, and $\epsilon_i$ is the residual effect of genotype $i$. 
+
+
+$G$ is assumed to follow $G_i \sim MVN(0, \Sigma \sigma^2_u)$, where $Sigma$ is the Kronecker product of the realized genomic relationship matrix, $A$, and environmental relationship matrix $E$. In one environment, $E$ is scalar 1.
+
+$\epsilon$ is assumed to follow $\epsilon_i \sim MVN(0, R \sigma^2_\epsilon)$, where R is an identity matrix where homoscedasticity is assumed.
+
+
+Here is an example of that calculation using real data:
+
+```{r, results='markup'}
+# Environment
+env <- "STP_2016"
+
+# Subset the phenos for modelling
+pheno_model <- pheno %>% 
+  filter(environment %in% env, trait == "GrainYield") %>%
+  select(line_name, environment, value) %>%
+  # Dummy variable for training or validation
+  mutate(population = ifelse(line_name %in% tp, "tp", "vp")) %>%
+  # Sort on environment, then genotype
+  arrange(line_name, environment)
+
+# Training phenotypes
+y <- pheno_model %>% 
+  filter(population == "tp") %>%
+  unite(observation, line_name, environment, sep = ":", remove = T) %>%
+  # Code to remove existing rownames then add back in
+  rownames_to_column() %>%
+  select(-rowname, -population) %>%
+  column_to_rownames("observation") %>% 
+  as.matrix()
+
+# validation phenos
+y_test <- pheno_model %>% 
+  filter(population == "vp") %>%
+  unite(observation, line_name, environment, sep = ":", remove = T) %>%
+  # Code to remove existing rownames then add back in
+  rownames_to_column() %>%
+  select(-rowname, -population) %>%
+  column_to_rownames("observation") %>% 
+  as.matrix()
+
+
+
+# X matrix - there are no fixed effects, just grand mean
+X <- matrix(1, nrow = nrow(y), ncol = 1)
+
+# Z matrix relates the phenotypic observations in y to the random genotypic effects u
+Z <- diag(nrow(y))
+Z <- cbind(Z, matrix(0, nrow = nrow(y), ncol = nrow(y_test)))
+dimnames(Z) <- list(tp, c(tp, vp))
+
+# The sigma matrix is the kronecker product of the Sigma_G matrix (or A matrix) and the Sigma_E matrix (or scalar 1)
+Sig_G <- A
+Sig_E <- matrix(1, nrow = 1, ncol = 1, dimnames = list(env, env))
+
+Sig <- kronecker(Sig_G, Sig_E, make.dimnames = T)
+
+# solve the mixed model
+fit <- mixed.solve(y = y, Z = Z, K = Sig, X = X, method = "REML")
+
+vp_obs <- str_c(vp, env, sep = ":")
+
+# Accuracy
+c(r_MG = cor(fit$u[vp_obs], y_test))
+
+```
+
+
+
+
+#### G-BLUP Model - Multiple Fixed Environments
+
+For a G-BLUP model for multiple environments, the model takes a similar form. Assume there are $I$ genotypes in $J$ environments.
+
+$$ y_{ij} = \mu_j + G_{ij} + \epsilon_{ij} $$
+
+where $y_ij$ is the phenotypic observation of the genotype $i$ in environment $j$ , $\mu{j}$ is the mean of environment $j$, $G_{ij}$ is the random effect of genotype $i$ in environment $j$, and $\epsilon_{ij}$ is the residual effect of genotype $i$ in environment $j$.
+
+
+$G$ is assumed to follow $G_i \sim MVN(0, \Sigma \sigma^2_u)$, where $Sigma$ is the Kronecker product of the realized genomic relationship matrix, $A$, and environmental relationship matrix $E$. We can allow for genetic effects to vary depending on the evironment by estimating $\sigma^2_u$ for each environment.44
+
+$\epsilon$ is assumed to follow $\epsilon_i \sim MVN(0, R \sigma^2_\epsilon)$, where R is an identity matrix where homoscedasticity is assumed.
+
+
+Here is an example of that calculation using real data:
+
+```{r, results='markup'}
+
+# Environment
+env <- c("STP_2016", "CRM_2016")
+
+# Subset the phenos for modelling
+pheno_model <- pheno %>% 
+  filter(environment %in% env, trait == "GrainYield") %>%
+  select(line_name, environment, value) %>%
+  # Dummy variable for training or validation
+  mutate(population = ifelse(line_name %in% tp, "tp", "vp")) %>%
+  # Sort on environment, then genotype
+  arrange(line_name, environment)
+
+# Training phenotypes
+y <- pheno_model %>% 
+  select(-population) %>% 
+  spread(environment, value) %>% 
+  rownames_to_column() %>% 
+  select(-rowname) %>% 
+  column_to_rownames("line_name") %>% 
+  as.matrix()
+
+## Create matrices
+
+# X matrix
+X <- matrix(1, nrow = nrow(y), ncol = 1)
+
+# Data for Z matrix
+Z <- diag(1, length(tp), nrow(y))
+
+
+# The sigma matrix is the kronecker product of the Sigma_G matrix (or A matrix) and the Sigma_E matrix (or scalar 1)
+Sig_G <- A
+Sig_E <- diag(length(env))
+dimnames(Sig_E) <- list(sort(env), sort(env))
+
+Sig <- kronecker(Sig_G, Sig_E, make.dimnames = T)
+
+y_use <- y
+y_use[vp,] <- NA
+
+## Start with MTM to run an example
+## MTM is for multiple traits, so if we consider phenotypes in different environments as genetically
+## correlated traits (Falconer), then this will be suitable
+fit_MTM <- MTM(Y = y_use, K = list(list(K = A, COV = list(type = "UN", df0 = 2, S0 = diag(2)))),
+               resCov = list(type = "DIAG", df0 = rep(1, 2), S0 = rep(1, 2)),
+               nIter = 100, burnIn = 50
+)
+
+mtm_acc <- sapply(X = seq(ncol(y)), FUN = function(i) {
+  vp_hat <- fit_MTM$YHat[vp,i]
+  y_vp <- y[vp,i]
+  cor(vp_hat, y_vp) })
+
+
+
+# Now try with the multivariate function in EMMREML to allow the genetic variance to vary
+## across environments
+
+# We have to tranpose some matrices
+y_t <- t(y)
+y_use <- y_t %*% t(Z)
+
+Z_use <- t(Z)
+
+X_use <- t(X) %*% t(Z)
+
+
+fit_emm <- emmremlMultivariate(Y = y_use, X = X_use, Z = Z_use, K = Sig_G, 
+                               tolpar=1e-4,varBhat=FALSE, varGhat=FALSE, PEVGhat=FALSE, 
+                               test=FALSE)
+
+# Check accuracy
+emm_acc <- sapply(X = seq(ncol(y)), FUN = function(i) {
+  vp_hat <- fit_emm$Gpred[i,vp]
+  y_vp <- y[vp,i]
+  cor(vp_hat, y_vp) })
+
+
+
+
+
+
+
+
+
+
+
+# Data for X matrix
+X_data <- droplevels(filter(pheno_model, population == "tp"))
+# The X matrix will relate each observation to the fixed effects, in this case environments
+X <- model.matrix(~ environment, data = X_data)
+
+# Data for Z matrix
+Z_data <- droplevels(filter(pheno_model, environment %in% env)) %>%
+  filter(population == "tp")
+# Z matrix relates the phenotypic observations in y to the random genotypic effects u
+Z <- model.matrix(~ -1 + line_name:environment, data = Z_data)
+
+# The sigma matrix is the kronecker product of the Sigma_G matrix (or A matrix) and the Sigma_E matrix (or scalar 1)
+Sig_G <- A
+Sig_E <- diag(length(env))
+dimnames(Sig_E) <- list(sort(env), sort(env))
+
+Sig <- kronecker(Sig_G, Sig_E, make.dimnames = T)
+
+# solve the mixed model
+fit <- mixed.solve(y = y, Z = Z, K = Sig, X = X, method = "REML")
+
+# TP_observations
+tp_obs <- str_c(tp, env[1], sep = ":")
+
+# VP observations
+vp_obs <- str_c(vp, env[1], sep = ":")
+
+# Accuracy
+cor(y_test[vp_obs,], fit$u[vp_obs])
+
+```
+
+
+```{r, results='markup'}
+
+# Prediction environment
+pred_env <- "STP_2016"
+# Validation environment
+val_env <- "CRM_2016"
+
+# Subset the phenos for modelling
+pheno_model <- pheno %>% 
+  filter(environment %in% c(pred_env, val_env), trait == "GrainYield") %>%
+  select(line_name, environment, value) %>%
+  # Dummy variable for training or validation
+  mutate(population = ifelse(line_name %in% tp, "tp", "vp")) %>%
+  # Sort on environment, then genotype
+  arrange(line_name, environment)
+
+# Training phenotypes
+y <- pheno_model %>% 
+  filter(population == "tp", environment %in% pred_env) %>%
+  unite(observation, line_name, environment, sep = ":", remove = T) %>%
+  # Code to remove existing rownames then add back in
+  rownames_to_column() %>%
+  select(-rowname, -population) %>%
+  column_to_rownames("observation") %>% 
+  as.matrix()
+
+# validation phenos
+y_test <- pheno_model %>% 
+  filter(population == "vp", environment %in% val_env) %>%
+  unite(observation, line_name, environment, sep = ":", remove = T) %>%
+  # Code to remove existing rownames then add back in
+  rownames_to_column() %>%
+  select(-rowname, -population) %>%
+  column_to_rownames("observation") %>% 
+  as.matrix()
+
+# Data for X matrix
+# X_data <- droplevels(filter(pheno_model, population == "tp", environment %in% pred_env))
+# # The X matrix will relate each observation to the fixed effects, in this case environments
+# X <- model.matrix(~ environment, data = X_data)
+
+# Vector of 1s for the X matrix
+X <- matrix(1, nrow = length(y))
+
+# Data for Z matrix
+Z_data <- droplevels(filter(pheno_model)) %>%
+  filter(population == "tp", environment %in% pred_env)
+# Z matrix relates the phenotypic observations in y to the random genotypic effects u
+Z <- model.matrix(~ -1 + line_name:environment, data = Z_data)
+
+# The sigma matrix is the kronecker product of the Sigma_G matrix (or A matrix) and the Sigma_E matrix (or scalar 1)
+Sig_G <- A
+
+# Covariance matrix of environments
+Sig_E <- matrix(1, nrow = length(c(pred_env, val_env)), ncol = length(c(pred_env, val_env)))
+dimnames(Sig_E) <- list(c(pred_env, val_env), c(pred_env, val_env))
+
+Sig <- kronecker(Sig_E, Sig_G)
+dimnames(Sig) <- list(c(str_c(row.names(Sig_G), pred_env, sep = ":"), str_c(row.names(Sig_G), val_env, sep = ":")),
+                      c(str_c(row.names(Sig_G), pred_env, sep = ":"), str_c(row.names(Sig_G), val_env, sep = ":")))
+
+# solve the mixed model
+fit <- mixed.solve(y = y, Z = Z, K = Sig, X = X, method = "REML")
+
+# VP observations
+vp_obs <- str_c(vp, val_env, sep = ":")
+
+# Accuracy
+cor(y_test[vp_obs,], fit$u[vp_obs])
+
+```
+
+
+
+
+## Predictions
+
+Predictions will be made by training on one environment, using the kronecker product of the relationship matrix and the environmental covariance matrix, and then validating in another environment. This will be compared to simply training the model in one environment and validating predictions in another environment
+
+```{r}
+
+# Find environments in which the tp was grown
+TP_env <- pheno %>% 
+  filter(line_name %in% tp) %>% 
+  distinct(environment) %>%
+  unlist()
+
+# Find environment in which the C1R was grown
+VP_env <- pheno %>%
+  filter(line_name %in% vp) %>%
+  distinct(environment) %>%
+  unlist()
+
+```
+
+
+
+
+
+
+
+
+
+### Model 1 - Fixed Effect of Environment
+
+
+
+```
+
+
+### TEST
+tp_env <- TP_env[1]
+vp_env <- VP_env[2]
+
+sel_trait <- "GrainYield"
+
+# training phenos
+y <- pheno %>% 
+  filter(environment == tp_env, line_name %in% tp, trait == sel_trait) %>%
+  select(line_name, value) %>% 
+  column_to_rownames("line_name") %>% 
+  as.matrix()
+
+# validation phenos
+y_test <- pheno %>% 
+  filter(environment == vp_env, line_name %in% vp, trait == sel_trait) %>%
+  select(line_name, value) %>% 
+  column_to_rownames("line_name") %>% 
+  as.matrix()
+
+
+### Normal GBLUP prediction
+
+# Model matrix for random effects
+Z <- diag(length(y))
+Z <- cbind(Z, matrix(0, nrow = length(y), ncol = length(y_test)))
+
+# Fit the model
+solve_out <- mixed.solve(y = y, Z = Z, K = A, method = "REML")
+
+# Accuracy
+cor(solve_out$u[vp], y_test)
+
+```
+
+## Testing
+
+```{r}
+
+
+
+## Model matrices for GxE
+
+# Create the covariance matrix for the training environment versus testing environment
+E_sub <- E[c(tp_env, vp_env), c(tp_env, vp_env)]
+
+# Create the kronecker product matrix
+GE_sub <- kronecker(A, E_sub, make.dimnames = T)
+
+# Combine observed training genotype names with observed environment
+tp_obs <- str_c(tp, tp_env, sep = ":")
+
+# Combine desired validation genotype names with desired environment
+vp_obs <- str_c(vp, vp_env, sep = ":")
+
+Z <- matrix(0, nrow = length(y), ncol = ncol(GE_sub), 
+            dimnames = list(tp_obs, colnames(GE_sub)))
+
+# Add 1s
+Z[cbind(match(tp_obs, row.names(Z)), match(tp_obs, colnames(Z)))] <- 1
+
+
+# Fit the model
+solve_out_GE <- mixed.solve(y = y, Z = Z, K = GE_sub, method = "REML")
+
+# Accuracy
+cor(solve_out_GE$u[vp_obs], y_test)
+
+
+
+## Create an expanded grid of genotype and environment combinations
+ge_combo <- pheno %>% 
+  select(line_name, environment)
+
+dd <- data.frame(a = gl(3,4), b = gl(4,1,12)) # balanced 2-way
+
+
+
+options("contrasts")
+
+
+model.matrix(~ a + b, dd)
+model.matrix(~ a + b, dd, contrasts = list(a = "contr.sum"))
+model.matrix(~ a + b, dd, contrasts = list(a = "contr.sum", b = "contr.poly"))
+m.orth <- model.matrix(~a+b, dd, contrasts = list(a = "contr.helmert"))
+
+
+
+# Iterate over the tp environments
+
+
+
+
+
+
+
+
+
+
+## Notes from Malosetti, 2016
+
+
+
+
+
+```
+
+
+
+

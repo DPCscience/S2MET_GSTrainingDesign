@@ -1,0 +1,192 @@
+---
+title: "Gather Environmental Variables"
+output: html_notebook
+---
+
+## Introduction
+
+This notebook will walk through the process of gathering and cleaning data that were serve as environmental covariables in the S2MET project
+
+```{r}
+
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(rnoaa)
+library(geosphere)
+library(soilDB)
+
+# Directory
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
+
+# Trial Information
+trial_info <- read_csv(file.path(env_var_dir, "trial_locations.csv"))
+
+```
+
+
+## Data Collection
+
+### NOAA Weather Data
+
+Questions
+
+1. Should data be collected only during the time in which the plants are grown? Values outside of this range
+could be set to NA and then imputed using the mean.
+2.
+
+```{r}
+
+# API token
+token <- 'ubmUkwrtxZOQLeyXZdtCMjkKcCTpPDcK'
+
+# Start and end data of weather data
+start_date <- "2016-03-01"
+end_date <- "2016-09-30"
+
+# Desired data types
+desired_vars <- c("TMIN", "TMAX", "PRCP")
+
+# Load the list of cooperative stations
+station_list <- ghcnd_stations()
+
+# Remove stations with no id and keep stations with the USC prefix
+NA_stations <- station_list %>% 
+  filter(str_detect(.$id, pattern = "USC|CA"),
+         first_year <= year(start_date), last_year >= year(end_date)) 
+
+desireable_stations <- NA_stations %>% 
+  # Filter on desired variables
+  group_by(id) %>% 
+  do(data.frame(present_vars = all(desired_vars %in% .$element)))
+
+# Add the logical to the usc_stations df
+stations <- full_join(NA_stations, desireable_stations, by = "id") %>%
+  filter(present_vars)
+
+# Grab the unique stations
+stations_unique <- stations %>%
+  select(id:wmo_id) %>%
+  distinct()
+
+
+# Create a list of distances from each trial location to all of the stations
+trial_loc_dist <- trial_info %>% 
+  # Omit NAs
+  na.omit() %>%
+  group_by(trial) %>%
+  do(stat_dist = distGeo(p1 = c(.$longitude, .$latitude), p2 = select(stations_unique, longitude, latitude)) )
+
+trial_loc_dist_list <- trial_loc_dist$stat_dist
+names(trial_loc_dist_list) <- trial_loc_dist$trial
+
+# Iterate by trial
+station_data <- trial_loc_dist_list %>%
+  map(function(trial_dist) {
+    
+    closest_station <- stations_unique %>% 
+      slice(head(order(trial_dist), n = 1))
+    
+    # Format the id
+    chosen_station_id <- str_c("GHCND:", closest_station$id)
+    
+    data <- ncdc(datasetid = 'GHCND', datatypeid = desired_vars, stationid = chosen_station_id, 
+                 startdate = start_date, enddate = end_date, limit = 1000, token = token)
+    
+    list(closest_station = closest_station, data = data) })
+
+# Pull out the closest stations per trial
+closest_stations <- station_data %>% 
+  map(function(output) output$closest_station) %>% 
+  bind_rows()
+
+# Rename
+closest_stations <- closest_stations %>% 
+  mutate(trial = names(station_data))
+
+# Quality-control the data
+station_data_qc <- station_data %>% 
+  map(function(output) output$data$data) %>%
+  map(filter, fl_q == "")
+
+# Add trial name back in 
+station_data_sorted <- mapply(station_data_qc, names(station_data_qc), FUN = function(df, name)
+  mutate(df, trial = name), SIMPLIFY = F) %>%
+  bind_rows() %>%
+  arrange(trial, datatype, date)
+
+# Select some columns and turn into a matrix
+station_data_mat <- station_data_sorted %>% 
+  select(trial, date, datatype, value) %>% 
+  unite(obs_info, date:datatype) %>% 
+  spread(obs_info, value)
+
+row.names(station_data_mat) <- station_data_mat$trial
+station_data_mat <- station_data_mat %>%
+  select(-trial) %>%
+  as.matrix()
+
+
+# Impute missing data with the mean
+station_data_mat_imp <- station_data_mat %>% 
+  apply(MARGIN = 2, FUN = function(obs) {
+    obs[is.na(obs)] <- mean(obs, na.rm = T)
+    return(obs) })
+
+```
+
+
+### Soil Data
+
+```{r}
+
+
+
+
+
+```
+
+
+
+## Create Regressors
+
+### PCA
+
+```{r}
+
+# PCA
+station_pca <- svd(station_data_mat_imp)
+
+plot(station_pca$u[,1], station_pca$u[,2])
+text(station_pca$u[,1], station_pca$u[,2], labels = row.names(station_data_mat_imp))
+
+# Create an environmental relationship matrix
+E <- cor(station_pca$u)
+dimnames(E) <- list(rownames(station_data_mat_imp),rownames(station_data_mat_imp))
+
+# Save this data
+save_file <- file.path(env_var_dir, "env_cov_mat.RData")
+save("E", file = save_file)
+
+
+# CLuster
+E_dist <- dist(E)
+E_clust <- hclust(E_dist)
+
+plot(E_clust)
+
+
+```
+
+
+
+
+
+
+```
+
+
+
+

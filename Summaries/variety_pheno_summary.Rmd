@@ -1,0 +1,177 @@
+---
+title: "2016 Variety Phenotype Summary"
+author: "Jeff Neyhart & Kevin Smith"
+date: "December 16, 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+
+# Load packages and data
+library(tidyverse)
+library(lme4)
+library(stringr)
+library(knitr)
+
+load("C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/S2_MET_BLUE.RData")
+load("C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/S2_MET_tidy.RData")
+
+```
+
+## Introduction
+
+The University of Minnesota spearheaded a multi-environment trial of spring
+two-row barley. As part of the experimental design, nine check varieties
+were planted in triplicate. Data on heading date, grain yield, and plant
+height were collected in most environments. Here is a summary of the phenotype
+data for these varities
+
+## Varieties and Source
+
+Variety      | Source
+-------------|-------------
+AAC_Synergy  | Syngenta
+AC_Metcalfe  | AAFC
+CDC_Copeland | University of Saskatchewan
+Conlon       | North Dakota State University
+Conrad       | Busch Ag
+Hockett      | Montana State University
+LCS_Genie    | Limagrain
+ND_Genesis   | North Dakota State University
+Pinnacle     | North Dakota State University
+
+
+## Trait Distributions
+
+```{r, echo=FALSE, cache=TRUE}
+
+varieties <- c("Conlon", "ND_Genesis", "AC_Metcalfe", "AAC_Synergy", "Pinnacle", 
+            "LCS_Genie", "Hockett", "CDC_Copeland", "Conrad") %>%
+  sort()
+
+# Calculate BLUES of 2016 data
+BLUEs <- S2.MET.tidy %>%
+  filter(year == 2016) %>%
+  # Split by trait
+  split(.$trait) %>%
+  map(~ lmer(value ~ -1 + line_name + (1|environment), data = .)) %>%
+  map(fixef) %>%
+  map(function(tr) data.frame(line_name = str_replace(names(tr), "line_name", ""), value = tr, row.names = NULL))
+
+# Add trait names back
+BLUEs1 <- lapply(names(BLUEs), function(trait) BLUEs[[trait]] %>% mutate(trait = trait)) %>%
+  bind_rows() %>%
+  tbl_df()
+
+# Plot
+BLUEs1 %>%
+  ggplot(aes(value)) +
+  geom_vline(data = filter(BLUEs1, line_name %in% varieties),
+             aes(xintercept = value, col = line_name), lwd = 1) +
+  geom_histogram(bins = 30) +
+  xlab("Trait Value") +
+  ylab("Count") +
+  scale_color_discrete(guide = guide_legend(title = "Variety")) +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Distribution of Traits",
+    subtitle = "Trait values were averaged across environments"
+  ) +
+  facet_wrap("trait", scales = "free_x")
+  
+```
+
+
+The above graph shows the distribution of all lines evaluated in the multi-
+environment trials. Each of the lines represents the trait value of the
+corresponding variety. The units are $kg~ha^{-1}$ for `GrainYield`, $days$
+for `HeadingDate`, and $cm$ for `PlantHeight`.
+
+```{r, echo=FALSE}
+
+BLUEs1 %>% 
+  filter(line_name %in% varieties) %>% 
+  spread(trait, value) %>%
+  rename(Variety = line_name, `Yield ($kg~ha^{-1}$)` = GrainYield,
+         `Days to Heading ($days$)` = HeadingDate, 
+         `Plant Height ($cm$)` = PlantHeight) %>%
+  kable(format = "markdown")
+
+
+```
+
+
+## Stability
+
+```{r, echo=FALSE}
+
+# Start with the BLUEs and calculate environmental means
+env.means <- S2.MET.BLUE %>% 
+  filter(year == 2016,
+         trait == "GrainYield") %>%
+  group_by(environment) %>% 
+  summarize(index = mean(value)) %>%
+  ungroup()
+
+# Extract the value of each variety at each environment
+variety.means <- S2.MET.BLUE %>% 
+  filter(year == 2016,
+         line_name %in% varieties,
+         trait == "GrainYield") %>% 
+  select(environment, line_name, value)
+
+# Merge
+fw.data <- full_join(env.means, variety.means, by = "environment")
+
+# Regression
+
+
+# Plot
+fw.data %>% 
+  ggplot(aes(x = index, y = value, col = line_name)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  xlab(expression(Environmental~Mean~Yield~(kg~ha^-1))) +
+  ylab(expression(Variety~Yield~(kg~ha^-1))) +
+  scale_color_discrete(guide = guide_legend(title = "Variety")) +
+  theme(legend.position = "bottom")
+
+```
+
+```{r, echo=FALSE}
+
+# Calculate stability regression coefficients of all lines
+# Extract the value of each variety at each environment
+line.means <- S2.MET.BLUE %>% 
+  filter(year == 2016,
+         trait == "GrainYield") %>%
+  select(environment, line_name, value)
+
+fw.data <- full_join(env.means, line.means, by = "environment")
+
+# Calculate regression coefficients for all
+betas <- fw.data %>%
+  split(.$line_name) %>%
+  map(~lm(value ~ index, data = .)) %>%
+  map_df(coef) %>%
+  slice(2) %>% 
+  gather(line_name, coef)
+
+fw.data <- line.means %>%
+  group_by(line_name) %>%
+  summarize(index = mean(value)) %>%
+  full_join(., betas, by = "line_name")
+
+# Plot
+fw.data %>%
+  ggplot() +
+  geom_point(aes(x = index, y = coef, col = ifelse(fw.data$line_name %in% varieties, fw.data$line_name, NA))) +
+  scale_color_discrete(guide = guide_legend(title = "Variety"))
+
+
+```
+

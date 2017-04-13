@@ -1,0 +1,216 @@
+---
+title: "S2MET Phenotypic Data Summary"
+output: html_notebook
+---
+
+## Introduction
+
+This notebook will provide some phenotyping data summaries for the S2MET project.
+
+```{r}
+
+library(tidyverse)
+library(stringr)
+library(readxl)
+
+pheno.dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+
+# Load the phenotypic data
+load(file.path(pheno.dir, "S2_MET_BLUE.RData"))
+
+# Load an entry file
+entry.file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
+entry.list <- read_excel(entry.file, sheet = "S2_MET", col_names = c("Line", "Pedigree"), 
+                         col_types = c("text", "text"), skip = 1)
+
+# Get rid of checks
+entries <- entry.list$Line %>% head(-10)
+
+
+```
+
+
+
+### Basic
+
+Let's look at correlations among the environments and visualize with a heatmap
+
+```{r}
+
+# Cut out the checks
+entry.BLUE <- S2.MET.BLUE %>%
+  filter(line_name %in% entries)
+
+# Remove two environments with low overlap
+pheno <- entry.BLUE %>%
+  filter(!environment %in% c("HNY_2015", "ALV_2016")) %>%
+  # Just use TP individuals
+  filter(str_detect(line_name, "^[0-9]{2}"))
+
+# Create an array of correlations per trait
+env.cor <- pheno %>% 
+  # Group by trait
+  split(.$trait) %>%
+  map(select, line_name, environment, value) %>%
+  map(spread, environment, value) %>%
+  map(do, correlation = cor(.[,-1], use = "pairwise.complete.obs")) %>%
+  map(simplify2array) %>%
+  map(function(tr) {
+    cor.df <- tr$correlation %>%
+      data.frame(env1 = row.names(.), .) %>%
+      gather(env2, correlation, -env1) %>%
+      mutate(env2 = as.factor(env2))
+    
+    # Calculate distance and cluster to find the order of environments
+    env.order <- tr$correlation %>%
+      dist() %>%
+      hclust() %>%
+      {.$labels[.$order]}
+    
+    # Reorder the df
+    cor.df$env1 <- with(cor.df, reorder(env1, new.order = env.order))
+    cor.df$env2 <- with(cor.df, reorder(env2, new.order = env.order))
+    
+    return(cor.df) })
+
+trait <- "GrainYield"
+
+# Plot
+ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+trait <- "PlantHeight"
+
+# Plot
+ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+trait <- "HeadingDate"
+
+# Plot
+ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+
+```
+
+
+Now let's try some clustering as described in Bernardo 2010
+
+
+```{r}
+
+# Define a function
+Dist <- function(x) {
+
+  # Number of environments
+  n.env <- ncol(x)
+  
+  # Find all pairwise combinations
+  env.pairwise <- expand.grid(names(x), names(x))
+  
+  # Apply a function over these pairs
+  D_jj <- apply(X = env.pairwise, MARGIN = 1, FUN = function(env.pairs) {
+    
+    # Subset the data
+    x[,as.character(as.matrix(env.pairs))] %>%
+      
+      # In each environment, calculate the deviation from each observation to the mean of
+      # all observation and divide by the sd of all observations
+      # Then find the mean squared differences. This is the distance
+      apply(MARGIN = 2, FUN = function(p) (p - mean(p, na.rm = T)) / sd(p, na.rm = T)) %>%
+      # Subset the complete cases
+      na.omit() %>%
+      # Square the difference
+      apply(MARGIN = 1, FUN = function(pairs) diff(pairs)^2) %>%
+      mean()
+    
+  })
+  
+  # Ouput matrix
+  matrix(data = D_jj, nrow = n.env, ncol = n.env, dimnames = list(names(x), names(x)))
+  
+}
+
+# Run the function
+env.dist <- pheno %>% 
+  # Group by trait
+  split(.$trait) %>%
+  map(select, line_name, environment, value) %>%
+  # Remove two pesky environments with low overlap
+  map(filter, !environment %in% c("HNY_2015", "ALV_2016")) %>%
+  map(spread, environment, value) %>%
+  map(do, distance = Dist(.[,-1])) %>%
+  map(simplify2array) %>%
+  map(function(tr) {
+    dist.tf <- tr$distance %>%
+      data.frame(env1 = row.names(.), .) %>%
+      gather(env2, distance, -env1) %>%
+      mutate(env2 = as.factor(env2))
+    
+    # Convert to distance matrix and perform clustering to group environments
+    env.order <- tr$distance %>%
+      as.dist() %>%
+      hclust(method = "average") %>%
+      {.$labels[.$order]}
+    
+    # Reorder the df
+    dist.tf$env1 <- with(dist.tf, reorder(env1, new.order = env.order))
+    dist.tf$env2 <- with(dist.tf, reorder(env2, new.order = env.order))
+    
+    return(dist.tf) })
+    
+
+trait <- "GrainYield"
+
+# Plot
+ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+trait <- "PlantHeight"
+
+# Plot
+ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+trait <- "HeadingDate"
+
+# Plot
+ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") + 
+  ggtitle(trait) +
+  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+```
+
+

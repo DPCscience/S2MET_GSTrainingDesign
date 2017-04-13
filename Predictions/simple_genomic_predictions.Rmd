@@ -1,0 +1,146 @@
+---
+title: "S2MET Simple Genomic Predictions"
+output: html_notebook
+---
+
+## Introduction
+
+This notebook outlines some simple genomic predictions within the multi-
+environment dataset. These are simple prediction procedures and include
+intra-environmental ....
+
+## Intra-environment Prediction
+
+```{r}
+
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(rrBLUP)
+library(modelr)
+library(boot)
+
+pheno.dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+geno.dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+
+# Load the genotype data
+load(file.path(geno.dir, "S2_genos_mat.RData"))
+
+# Load the phenotypic data
+load(file.path(pheno.dir, "S2_MET_BLUE.RData"))
+load(file.path(pheno.dir, "S2_tidy_BLUE_all.RData"))
+
+
+# Load an entry file
+entry.file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
+entry.list <- read_excel(entry.file, sheet = "S2_MET", col_names = c("Line", "Pedigree"), 
+                         col_types = c("text", "text"), skip = 1)
+
+# Get rid of checks
+entries <- entry.list$Line %>% head(-10)
+
+
+```
+
+
+Separate the TP and VP and predict in each environment
+
+```{r}
+
+tp <- entries %>% 
+  str_subset("^[0-9]{2}") %>%
+  intersect(., row.names(s2_imputed_mat))
+
+vp <- entries %>% 
+  str_subset("^2MS") %>%
+  intersect(., row.names(s2_imputed_mat))
+
+# First remove some locations with just the VP or just the TP
+pheno <- S2.MET.BLUE %>%
+  filter(!environment %in% c("ALV_2016", "CNY_2015", "HNY_2015", "HTM_2015", "KNY_2015", "STP_2015"),
+         line_name %in% c(tp, vp) )
+
+intra.preds <- pheno %>% 
+  # Split by trait and env
+  split(list(.$trait, .$environment)) %>%
+  # Apply a function for each trial
+  map(function(trial) {
+    # If there is no data, return null
+    if(nrow(trial) == 0) return(NULL)
+    
+    # Train
+    tp1 <- trial %>% 
+      filter(line_name %in% tp) %>%
+      select(line_name) %>%
+      unlist()
+    
+    # Training phenos
+    y.train <- trial %>%
+      filter(line_name %in% tp) %>%
+      select(value) %>%
+      unlist() %>%
+      as.matrix()
+    
+    # Training genos
+    g.train <- s2_imputed_mat[tp1,]
+    
+    # Solve the mixed model
+    mixed.fit <- mixed.solve(y = y.train, Z = g.train, method = "REML")
+    
+    ## Validation
+    vp1 <- trial %>%
+      filter(line_name %in% vp) %>%
+      select(line_name) %>%
+      unlist()
+    
+    # Validation phenos
+    y.val <- trial %>%
+      filter(line_name %in% vp) %>%
+      select(value) %>%
+      unlist() %>%
+      as.matrix()
+    
+    # Validation genos
+    g.val <- s2_imputed_mat[vp1,]
+    
+    # Predict
+    PGV <- g.val %*% mixed.fit$u
+    
+    # Bootstrap the correlation
+    boot_cor <- neyhart::boot.cor(cbind(y.val, PGV), 1000)
+    
+    # Collect and output
+    trial %>% 
+      distinct(environment, trait) %>% 
+      mutate(cor = boot_cor$r, 
+             boot_lower = boot_cor$CI[1], 
+             boot_upper = boot_cor$CI[2])
+    
+  })
+
+# Remove NULL and row-bind
+intra.preds1 <- intra.preds %>%
+  bind_rows()
+
+# Plot
+ggplot(data = intra.preds1, aes(environment, cor)) +
+  geom_bar(stat = "identity", fill = "lightblue", col = "black") +
+  geom_errorbar(aes(ymin = boot_lower, ymax = boot_upper), width = 0.25) +
+  xlab("Environment") +
+  ylab(expression(r[MG])) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  facet_grid(trait ~ .) +
+  ggtitle("Intra-Environment Predictions")
+
+save.file <- "Figures/intra_environment_predictions.jpg"
+ggsave(filename = save.file, height = 6, width = 10)
+
+
+
+```
+
+
+
+
+
+
