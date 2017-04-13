@@ -39,10 +39,12 @@ The objectives of the project are to:
 
 Trials in the `S2MET` will be performed in `r n_distinct(trial_info$Location)` environments over `r n_distinct(trial_info$Year)` years for a total of `r n_distinct(trial_info$Environment)` environments. Below is a map of the location across North America.
 
+{::nomarkdown}
+
 ```{r make.map, echo = FALSE, fig.align='center'}
 
 # Make the map - first subset the data.frame for lng/lat
-m <- trial_info %>%
+trial_info %>%
   select(Longitude, Latitude, Location) %>%
   na.omit() %>%
   distinct() %>%
@@ -52,9 +54,6 @@ m <- trial_info %>%
   addTiles() %>%
   addMarkers(~Longitude, ~Latitude, popup = ~Location)
 
-m
-  
-
 ```
 
-
+{:/}
