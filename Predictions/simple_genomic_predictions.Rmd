@@ -7,53 +7,64 @@ output: html_notebook
 
 This notebook outlines some simple genomic predictions within the multi-
 environment dataset. These are simple prediction procedures and include
-intra-environmental ....
+intra-environmental and inter-environmental, without modeling the correlation
+between environments
 
-## Intra-environment Prediction
+First load some packages and set some directories
 
-```{r}
+```{r setup}
 
 library(tidyverse)
 library(stringr)
 library(readxl)
 library(rrBLUP)
 library(modelr)
-library(boot)
 
-pheno.dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
-geno.dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
 
 # Load the genotype data
-load(file.path(geno.dir, "S2_genos_mat.RData"))
+load(file.path(geno_dir, "S2_genos_mat.RData"))
 
 # Load the phenotypic data
-load(file.path(pheno.dir, "S2_MET_BLUE.RData"))
-load(file.path(pheno.dir, "S2_tidy_BLUE_all.RData"))
+load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
+load(file.path(pheno_dir, "S2_tidy_BLUE_all.RData"))
 
 
 # Load an entry file
-entry.file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
-entry.list <- read_excel(entry.file, sheet = "S2_MET", col_names = c("Line", "Pedigree"), 
-                         col_types = c("text", "text"), skip = 1)
+entry_file <- file.path(proj_dir, "Plant_Materials/S2MET_project_entries.xlsx")
+entry_list <- read_excel(entry_file)
 
-# Get rid of checks
-entries <- entry.list$Line %>% head(-10)
+# Get rid of checks and the pedigree
+entries <- entry_list %>%
+  filter(Class != "Check") %>%
+  select(-Pedigree)
+
+# Separate the tp and vp
+tp <- entries %>% 
+  filter(Class == "S2TP") %>%
+  select(Line) %>%
+  unlist() %>%
+  intersect(., row.names(s2_imputed_mat))
+
+vp <- entries %>% 
+  filter(Class == "S2C1R") %>%
+  select(Line) %>%
+  unlist() %>%
+  intersect(., row.names(s2_imputed_mat))
 
 
 ```
 
 
+
+## Intra-environment Prediction
+
 Separate the TP and VP and predict in each environment
 
 ```{r}
-
-tp <- entries %>% 
-  str_subset("^[0-9]{2}") %>%
-  intersect(., row.names(s2_imputed_mat))
-
-vp <- entries %>% 
-  str_subset("^2MS") %>%
-  intersect(., row.names(s2_imputed_mat))
 
 # First remove some locations with just the VP or just the TP
 pheno <- S2.MET.BLUE %>%
@@ -140,6 +151,179 @@ ggsave(filename = save.file, height = 6, width = 10)
 ```
 
 
+
+
+
+
+
+
+## Inter-environment Prediction
+
+These predictions will simply take the training population from one environment and predict the validation population in every other environment. Predictions will not take advantage of any information about genetic correlations between environments.
+
+First calculate phenotypic correlations between environments of all lines
+
+```{r pheno.corr}
+
+# Gather phenos of the tp and vp
+pheno <- S2.MET.BLUE %>%
+  filter(line_name %in% c(tp, vp)) %>% 
+  mutate_at(vars(trial:trait), as.factor)
+  
+
+# Re-organize, group by trait, spread by environment, and calculate pairwise correlations
+pheno_cor <- pheno %>% 
+  select(trait, line_name, environment, value) %>% 
+  group_by(trait) %>%
+  do({
+    spread(., environment, value) %>%
+      select(-trait, -line_name) %>%
+      cor(use = "pairwise.complete.obs") %>%
+      # Convert to data.frame and tidy
+      as.data.frame() %>% 
+      rownames_to_column("env1") %>% 
+      gather(env2, correlation, -env1) })
+
+# Plot the heatmap
+pc_heatmap <- pheno_cor %>%
+  ggplot(aes(x = env1, y = env2)) +
+  geom_tile(aes(fill = correlation)) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = mean(pheno_cor$correlation, na.rm = T),
+                       guide = guide_legend(title = "Correlation")) +
+  xlab("Environment 1") +
+  ylab("Environment 2") +
+  theme(axis.text = element_blank() ) +
+  labs(
+    title = "Phenotypic Correlations",
+    subtitle = "Pairwise phenotypic correlations between the common lines in each environment"
+  ) +
+  facet_wrap(~ trait, nrow = 2, ncol = 2)
+
+save_file <- file.path(proj_dir, "Predictions/pheno_cor_heatmap.jpg")
+ggsave(filename = save_file, plot = pc_heatmap, height = 8, width = 10)
+
+```
+
+Now run pairwise predictions
+
+
+
+```{r}
+
+# Create all pairwise combinations and traits
+env_pairs <- expand.grid(trait = unique(pheno$trait),
+                         train_environment = unique(pheno$environment), 
+                         pred_environment = unique(pheno$environment)) %>%
+  mutate_all(parse_character)
+
+
+# Test using first two rows
+env_pairs <- env_pairs %>% slice(1:2)
+
+# Iterate over each pair
+pheno_acc <- env_pairs %>%
+  rowwise() %>%
+  do({
+    
+    # The trait
+    pred_trait <- .$trait
+    
+    # Extract training data for the first environment
+    train_env <- .$train_environment
+    train_pheno <- pheno %>%
+      filter(line_name %in% tp, environment == train_env, trait == pred_trait) %>%
+      select(line_name, value)
+    
+    # Return NA if the data.frame is empty
+    if (nrow(train_pheno) == 0) 
+      return(data.frame(trait = pred_trait, train_environment = train_env,
+                        pred_environment = pred_env, acc = NA))
+    
+    # Extract validation data for the second environment
+    pred_env <- .$pred_environment
+    pred_pheno <- pheno %>%
+      filter(line_name %in% vp, environment == pred_env, trait == pred_trait) %>%
+      select(line_name, value)
+    
+    # Return NA if the data.frame is empty
+    if (nrow(pred_pheno) == 0)
+      return(data.frame(trait = pred_trait, train_environment = train_env,
+                        pred_environment = pred_env, acc = NA))
+    
+    # Extract marker data
+    g_train <- s2_imputed_mat[train_pheno$line_name, ]
+    g_pred <- s2_imputed_mat[pred_pheno$line_name, ]
+    
+    # Predict marker effects
+    solve_out <- mixed.solve(y = train_pheno$value, Z = g_train, method = "REML")
+    # Predict genotypic values
+    PGV <- g_pred %*% solve_out$u
+    
+    # Correlate
+    data.frame(trait = pred_trait, train_environment = train_env,
+               pred_environment = pred_env, acc = cor(pred_pheno$value, PGV)) })
+
+# Remove NAs
+pheno_acc1 <- pheno_acc %>%
+  filter(!is.na(acc))
+
+# Heatmap
+pa_heatmap <-pheno_acc1 %>%
+  ggplot(aes(x = train_environment, y = pred_environment)) +
+  geom_tile(aes(fill = acc)) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = mean(pheno_acc1$acc, na.rm = T),
+                       guide = guide_legend(title = "Accuracy")) +
+  xlab("Training Environment") +
+  ylab("Prediction Environment") +
+  theme(axis.text = element_blank() ) +
+  labs(
+    title = "Progeny Prediction Accuracy",
+    subtitle = "Pairwise accuracy of the training population (n <= 175) in one environment when predicting the validation population (n <= 48)\nin another environment"
+  ) +
+  facet_wrap(~ trait, nrow = 2, ncol = 2)
+
+save_file <- file.path(proj_dir, "Predictions/pred_acc_heatmap.jpg")
+ggsave(filename = save_file, plot = pa_heatmap, height = 8, width = 10)
+
+```
+
+
+Compare the phenotypic correlation with the prediction accuracy
+
+```{r}
+
+
+## Correlate phenotypic correlation and prediction accuracy
+compare_cor <- full_join(pheno_cor, pheno_acc1, 
+                         by = c("trait" = "trait", "env1" = "train_environment", "env2" = "pred_environment"))
+
+compare_cor1 <- compare_cor %>% 
+  group_by(trait) %>% 
+  summarize(cor = cor(correlation, acc, use = "complete.obs"))
+
+# Plot the comparison
+cc_graph <- compare_cor %>%
+  # Filter NA and self-correlations
+  na.omit() %>% 
+  filter(correlation != 1) %>%
+  ggplot(aes(x = correlation, y = acc)) +
+  geom_point(size = 2) +
+  geom_abline(slope = 1) +
+  geom_smooth(method = "lm", se = F) +
+  xlab("Phenotypic Correlation") +
+  ylab("Progeny Prediction Accuracy") +
+  labs(
+    title = "Phenotypic Correlation vs Prediction Accuracy",
+    subtitle = "Correlation between the phenotypic correlation between environments and the prediction accuracy between environments",
+    caption = "The black line is the r = 1 line and the blue line is the fitted regression line."
+  ) +
+  facet_wrap(~ trait, nrow = 2, ncol = 2)
+
+save_file <- file.path(proj_dir, "Predictions/compare_corrs.jpg")
+ggsave(filename = save_file, plot = cc_graph, height = 8, width = 10)
+
+
+```
 
 
 

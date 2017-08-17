@@ -1,6 +1,6 @@
 ---
 output: 
-  html_document
+  github_document
 always_allow_html: yes
 ---
 
@@ -12,7 +12,7 @@ knitr::opts_chunk$set(collapse = TRUE)
 # Load packages
 library(tidyverse)
 library(readxl)
-library(leaflet)
+library(ggmap)
 
 # Load the trial information
 trial_info <- read_csv(file = "Environmental_Variables/trial_metadata.csv")
@@ -39,9 +39,20 @@ The objectives of the project are to:
 
 Trials in the `S2MET` will be performed in `r n_distinct(trial_info$Location)` environments over `r n_distinct(trial_info$Year)` years for a total of `r n_distinct(trial_info$Environment)` environments. Below is a map of the location across North America.
 
-{::nomarkdown}
 
 ```{r make.map, echo = FALSE, fig.align='center'}
+
+# First subset the data.frame for lng/lat
+trial_info_sub <- trial_info %>%
+  select(Longitude, Latitude, Location) %>%
+  na.omit() %>%
+  distinct()
+
+# Make a zoom box
+na <- c(left = -130, bottom = 25, right = -55, top = 55)
+
+# Make the map
+my_map <- get_map(location = na, maptype = "terrain", source = "google")
 
 # Make the map - first subset the data.frame for lng/lat
 trial_info %>%
@@ -56,4 +67,3 @@ trial_info %>%
 
 ```
 
-{:/}

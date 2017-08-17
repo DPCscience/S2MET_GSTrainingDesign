@@ -5,212 +5,448 @@ output: html_notebook
 
 ## Introduction
 
-This notebook will provide some phenotyping data summaries for the S2MET project.
+This notebook will provide some phenotyping data summaries for the S2MET project. It will include:
 
-```{r}
+1. Heritability estimates
+2. Correlations among environments
+
+```{r prep}
 
 library(tidyverse)
+library(broom)
 library(stringr)
 library(readxl)
+library(pbr)
+library(EMMREML)
 
-pheno.dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+# Directories
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/Phenotype_Data/"
 
 # Load the phenotypic data
-load(file.path(pheno.dir, "S2_MET_BLUE.RData"))
+load(file.path(pheno_dir, "S2_MET_tidy.RData"))
+load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
 
 # Load an entry file
-entry.file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
-entry.list <- read_excel(entry.file, sheet = "S2_MET", col_names = c("Line", "Pedigree"), 
-                         col_types = c("text", "text"), skip = 1)
+entry_file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/Plant_Materials/S2MET_project_entries.xlsx"
 
-# Get rid of checks
-entries <- entry.list$Line %>% head(-10)
+entry_list <- read_excel(entry_file)
 
+# Grab the entry names that are not checks
+tp <- entry_list %>% 
+  filter(Class == "S2TP") %>% 
+  .[["Line"]]
 
-```
+vp <- entry_list %>% 
+  filter(Class == "S2C1R") %>% 
+  .[["Line"]]
 
+# Define the checks
+checks <- entry_list %>% 
+  filter(Class == "Check") %>% 
+  .[["Line"]]
 
-
-### Basic
-
-Let's look at correlations among the environments and visualize with a heatmap
-
-```{r}
-
-# Cut out the checks
-entry.BLUE <- S2.MET.BLUE %>%
-  filter(line_name %in% entries)
-
-# Remove two environments with low overlap
-pheno <- entry.BLUE %>%
-  filter(!environment %in% c("HNY_2015", "ALV_2016")) %>%
-  # Just use TP individuals
-  filter(str_detect(line_name, "^[0-9]{2}"))
-
-# Create an array of correlations per trait
-env.cor <- pheno %>% 
-  # Group by trait
-  split(.$trait) %>%
-  map(select, line_name, environment, value) %>%
-  map(spread, environment, value) %>%
-  map(do, correlation = cor(.[,-1], use = "pairwise.complete.obs")) %>%
-  map(simplify2array) %>%
-  map(function(tr) {
-    cor.df <- tr$correlation %>%
-      data.frame(env1 = row.names(.), .) %>%
-      gather(env2, correlation, -env1) %>%
-      mutate(env2 = as.factor(env2))
-    
-    # Calculate distance and cluster to find the order of environments
-    env.order <- tr$correlation %>%
-      dist() %>%
-      hclust() %>%
-      {.$labels[.$order]}
-    
-    # Reorder the df
-    cor.df$env1 <- with(cor.df, reorder(env1, new.order = env.order))
-    cor.df$env2 <- with(cor.df, reorder(env2, new.order = env.order))
-    
-    return(cor.df) })
-
-trait <- "GrainYield"
-
-# Plot
-ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
-  geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
-trait <- "PlantHeight"
-
-# Plot
-ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
-  geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
-trait <- "HeadingDate"
-
-# Plot
-ggplot(env.cor[[trait]], aes(env1, env2, fill = correlation)) +
-  geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Correlation")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
+entries <- entry_list %>% 
+  .[["Line"]]
 
 
 ```
 
 
-Now let's try some clustering as described in Bernardo 2010
+## Basic Summaries
+
+Look at the number of lines per environment
+
+```{r line.summ}
+
+# Filter the phenotypes for all entries minus checks
+s2_met_tidy_filt  <- S2_MET_tidy %>% 
+  filter(line_name %in% entries) %>%
+  mutate_at(vars(-value), parse_guess)
 
 
-```{r}
+# Count the number of lines per environment
+s2_met_tidy_filt %>% 
+  group_by(environment, trait) %>% 
+  summarize(n = n_distinct(line_name)) %>% 
+  spread(trait, n)
 
-# Define a function
-Dist <- function(x) {
+```
 
-  # Number of environments
-  n.env <- ncol(x)
-  
-  # Find all pairwise combinations
-  env.pairwise <- expand.grid(names(x), names(x))
-  
-  # Apply a function over these pairs
-  D_jj <- apply(X = env.pairwise, MARGIN = 1, FUN = function(env.pairs) {
+Find the proportion of unbalance in the dataset
+
+Do this for the TP, then for the VP, then for both
+
+```{r prop.unbal}
+
+s2_met_tidy_count <- s2_met_tidy_filt %>%
+  # Add a dummy variables for all observations
+  mutate(dummy = 1) %>%
+  distinct(trait, line_name, environment, dummy) %>%
+  select(trait, line_name, environment, dummy)
+
+# Create count tables for the TP, then the VP
+s2_met_tidy_count_tp <- s2_met_tidy_count %>% 
+  filter(line_name %in% tp)
+
+s2_met_tidy_count_vp <- s2_met_tidy_count %>% 
+  filter(line_name %in% vp)
+
+# Find the proportion of balance
+tp_bal <- s2_met_tidy_count_tp %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy)) %>%
+  mutate(pop = "tp")
+
+vp_bal <- s2_met_tidy_count_vp %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy))  %>%
+  mutate(pop = "vp")
+
+# Intersect the environments with both the TP and VP
+common_env <- intersect(
+  distinct(s2_met_tidy_count_tp, environment), 
+  distinct(s2_met_tidy_count_vp, environment) )
+
+# Filter the larger tidy set on these environments and find the level of balance
+common_bal <- s2_met_tidy_count %>% 
+  filter(environment %in% common_env$environment) %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy))  %>%
+  mutate(pop = "all")
+
+# Print
+list(tp_bal, vp_bal, common_bal) %>% 
+  reduce(full_join, by = c("trait", "prop_bal", "pop")) %>% 
+  spread(trait, prop_bal)
+
+```
+
+
+## Heritability
+
+To calculate heritability, we need estimates of $\sigma^2_G$ (the genetic variance), $\sigma^2_{GE}$ (genotype-by-environment interaction variance), and $\sigma^2_R$ (residual variance). 
+
+Since these trials are augmented designs, the estimate of $\sigma^2_G$ will come solely from the lines, and not the checks, while the checks will be used to estimate $\sigma^2_R$. For each trait in each environment, there is some number of lines ($n_g$) and some
+number of checks ($n_c$). There are $n$ observations total.
+
+First, we will calculate the hertiability within an environment by fitting the following model per trait and environment:
+
+$$
+y_{i} = \mu + G_i + \epsilon_{i}
+$$
+
+where $y_{i}$ is the phenotypic observation, $\mu$ is the grand mean, $G_i$ is the the genotypic effect, and $\epsilon_{i}$ is the error associated with the phenotypic observation. $G_i$ is broken down into $g_i + c_i$, where $g_i$ is the random effect of the $i$th genotype, and $c_i$ is the fixed effect of the $i$th check.
+
+The model can be expressed in matrix form as
+
+$$
+\mathbf{y = X \beta + Z u + e}
+$$
+
+where $y$ is a $n \times 1$ vector of phenotypic observations, $X$ is a $n \times (n_c + 1)$ design matrix of the fixed effects, $\beta$ is a $(n_c + 1) \times 1$ vector of fixed effects, $Z$ is a $n \times n_g$ design matrix of the random effects, $u$ is a $n_g \times 1$ vector of random effects, and $\epsilon$ is a $n \times 1$ vector of residuals.
+
+
+Second, the heritability will be calcuted for each trait across all environments by fitting the following model:
+
+$$
+y_{ij} = \mu + G_i + t_j + (gt)_{ij} + \epsilon_{ij}
+$$
+
+where $y_{ij}$ is the phenotypic observation, $\mu$ is the grand mean, $G_i$ is the the genotypic effect (broken down into $g_i + c_i$, where $g_i$ is the random effect of the $i$th genotype, and $c_i$ is the fixed effect of the $i$th check), $t_j$ is the fixed effect of the $j$th environment, $(gt)_{ij}$ is the random effect of the interaction between the $i$th genotype and the $j$th environment, and $\epsilon_{ij}$ is the error associated with the phenotypic observation. There are $n_t$ environments.
+
+The model is expressed in matrix form as
+
+$$
+\mathbf{y = X \beta + Z u + W m + e}
+$$
+
+where $\mathbf{y}$ is a $n \times 1$ vector of phenotypic observations, $\mathbf{X}$ is a $n \times (n_c + 1)$ design matrix of the fixed effects, $\mathbf{\beta}$ is a $(n_c + 1) \times 1$ vector of fixed effects, $\mathbf{Z}$ is a $n \times n_g$ design matrix of the random genotype effects, $\mathbf{u}$ is a $n_g \times 1$ vector of random genotype effects, $\mathbf{W}$ is a $n \times (n_g * n_t)$ design matrix of the random genotype-environment interaction effects, $\mathbf{m}$ is a $(n_g * n_t) \times 1$ vector of random genotype-environment interaction effects, and $\epsilon$ is a $n \times 1$ vector of residuals.
+
+
+```{r fit.models}
+
+# Add dummy for the check
+s2_met_tidy_model <- S2_MET_tidy %>% 
+  filter(line_name %in% entries) %>%
+  droplevels() %>%
+  mutate(check = ifelse(as.character(line_name) %in% checks, as.character(line_name), "00check"),
+         line = ifelse(as.character(line_name) %in% checks, "00line", as.character(line_name))) %>%
+  # Group by environments and rescale
+  group_by(trait, environment) %>%
+  mutate(value_rescale = as.numeric(scale(value))) %>%
+  ungroup()
+
+# Group by trait and environment
+var_comp_env <- s2_met_tidy_model %>%
+  group_by(trait, environment) %>%
+  # Calculate the average number of replications
+  mutate(avg_rep = pbr:::avg_reps(table(line_name))) %>%
+  group_by(avg_rep, add = TRUE) %>%
+  do({
+    # Fit the model
+    fit <- lmer(value_rescale ~ check + (1|line), data = .)
     
-    # Subset the data
-    x[,as.character(as.matrix(env.pairs))] %>%
-      
-      # In each environment, calculate the deviation from each observation to the mean of
-      # all observation and divide by the sd of all observations
-      # Then find the mean squared differences. This is the distance
-      apply(MARGIN = 2, FUN = function(p) (p - mean(p, na.rm = T)) / sd(p, na.rm = T)) %>%
-      # Subset the complete cases
-      na.omit() %>%
-      # Square the difference
-      apply(MARGIN = 1, FUN = function(pairs) diff(pairs)^2) %>%
-      mean()
-    
+    # Extract variances and return variance components
+    as.data.frame(VarCorr(fit)) %>%
+      select(grp, vcov) %>% 
+      spread(grp, vcov) %>% 
+      rename(V_G = line, V_R = Residual)
   })
+
+
+# Group by trait and calculate variance components
+var_comp <- s2_met_tidy_model %>%
+  group_by(trait) %>%
+  # Calculate the average number of replications and other counts
+  mutate(e = n_distinct(environment),
+         l = n_distinct(location),
+         y = n_distinct(year),
+         avg_rep = pbr:::avg_reps(table(line_name)) / e) %>%
+  group_by(e, l, y, avg_rep, add = TRUE) %>%
+  do({
+    # Fit the model
+    fit <- lmer(value_rescale ~ check + (1|line) + environment + (1|line:location) + (1|line:year) + (1|line:location:year), data = .)
+    
+    # Extract variances and return variance components
+    as.data.frame(VarCorr(fit)) %>%
+      select(grp, vcov) %>% 
+      spread(grp, vcov) %>% 
+      rename(V_G = line, V_GL = `line:location`, V_GY = `line:year`, V_GLY = `line:location:year`, V_R = Residual)
+  })
+
+
+```
+
+
+
+The broad-sense heritability is calculated on a entry-mean basis according to the formula
+
+$$
+H = \frac{ \sigma^2_G }{ \sigma^2_G + \frac{\sigma^2_{GE}}{r} + \frac{\sigma^2_R}{er} }
+$$
+
+for overall heritability calculations, and 
+
+$$
+H = \frac{ \sigma^2_G }{ \sigma^2_G  + \frac{\sigma^2_R}{r} }
+$$
+
+
+where $e$ is the number of environments and $r$ is the number of replicates. In the case of an augmented design, where the number of replicates is uneven, the following formula is used to calculate the average number of replications:
+
+$$
+r = \frac{ R_1 - \frac{R_2}{R_1} }{n - 1}
+$$
+
+where $R_1 = \sum r_i$, $R_2 = \sum r^2_i$, $r_i$ is the number of replications of the $i$th entry, and $n$ is the number of entries (i.e. $n_g + n_c$).
+
+
+Here are the estimates of heritability for each trait in each environment
+
+
+```{r calc.herit.env}
+
+# Calculate a heritability per environment
+herit_env <- model_vars_env %>%
+  group_by(trait, environment) %>%
+  summarize(H = V_G / (V_G + (V_R / avg_rep)))
+
+    
+
+# Plot
+herit_env %>%
+  ggplot(aes(x = environment, y = H)) +
+  geom_col() +
+  facet_grid(trait ~ ., switch = "y") +
+  ylab("Heritability") +
+  xlab("Environment") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
   
-  # Ouput matrix
-  matrix(data = D_jj, nrow = n.env, ncol = n.env, dimnames = list(names(x), names(x)))
+```
+  
+
+Now calculate heritability across all environments
+
+```{r calc.herit}
+
+# Calculate a heritability over all environments
+(herit <- var_comp %>%
+  group_by(trait) %>%
+  summarize(V_G = V_G, V_GL = V_GL, V_GY = V_GY, V_GLY = V_GLY, V_R = V_R,
+            H = V_G / (V_G + (V_GL / l) + (V_GY / y) + (V_GLY / (l * y)) + V_R / (l * y * avg_rep))))
+
+
+
+# Plot variance components and heritabilities
+herit %>%
+  gather(param, value, -trait) %>%
+  filter(param != "H") %>%
+  ggplot(aes(x = trait, y = value, fill = param)) +
+  geom_col(position = "stack") +
+  ylab("Value") +
+  xlab("Trait") +
+  scale_fill_discrete(name = "Variance Component")
+
+
+```
+
+
+## Environmental Correlations
+
+Estimate the genetic variance-covariance matrix across environments using the method by @Lado2016a and @Rebonato2000
+
+In this method, a correlation matrix is first calculated using Pearson correlations, then this correlation matrix is decomposed to estimate the genetic correlation.
+
+
+
+```{r functions}
+
+# Define a function to correct the correlation matrix
+corr_decomp <- function(x) {
+  
+  # Decomposition
+  s <- eigen(x)
+
+  # Set anything less than 0 to 0
+  la <- ifelse(s$values <= 0, 0, s$values)
+
+  # Get the eigenvectors
+  S <- s$vectors
+  
+  # Diagonal matrix of eigenvalues
+  La <- diag(la)
+
+  B_prime <- S %*% sqrt(La)
+
+  # Normalization matrix
+  T_mat <- solve(diag(as.vector(S^2 %*% la)))
+
+  # Return B matrix
+  B <- sqrt(T_mat) %*% B_prime * -1
+  
+  # tcrossprod
+  C_prime <- tcrossprod(B)
+  dimnames(C_prime) <- dimnames(x)
+  return(C_prime)
   
 }
 
-# Run the function
-env.dist <- pheno %>% 
-  # Group by trait
+```
+
+
+
+Calculate the genetic correlation between environments using the training population
+
+```{r env.corr.tp}
+
+# Calculate environmental correlations using all pairwise information on the tp
+# First subset the data
+pheno_use <- S2.MET.BLUE %>%
+  filter(year != 2014)
+
+# Extract tp and correlate
+env_cor <- pheno_use %>% 
+  filter(line_name %in% tp) %>%
+  select(trait, line_name, environment, value) %>%
+  # Split by trait
   split(.$trait) %>%
-  map(select, line_name, environment, value) %>%
-  # Remove two pesky environments with low overlap
-  map(filter, !environment %in% c("HNY_2015", "ALV_2016")) %>%
   map(spread, environment, value) %>%
-  map(do, distance = Dist(.[,-1])) %>%
-  map(simplify2array) %>%
-  map(function(tr) {
-    dist.tf <- tr$distance %>%
-      data.frame(env1 = row.names(.), .) %>%
-      gather(env2, distance, -env1) %>%
-      mutate(env2 = as.factor(env2))
-    
-    # Convert to distance matrix and perform clustering to group environments
-    env.order <- tr$distance %>%
-      as.dist() %>%
-      hclust(method = "average") %>%
-      {.$labels[.$order]}
-    
-    # Reorder the df
-    dist.tf$env1 <- with(dist.tf, reorder(env1, new.order = env.order))
-    dist.tf$env2 <- with(dist.tf, reorder(env2, new.order = env.order))
-    
-    return(dist.tf) })
-    
+  map(group_by, trait) %>%
+  map(function(trait_mat) do(trait_mat, cor_mat = cor(.[,-1:-2], use = "pairwise.complete.obs", method = "pearson"))) %>%
+  bind_rows()
 
-trait <- "GrainYield"
+# For each matrix, adjust using the function above
+env_cor_tp <- env_cor %>% 
+  mutate(adj_cor_mat = list(corr_decomp(cor_mat)))
 
-# Plot
-ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
+# Reconfigure the data and plot a heatmap
+env_cor_tp_tidy <- env_cor_tp %>%
+  split(.$trait) %>%
+  map(group_by, trait) %>%
+  map(function(trait_df) do(trait_df, {
+    .$adj_cor_mat %>% as.data.frame() %>% rownames_to_column("env1") %>% gather(env2, correlation, -env1) }) ) %>%
+  bind_rows()
+
+env_cor_tp_tidy %>%
+  ggplot(aes(x = env1, y = env2, fill = correlation)) +
   geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
-trait <- "PlantHeight"
-
-# Plot
-ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
-  geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
-trait <- "HeadingDate"
-
-# Plot
-ggplot(env.dist[[trait]], aes(env1, env2, fill = distance)) +
-  geom_tile() +
-  xlab("") +
-  ylab("") + 
-  ggtitle(trait) +
-  scale_fill_gradient(low = "white", high = "red", guide = guide_legend(title = "Distance")) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+  scale_fill_gradientn(colors = c("blue", "white", "red"), na.value = "transparent", breaks = c(-1, 0, 1), limits = c(-1, 1), 
+                       guide = guide_colorbar(title = "Genetic Correlation")) +
+  ylab("Environment 2") +
+  xlab("Environment 1") +
+  facet_wrap(~ trait, nrow = 2, ncol = 2) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6)
+  ) 
 
 
 ```
 
+
+Calculate the genetic correlation between environments using the checks
+
+```{r env.corr.chk}
+
+# Calculate environmental correlations using all pairwise information on the checks
+# First subset the data
+pheno_use <- S2.MET.BLUE %>%
+  filter(year != 2014)
+
+# Extract tp and correlate
+env_cor <- pheno_use %>% 
+  filter(line_name %in% checks,
+         !str_detect(trial, "S2C1F4")) %>%
+  select(trait, line_name, environment, value) %>%
+  # Split by trait
+  split(.$trait) %>%
+  map(spread, environment, value) %>%
+  map(group_by, trait) %>%
+  map(function(trait_mat) do(trait_mat, cor_mat = cor(.[,-1:-2], use = "pairwise.complete.obs", method = "pearson"))) %>%
+  bind_rows()
+
+# For each matrix, adjust using the function above
+env_cor_chk <- env_cor %>% 
+  mutate(adj_cor_mat = list(corr_decomp(cor_mat)))
+
+# Reconfigure the data and plot a heatmap
+env_cor_chk_tidy <- env_cor_chk %>%
+  split(.$trait) %>%
+  map(group_by, trait) %>%
+  map(function(trait_df) do(trait_df, {
+    .$adj_cor_mat %>% as.data.frame() %>% rownames_to_column("env1") %>% gather(env2, correlation, -env1) }) ) %>%
+  bind_rows()
+
+env_cor_chk_tidy %>%
+  ggplot(aes(x = env1, y = env2, fill = correlation)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("blue", "white", "red"), na.value = "transparent", breaks = c(-1, 0, 1), limits = c(-1, 1), 
+                       guide = guide_colorbar(title = "Genetic Correlation")) +
+  ylab("Environment 2") +
+  xlab("Environment 1") +
+  facet_wrap(~ trait, nrow = 2, ncol = 2) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6)
+  ) 
+
+```
+
+
+Save the correlation matrices for further use
+
+```{r}
+
+save_file <- file.path(proj_dir, "Environmental_Variables/env_cov_mat_correlation.RData")
+save("env_cor_tp", "env_cor_chk", file = save_file)
+
+
+```
 

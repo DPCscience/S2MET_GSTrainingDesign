@@ -4,7 +4,7 @@
 
 <head>
 
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <meta name="generator" content="pandoc" />
 
@@ -174,45 +174,11 @@ $(document).ready(function () {
 <!-- rnb-text-begin -->
 <div id="introduction" class="section level2">
 <h2>Introduction</h2>
-<p>Use data and instructions from (Cueves et al. 2017)[<a href="http://www.g3journal.org/content/7/1/41" class="uri">http://www.g3journal.org/content/7/1/41</a>] to fit GxE prediction using the <code>BGLR</code>, <code>MTM</code>, and <code>EMMREML</code> packages.</p>
-<!-- rnb-text-end -->
-<!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeSh0aWR5dmVyc2UpXG5saWJyYXJ5KEVNTVJFTUwpXG5saWJyYXJ5KEJHTFIpXG5gYGAifQ== -->
-<pre class="r"><code>library(tidyverse)
-library(EMMREML)
-library(BGLR)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiIyBQYWNrYWdlIEJheWVzaWFuIEdlbmVyYWxpemVkIFJlZ3Jlc3Npb24gKEJHTFIpLCAxLjAuNS4gXG4jIEd1c3Rhdm8gZGUgbG9zIENhbXBvcyAmIFBhdWxpbm8gUGVyZXotUm9kcmlndWV6XG4jIFN1cHBvcnQgcHJvdmlkZWQgYnkgdGhlIFUuUy4sIE5hdGlvbmFsIEluc3RpdHV0ZXMgb2YgSGVhbHRoIChOSUgpXG4jIChHcmFudDogUjAxR00xMDEyMTksIE5JR01TKVxuIyBhbmQgYnkgdGhlIEludGVybmF0aW9uYWwgTWFpemUgYW5kIFdoZWF0IEltcHJvdmVtZW50IENlbnRlciAoQ0lNTXlUKS5cbiMgVHlwZSAnaGVscChCR0xSKScgZm9yIHN1bW1hcnkgaW5mb3JtYXRpb25cbiJ9 -->
-<pre><code># Package Bayesian Generalized Regression (BGLR), 1.0.5. 
-# Gustavo de los Campos &amp; Paulino Perez-Rodriguez
-# Support provided by the U.S., National Institutes of Health (NIH)
-# (Grant: R01GM101219, NIGMS)
-# and by the International Maize and Wheat Improvement Center (CIMMyT).
-# Type 'help(BGLR)' for summary information</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeShNVE0pXG5gYGAifQ== -->
-<pre class="r"><code>library(MTM)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-chunk-end -->
-<!-- rnb-text-begin -->
-</div>
-<div id="mtm-example" class="section level2">
-<h2>MTM Example</h2>
-<!-- rnb-text-end -->
-<!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuQ09SLlBUMTwtY29yKFlIYXRJbnRbdHN0MSwxXSx5W3RzdDEsMV0pXG5cbmBgYCJ9 -->
-<pre class="r"><code>COR.PT1&lt;-cor(YHatInt[tst1,1],y[tst1,1])
-</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRXJyb3IgaW4gaXMuZGF0YS5mcmFtZSh4KSA6IG9iamVjdCAnWUhhdEludCcgbm90IGZvdW5kXG4ifQ== -->
-<pre><code>Error in is.data.frame(x) : object 'YHatInt' not found</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-chunk-end -->
-<!-- rnb-text-begin -->
+<p>This notebook will outline some procedures to predict genotypic values in the presence of GxE by using a number of different models. Each model will be introduced, its assumptions outlined, predictions made, and results interpreted.</p>
 <!-- rnb-text-end -->
 </div>
 
-<div id="rmd-source-code">LS0tDQp0aXRsZTogIkV4YW1wbGUgR3hFIFByZWRpY3Rpb24iDQpvdXRwdXQ6IGh0bWxfbm90ZWJvb2sNCi0tLQ0KDQojIyBJbnRyb2R1Y3Rpb24NCg0KVXNlIGRhdGEgYW5kIGluc3RydWN0aW9ucyBmcm9tIChDdWV2ZXMgZXQgYWwuIDIwMTcpW2h0dHA6Ly93d3cuZzNqb3VybmFsLm9yZy9jb250ZW50LzcvMS80MV0gdG8gZml0IEd4RSBwcmVkaWN0aW9uIHVzaW5nIHRoZSBgQkdMUmAsIGBNVE1gLCBhbmQgYEVNTVJFTUxgIHBhY2thZ2VzLg0KDQpgYGB7cn0NCg0KbGlicmFyeSh0aWR5dmVyc2UpDQpsaWJyYXJ5KEVNTVJFTUwpDQpsaWJyYXJ5KEJHTFIpDQpsaWJyYXJ5KE1UTSkNCg0KYGBgDQoNCg0KDQoNCiMjIE1UTSBFeGFtcGxlDQoNCmBgYHtyfQ0KDQojIyMgRXhhbXBsZSBmb3IgZml0dGluZyBtdWx0aS1lbnZpcm9ubWVudCBtb2RlbCAoMykNCg0KIyMjIFJlcXVpcmUgTVRNIHBhY2thZ2UgKGRlIGxvcyBDYW1wb3MgYW5kIEdyw7xuZWJlcmcsIDIwMTYpDQoNCiMjIyMjIFJlcXVpcmUgQkdMUiBwYWNrYWdlIChkZSBsb3MgQ2FtcG9zIGFuZCBQw6lyZXotUm9kcsOtZ3VleiwgMjAxNCkNCg0KIyMjIyMgUmVxdWllcmUgZnVuY3Rpb24gQ1YyIChMw7NwZXotQ3J1eiBldCBhbC4sIDIwMTUpDQoNCiMjI0RhdGENCg0KZGF0YSh3aGVhdCkNCg0KWCA8LSB3aGVhdC5YDQpZIDwtIHdoZWF0LlkNCg0KWCA8LSBzY2FsZShYLGNlbnRlcj1UUlVFLHNjYWxlPVRSVUUpDQpZIDwtIHNjYWxlKFksY2VudGVyPVRSVUUsc2NhbGU9VFJVRSkNCg0KZW52IDwtIGMoMSwyLDMsNCkNCnkgPC0gWVssZW52XQ0KDQpHIDwtIHRjcm9zc3Byb2QoWCkgLyBuY29sKFgpDQoNCkluIDwtIGRpYWcoMSwgbnJvdyhZKSwgbnJvdyhZKSkNCg0Kc2V0LnNlZWQoMTIzNDUpDQoNCiMgTWlzc2luZyBkYXRhDQp5TkEgPC0gWQ0KeU5BW3JlcGxpY2F0ZSg0LCBhcy5sb2dpY2FsKHJiaW5vbShuID0gbnJvdyhZKSwgc2l6ZSA9IDEsIHByb2IgPSAwLjMpKSldIDwtIE5BIA0KDQoNCiMjIyBGaXQgbW9kZWwgKDMpIHdpdGggTVRNIChzZWUgZGUgbG9zIENhbXBvcyBhbmQgR3LDvG5lYmVyZywgMjAxNikNCg0KZm0gPC0gTVRNKFkgPSB5TkEsIEsgPSBsaXN0KA0KICBsaXN0KCBLID0gRywgQ09WID0gbGlzdCggdHlwZSA9ICJVTiIsIGRmMCA9IDQsIFMwID0gZGlhZyg0KSApICksDQogIGxpc3QoIEsgPSBJbiwgQ09WID0gbGlzdCh0eXBlID0gIlVOIiwgZGYwID0gNCwgUzAgPSBkaWFnKDQpKSApICksDQogIA0KICByZXNDb3YgPSBsaXN0KHR5cGUgPSAiRElBRyIsIFMwID0gcmVwKDEsIDQpLCBkZjAgPSByZXAoMSwgNCkpLA0KICANCiAgbkl0ZXIgPSAxMDAsIGJ1cm5JbiA9IDEwLCB0aGluID0gNSwgc2F2ZUF0ID0gImV4dDEiKQ0KDQoNCiMgUHJlZGljdGlvbiBhY2N1cmFjeQ0KWUhhdEludCA8LSBmbSRZSGF0DQoNCnRlc3Q8LWlzLm5hKHlOQSkNCg0KdHN0MSA8LSB0ZXN0WywxXQ0KdHN0MiA8LSB0ZXN0WywyXQ0KdHN0MyA8LSB0ZXN0WywzXQ0KdHN0NCA8LSB0ZXN0Wyw0XQ0KDQpDT1IuUFQxPC1jb3IoWUhhdEludFt0c3QxLDFdLHlbdHN0MSwxXSkNCg0KQ09SLlBUMjwtY29yKFlIYXRJbnRbdHN0MiwyXSx5W3RzdDIsMl0pDQoNCkNPUi5QVDM8LWNvcihZSGF0SW50W3RzdDMsM10seVt0c3QzLDNdKQ0KDQpDT1IuUFQ0PC1jb3IoWUhhdEludFt0c3Q0LDRdLHlbdHN0NCw0XSkNCg0KDQpgYGANCg0K</div>
+<div id="rmd-source-code">LS0tDQp0aXRsZTogIkV4YW1wbGUgR3hFIFByZWRpY3Rpb24iDQpvdXRwdXQ6IGh0bWxfbm90ZWJvb2sNCi0tLQ0KDQojIyBJbnRyb2R1Y3Rpb24NCg0KVGhpcyBub3RlYm9vayB3aWxsIG91dGxpbmUgc29tZSBwcm9jZWR1cmVzIHRvIHByZWRpY3QgZ2Vub3R5cGljIHZhbHVlcyBpbiB0aGUgcHJlc2VuY2Ugb2YgR3hFIGJ5IHVzaW5nIGEgbnVtYmVyIG9mIGRpZmZlcmVudCBtb2RlbHMuIEVhY2ggbW9kZWwgd2lsbCBiZSBpbnRyb2R1Y2VkLCBpdHMgYXNzdW1wdGlvbnMgb3V0bGluZWQsIHByZWRpY3Rpb25zIG1hZGUsIGFuZCByZXN1bHRzIGludGVycHJldGVkLg==</div>
 
 
 
@@ -247,7 +213,7 @@ $(document).ready(function () {
   (function () {
     var script = document.createElement("script");
     script.type = "text/javascript";
-    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
     document.getElementsByTagName("head")[0].appendChild(script);
   })();
 </script>

@@ -1,0 +1,72 @@
+---
+title: "S2_MET GEI Analysis"
+output: html_notebook
+---
+
+## Introduction
+
+This notebook will outline the genotype-environment interaction (GEI) analysis of the S2MET project. It will include:
+
+1. AMMI Bi-Plot Analysis (using mixed models)
+2. Mega-environment detection
+
+
+```{r test}
+
+## Attemps at a mixed model form of AMMI
+library(tidyverse)
+library(lme4)
+library(broom)
+library(agridat)
+
+dat <- as_data_frame(gauch.soy)
+
+# Mixed model
+fit <- lmer(yield ~ (1|gen) + env + (rep|env) + (1|gen:env), data = dat)
+
+# Calculate heritability
+r <- gauch.soy %>% group_by(env) %>% summarize(rep = n_distinct(rep)) %>% .$rep %>% mean()
+e <- gauch.soy %>% 
+  summarize(e = n_distinct(env)) %>%
+  as.numeric()
+
+vcov <- VarCorr(fit) %>%
+  as.data.frame()
+
+V_G <- vcov %>%
+  subset(grp == "gen", vcov, drop = TRUE)
+V_GE <- vcov %>%
+  subset(grp == "gen:env", vcov, drop = TRUE)
+V_R <- vcov %>%
+  subset(grp == "Residual", vcov, drop = TRUE)
+
+H <- V_G / (V_G + (V_GE / e) + (V_R / (e * r)))
+
+# Extract the random effects
+
+
+
+
+
+
+
+
+
+fit1 <- lm(yield ~ gen + env + rep %in% env + gen:env, data = dat)
+
+aov_df <- tidy(anova(fit1))
+
+MS_G <- aov_df %>%
+  subset(term == "gen", meansq)
+MS_GE <- aov_df %>%
+  subset(term == "gen:env", meansq)
+MS_R <- aov_df %>%
+  subset(term == "Residuals", meansq)
+
+V_GE <- (MS_GE - MS_R) / r
+V_G <- (MS_G - MS_GE) / (r * e)
+V_R <- V_G
+
+H1 <- V_G / (V_G + (V_GE / e) + (V_R / (e * r)))
+
+```

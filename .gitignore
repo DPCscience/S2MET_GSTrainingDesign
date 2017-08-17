@@ -2,3 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
+Phenotype_Data/*
+Environmental_Variables/*
+Figures/*
+Misc/*
+project_timeline.csv
+Summaries/*

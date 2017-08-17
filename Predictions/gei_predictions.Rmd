@@ -1,16 +1,14 @@
 ---
 title: "S2MET Predictions"
 output: html_notebook
+bibliography: C:/Users/Jeff/Documents/Literature/library.bib
 ---
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, results = "hide")
-```
-
 
 ## Introduction
 
-This notebook will outline prediction results for the S2MET using different methods of incorporating environmental covariables.
+This notebook will outline some procedures to predict genotypic values in the presence of GxE by using a number of different models. Each model will be introduced, its assumptions outlined, predictions made, and results interpreted.
+
+First we must define some directories and load packages
 
 ```{r}
 
@@ -18,7 +16,9 @@ library(tidyverse)
 library(stringr)
 library(rrBLUP)
 library(readxl)
-library(EMMREML)
+library(neyhart)
+library(sommer)
+library(gws)
 
 # The head directory
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
@@ -29,7 +29,7 @@ pred_dir <- file.path(proj_dir, "Predictions")
 # Other directories
 geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
 env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
-pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/"
+pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/Phenotype_Data/"
 
 
 ## Load Data
@@ -38,28 +38,106 @@ load(file.path(geno_dir, "S2_genos_mat.RData"))
 
 # Load the phenotypic data
 load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
-load(file.path(pheno_dir, "S2_tidy_BLUE_all.RData"))
+load(file.path(pheno_dir, "S2_MET_tidy.RData"))
 
 # Load environmental data
-load(file.path(env_var_dir, "env_cov_mat.RData"))
+load(file.path(env_var_dir, "environmental_data_compiled.RData"))
 
 
 ```
 
 
-## Entries
+### Model Description
+
+We will test a number of models and compare predictions
+
+#### Base Model
+
+Say there are *n* phenotypic observations total. Say also there are *I* genotypes total, and $I_o$ have phenotypic data and $I_u$ are unobserved. Say also there are *J* environments, and $J_o$ have phenotypic data and $J_u$ are unobserved. The $I_o$ unobserved genotypes are to be predicted in the $J_u$ environments.
+
+The basic model for genotypic and environment main effects is
+
+$$
+y_{ij} = G_i + E_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{e} 
+$$
+
+where $\mathbf{y}$ is a $n \times 1$ vector of phenotypes, $\mathbf{X}$ is a $n \times (I_o + J_o)$ design matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{\beta}$, which is a $(I_o + J_o) \times 1$ vector of fixed effects, and $\mathbf{e}$ is a $n \times 1$ vector of residual effects
+
+The above model assumes that genotypes and environments are fixed effects, and therefore predictions cannot be extended to unobserved genotypes or unobserved environments.
+
+#### Random Genotypes, Fixed Environments Model
+
+We can allow for prediction of unobserved genotypes by using a covariance structure to model the random genotype effects in the model
+
+$$
+y_{ij} = g_i + E_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{e} 
+$$
+
+where $\mathbf{Z}$ is a $n \times v$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{g}$, which is a $I \times 1$ vector of genotypic effects, assumed a random variable $\mathbf{g} \sim N(0, \mathbf{G} \sigma^2_g)$ and where $\mathbf{G}$ is a $I \times I$ genomic relationship matrix.
+
+Again, this model does not allow new environments to be predicted because information between environments is not shared.
+
+#### Random Genotypes, Random Environments Model
+
+We can allow for prediction of unobserved environments by using a covariance structure to model the random environmental effects in the model
+
+$$
+y_{ij} = g_i + t_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{e} 
+$$
+
+where $\mathbf{W}$ is a $n \times J$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{t}$, which is a $J \times 1$ vector of environmental effects, assumed a random variable $\mathbf{t} \sim N(0, \mathbf{E} \sigma^2_t)$ and where $\mathbf{E}$ is a $J \times J$ genomic relationship matrix.
+
+#### Random Genotypes, Random Environments, Random GxE Model
+
+We can allow for prediction of unobserved genotypes in unobserved environments by modeling the product of the covariance of environments and that of genotypes
+
+
+$$
+y_{ij} = g_i + t_j + (gt)_{ij} + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{Uq} + \mathbf{e} 
+$$
+
+where $\mathbf{U}$ is a $n \times (v * l)$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{q}$, which is a $IJ\times 1$ vector of genotype-by-environmental effects, assumed a random variable $\mathbf{t} \sim N(0, \mathbf{\Omega} \sigma^2_t)$ and where $\mathbf{\Omega}$ is a $IJ \times IJ$ GEI relationship matrix computed by $\Omega = G \otimes E$
+
+
+### Implementation
+
+
+Next create vectors of the entries and trim the phenotypic data
 
 ```{r}
 
 # Load an entry file
-entry_file <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Population Information/Entry Lists/Project Entries.xlsx"
-entry_list <- read_excel(entry_file, sheet = "S2_MET")
+entry_file <- file.path(proj_dir, "Plant_Materials/S2MET_project_entries.xlsx")
+entry_list <- read_excel(entry_file)
 
 # Get rid of checks
 entries <- entry_list %>% 
   filter(Class != "Check") %>%
-  select(Line) %>%
-  unlist()
+  pull(Line)
 
 # Pull out the tp lines that intersect with the genotype data
 tp <- entries %>% 
@@ -70,14 +148,1101 @@ vp <- entries %>%
   str_subset("^2MS") %>%
   intersect(., row.names(s2_imputed_mat))
 
-# Keep only the relevant lines and only 2016 trials
-pheno <- S2.MET.BLUE %>%
-  filter(line_name %in% c(tp, vp),
-         year == 2016) %>%
+# Keep only the relevant lines
+# Other phenotype data manipulations
+
+## We need to combine some environments and prepare others for prediction, including:
+# The environments "CNY15" and "HNY15" are the same
+
+pheno <- S2_MET_BLUE %>%
+  filter(line_name %in% c(tp, vp)) %>%
+  mutate(environment = ifelse(environment == "CNY15", "HNY15", as.character(environment))) %>%
   # Change line_name and environment to factors
-  mutate_at(vars(line_name, environment), funs(as.factor))
+  mutate_at(vars(line_name, environment), funs(as.factor)) %>%
+  droplevels()
 
 ```
+
+
+
+## Methods
+
+## Phenotypic Data Manipulation
+
+### Matrix Construction
+
+
+#### Genomic Relationship Matrix
+
+The genomic relationship matrix $\mathbf{G}$ will be calculated as
+
+$$
+\mathbf{G} = \frac{\mathbf{ZZ'}}{c}
+$$
+
+where $\mathbf{Z} = \mathbf{M} - \mathbf{P}$, $\mathbf{M}$ is a $n \times m$ matrix of genotype calls with elements $m = \{ -1, 0, 1\}$, $\mathbf{P}$ is a $1 \times m$ vector of allele frequencies expressed as $P_i = 2(p_i - 0.5)$, $c$ is equal to $c = 2 \sum p_i(1 - p_i)$ and $p_i$ is the frequency of the 1 allele at the *i*th marker locus.
+
+Note the standardization constant is calculate among a population of unselected individuals [@VanRaden2008], in this case the training population
+
+```{r G.mat}
+
+# Convert the matrix name
+M <- s2_imputed_mat[c(tp, vp), ]
+
+# Use function in the gws package
+G <- G_mat(X = M, base.pop = tp, impute.method = "pass")
+
+```
+
+
+#### Environmental Relationship Matrix
+
+We will look at two ways of making the environmental relationship matrix:
+
+The first is similar to the method above for the matrix $\mathbf{G}$, where the environment relationship matrix 
+
+$$
+\mathbf{E} = \frac{\mathbf{NN'}}{p}
+$$
+
+where $\mathbf{N}$ is a $J \times p$ matrix of environmental covariances that are centered and scaled for *J* environments and *p* enviornmental covariates.
+
+Assumptions
+
+- This method likely assumes that the environmental covariates are independent, which is certainly not the case (i.e. for daily temp covariances, which are highly correlated)
+- 
+
+This method is outlined below:
+
+```{r E.mat1}
+
+# Rename
+N <- one_year_mat
+
+# Create the relationship matrix
+E_1 <- tcrossprod(N) / ncol(N)
+
+
+```
+
+
+Another method is to reduce the number of environmental covariates down to a series of linearly independent principal componments and use the correlation among principal components as the relationship matrix
+
+
+
+
+```{r E.mat2}
+
+# PCA
+one_year_svd <- svd(one_year_mat)
+
+# Use the PCs as the matrix - n_PC = n_EC
+N <- one_year_svd$u %>%
+  structure(dimnames = list(row.names(one_year_mat), paste("PC", seq(nrow(.)), sep = "")))
+
+# Create the relationship matrix
+E_2 <- cor(t(N))
+
+
+```
+
+
+#### GEI Relationship Matrix
+
+The GEI relationship matrix $\Omega$ is calculated as the Kronecker product of the genomic and environmental relationship matrices
+
+$$
+\mathbf{\Omega} = \mathbf{G} \otimes \mathbf{E}
+$$
+
+where $\mathbf{\Omega}$ is a $IJ \times IJ$ matrix of genotype-environment interaction covariances
+
+```{r ge.mat}
+
+O_1 <- kronecker(E_1, G, make.dimnames = TRUE)
+
+O_2 <- kronecker(E_2, G, make.dimnames = TRUE)
+
+```
+
+
+
+### Predictions
+
+We need to develope a framework for predicting the vp in any environment using the tp from one or more other environments. We will first consider predicting the vp in Fargo using data from St Paul and Crookston.
+
+Here we will work to develop some functions or procedures for pulling out the phenotypic data from environments to predict and train. Additionally, we will develop incidence matrices for the genotypic effects, the environmental effects, and the interaction effects.
+
+```{r test}
+
+# Assign training and prediction environments
+env_train <- sort(c("STP16", "CRM16"))
+env_pred <- c("FND16")
+
+# Only use height data
+pheno_use <- pheno %>%
+  filter(trait == "GrainYield")
+
+# Pull out the phenotypic data
+pheno_train <- pheno_use %>% 
+  filter(environment %in% env_train, line_name %in% tp)
+pheno_pred <- pheno_use %>% 
+  filter(environment %in% env_pred, line_name %in% vp)
+
+# Create the y vector
+y_train <- pheno_train %>% 
+  dplyr::select(line_name, environment, value) %>% 
+  unite(gen_env, line_name, environment, sep = ":") %>% 
+  remove_rownames() %>% 
+  column_to_rownames("gen_env") %>% 
+  as.matrix()
+
+# Create the fixed effect vector (base mean)
+X <- model.matrix(~ 1, data = pheno_train)
+
+
+# Create the incidence matrix for the genotypes
+Z_g <- model.matrix(~ -1 + line_name, data = pheno_train)
+# Same for environments
+Z_e <- model.matrix(~ -1 + environment, data = pheno_train)
+
+Z_ge <- model.matrix(~ -1 + line_name:environment, data = pheno_train)
+
+
+solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
+                                               E = list(Z = Z_e, K = E_1), 
+                                               GE = list(Z = Z_ge, K = O_1)))
+
+# Extract the random effects
+u_hat <- randef(solve_out)
+
+# Convert to data.frames
+u_hat_df <- randef(solve_out) %>%
+  map(as.matrix) %>%
+  map(~data.frame(id = row.names(.), u_hat = ., row.names = NULL)) %>% 
+  map(~separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
+                fill = ifelse(str_detect(.$id[1], "environment"), "left", "right"))) %>%
+  map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = ""))
+
+# Measure accuracy
+pred_results <- pheno_pred %>% 
+  mutate_at(vars(environment, line_name), parse_character) %>% 
+  left_join(., dplyr::select(u_hat_df$G, -environment)) %>% 
+  left_join(., dplyr::select(u_hat_df$E, -line_name), by = "environment") %>% 
+  left_join(., u_hat_df$GE) %>% mutate(pred = u_hat.x + u_hat.y + u_hat)
+
+
+```
+
+
+
+Designate environments for prediction or validation
+
+```{r env.des}
+
+env_train <- pheno %>% 
+  filter(line_name %in% tp) %>% 
+  distinct(environment) %>% 
+  pull() %>% 
+  parse_character()
+
+env_pred <- pheno %>% 
+  filter(line_name %in% vp) %>% 
+  distinct(environment) %>% 
+  pull() %>% 
+  parse_character()
+
+# Trait vector
+traits <- pheno %>% 
+  distinct(trait) %>% 
+  pull() %>% 
+  parse_character()
+
+
+```
+
+
+#### Normal G-BLUP Model
+
+With this framework established, we will first predict using the regular G-BLUP model
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{e} 
+$$
+
+
+Predict all environments using all environments simultaneously
+
+```{r gblup1}
+
+# Iterate over all traits
+gblup1_results <- pheno %>%
+  group_by(trait) %>%
+  do(pred_out = {
+    
+    # Training and prediction phenotypes
+    pheno_train <- filter(., line_name %in% tp)
+    pheno_pred <- filter(., line_name %in% vp)
+    
+    # Create the y vector
+    y_train <- pheno_train %>% 
+      dplyr::select(line_name, environment, value) %>% 
+      unite(gen_env, line_name, environment, sep = ":") %>% 
+      as.data.frame() %>%
+      remove_rownames() %>% 
+      column_to_rownames("gen_env") %>% 
+      as.matrix()
+    
+    # Create the fixed effect vector (environment)
+    X <- model.matrix(~ -1 + environment, data = droplevels(pheno_train))
+    
+    # Create the incidence matrix for the genotypes
+    Z_g <- model.matrix(~ -1 + line_name, data = pheno_train) %>%
+                          structure(dimnames = list(NULL, str_replace(colnames(.), "line_name", "")))
+    
+    solve_out <- mixed.solve(y = y_train, Z = Z_g, K = G, X = X, method = "REML")
+    
+    # Convert to data.frames
+    u_hat_df <- solve_out$u %>% 
+      data.frame(id = names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+      separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
+               fill = ifelse(str_detect(.$id[1], "environment"), "left", "right")) %>%
+      mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = "") %>%
+      filter(line_name %in% vp) 
+    
+    # Combine predictions with observations
+    pheno_pred %>% 
+      mutate_at(vars(environment, line_name), parse_character) %>% 
+      left_join(., dplyr::select(u_hat_df, -environment), by = "line_name") %>% 
+      rename(pred = u_hat)
+    
+    })
+
+# Perform a bootstrap correlation and plot
+gblup1_analysis <- gblup1_results %>% 
+  group_by(trait) %>% 
+  unnest() %>% 
+  group_by(environment, add = T) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "GBLUP1") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+gblup1_analysis %>%
+  ggplot(aes(x = environment, y = r_hat)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP1 Prediction Accuracy",
+    subtitle = "All Training Environments Used to Predict All Validation Environments"
+  )
+  
+
+
+```
+
+
+Now for each validation environment, use all training data except that environment
+
+
+
+```{r gblup2}
+
+# Iterate over all traits
+gblup2_results <- expand.grid(environment = env_pred, trait = traits, stringsAsFactors = FALSE) %>%
+  group_by(environment, trait) %>%
+  do(pred_out = {
+    
+    # Training and prediction phenotypes
+    pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == .$trait)
+    pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == .$trait)
+    
+    # Create the y vector
+    y_train <- pheno_train %>% 
+      dplyr::select(line_name, environment, value) %>% 
+      unite(gen_env, line_name, environment, sep = ":") %>% 
+      as.data.frame() %>%
+      remove_rownames() %>% 
+      column_to_rownames("gen_env") %>% 
+      as.matrix()
+    
+    # Create the fixed effect vector (environment)
+    X <- model.matrix(~ -1 + environment, data = droplevels(pheno_train))
+    
+    # Create the incidence matrix for the genotypes
+    Z_g <- model.matrix(~ -1 + line_name, data = pheno_train) %>%
+                          structure(dimnames = list(NULL, str_replace(colnames(.), "line_name", "")))
+    
+    solve_out <- mixed.solve(y = y_train, Z = Z_g, K = G, X = X, method = "REML")
+    
+    # Convert to data.frames
+    u_hat_df <- solve_out$u %>% 
+      data.frame(id = names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+      separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
+               fill = ifelse(str_detect(.$id[1], "environment"), "left", "right")) %>%
+      mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = "") %>%
+      filter(line_name %in% vp) 
+    
+    # Combine predictions with observations
+    pheno_pred %>% 
+      mutate_at(vars(environment, line_name), parse_character) %>% 
+      left_join(., dplyr::select(u_hat_df, -environment), by = "line_name") %>% 
+      rename(pred = u_hat)
+    
+    })
+
+# Perform a bootstrap correlation and plot
+gblup2_analysis <- gblup2_results %>% 
+  ungroup() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "GBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+gblup2_analysis %>%
+  ggplot(aes(x = environment, y = r_hat)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP2 Prediction Accuracy",
+    subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
+  )
+
+# Combine
+bind_rows(gblup1_analysis, gblup2_analysis) %>%
+  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = "dodge", width = 0.5) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP Prediction Accuracy"
+  )
+  
+
+
+```
+
+
+#### Addtive GE-BLUP Model
+
+These models will account for the random environmental effect (using the environmental relationship matrix), but will not include interaction.
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{e} 
+$$
+
+
+Here we will only use the procedure where all training environments (minus the prediction environment) are used to predict that prediction environment.
+
+The following will be used in a R script and run on MSI
+
+
+```{r a.geblup2}
+
+# Iterate over all traits
+a_geblup2_results <- expand.grid(environment = env_pred, trait = traits, stringsAsFactors = FALSE) %>%
+  group_by(environment, trait) %>%
+  do(pred_out = {
+    
+    # Training and prediction phenotypes
+    pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == .$trait)
+    pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == .$trait)
+    
+    # Create the y vector
+    y_train <- pheno_train %>% 
+      dplyr::select(line_name, environment, value) %>% 
+      unite(gen_env, line_name, environment, sep = ":") %>% 
+      as.data.frame() %>%
+      remove_rownames() %>% 
+      column_to_rownames("gen_env") %>% 
+      as.matrix()
+    
+    # Create the fixed effect vector (environment)
+    X <- model.matrix(~ 1, data = pheno_train)
+    
+    # Create the incidence matrix for the genotypes
+    Z_g <- model.matrix(~ -1 + line_name, data = pheno_train) %>%
+      structure(dimnames = list(NULL, str_replace(colnames(.), "line_name", "")))
+    
+    # Same for environments
+    Z_e <- model.matrix(~ -1 + environment, data = pheno_train) %>% 
+      structure(dimnames = list(NULL, str_replace(colnames(.), "environment", "")))
+
+
+    solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
+                                                   E = list(Z = Z_e, K = E_1)))
+    
+    
+    # Convert to data.frames
+    u_hat_df <- randef(solve_out) %>%
+      map(as.matrix) %>%
+      map(~data.frame(id = row.names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE)) %>% 
+      map(~separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
+                    fill = ifelse(str_detect(.$id[1], "[A-Z]{3}[0-9]{2}"), "left", "right"))) %>%
+      map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = ""))
+
+    # Measure accuracy
+    pheno_pred %>% 
+      mutate_at(vars(environment, line_name), parse_character) %>% 
+      left_join(., dplyr::select(u_hat_df$G, -environment), by = "line_name") %>% 
+      left_join(., dplyr::select(u_hat_df$E, -line_name), by = "environment") %>% 
+      mutate(pred = u_hat.x + u_hat.y) %>%
+      dplyr::select(-u_hat.x, -u_hat.y)
+    
+    })
+
+# Create a file for use on MSI
+list_to_save <- c("env_pred", "traits", "pheno", "tp", "vp", "G", "E_1", "E_2")
+save(list = list_to_save, file = file.path(proj_dir, "Predictions/MSI/aGE-BLUP_start_data_MSI.RData"))
+
+
+# Perform a bootstrap correlation and plot
+gblup2_analysis <- gblup2_results %>% 
+  ungroup() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "GBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+gblup2_analysis %>%
+  ggplot(aes(x = environment, y = r_hat)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP2 Prediction Accuracy",
+    subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
+  )
+
+# Combine
+bind_rows(gblup1_analysis, gblup2_analysis) %>%
+  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = "dodge", width = 0.5) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP Prediction Accuracy"
+  )
+  
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+Use data across all 2016 environments for GrainYield
+
+The methods will be divided into two sets of models: those that use environmental covariables and those that do not. Models will be those that use information on observed environments (from the TP) to predict unobserved genotypes in those environments (the VP). Eventually, however, we want to be able to predict unobserved genotypes in totally unobserved environments.
+
+```{r filter.pheno}
+
+env <- sort(c("STP16", "CRM16", "AID16"))
+trt <- "GrainYield"
+
+pheno_use <- pheno %>%
+  filter(environment %in% env) %>%
+  # filter(!environment %in% c("ALV16", "CPE16")) %>%
+  filter(trait == trt) %>%
+  droplevels()
+
+# Subset the environment covariance matrices
+Sig_E_tp <- E_tp %>% 
+  filter(trait == trt) %>%
+  .$adj_cor_mat %>%
+  .[[1]] %>%
+  subset(row.names(.) %in% env, env)
+
+Sig_E_chk <- E_chk %>% 
+  filter(trait == trt) %>%
+  .$adj_cor_mat %>%
+  .[[1]] %>%
+  subset(row.names(.) %in% env, env)
+
+
+# Retrieve just phenos for the tp
+pheno_tp <- pheno_use %>%
+  filter(line_name %in% tp)
+
+# Retrieve just phenos for the vp
+pheno_vp <- pheno_use %>%
+  filter(line_name %in% vp)
+
+# Convert to usable form
+pheno_vp_use <- pheno_vp %>%
+  select(line_name, environment, value) %>%
+  mutate_at(vars(-value), as.character)
+
+pheno_tp_use <- pheno_tp %>%
+  select(line_name, environment, value) %>%
+  mutate_at(vars(-value), as.character)
+
+# Response variable input matrix
+y <- pheno_tp_use %>% 
+  unite(inter, line_name:environment, sep = ":") %>%
+  data.frame(row.names = .$inter) %>%
+  select(value) %>%
+  as.matrix()
+
+
+```
+
+Generally, I will use notation from @Jarquin2014a and @Lopez-Cruz2015
+
+### No Environmental Covariables
+
+#### Main Effects Model 1 (Environments Fixed)
+
+The first model is the main effects model, with no interaction. In this model, information on genotypes is borrowed by using genetic covariables (i.e. SNPs), however information on environments is not shared. It can be written as
+
+Equation 1:
+$$
+y_{ij} = \mu + g_i + E_j + \epsilon_{ij}
+$$
+
+
+where $y_{ij}$ is the phenotypic observation of the $i$th genotype in the $j$th environment, $\mu$ is the grand mean (fixed), $g_i$ is the fixed effect of the $i$th genotype, $E_j$ is the random effect of the $j$th environment, and $\epsilon_{ij}$ is the randome error term associated with the $i$th genotype in the $j$th environment. In mixed model form, this equation can be re-written as
+
+Equation 2:
+$$
+\mathbf{y = X\beta + Zu + e}
+$$
+
+where $\mathbf{X}$ is a design matrix of fixed effects (environments), $\mathbf{\beta}$ is a vector of fixed environmental effects, $\mathbf{Z}$ is a design matrix of random effects (genotypes) and $\mathbf{u}$ is a vector of genotype effects.
+
+$\mathbf{u}$ is assumed to be a random variable such that $\mathbf{u} \sim N(0, \mathbf{G} \sigma^2_g)$, where $G$ is the genomic relationship matrix
+
+Assumptions:
+
+- The genetic variance ($\sigma^2_g$) is constant over environments.
+
+In R code form
+
+
+```{r main.eff.fixed, results='hide'}
+
+# Define the X matrix
+X <- model.matrix(~ -1 + environment, data = pheno_tp)
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name, data = pheno_tp)
+
+
+# Solve the mixed model
+fit_Eg_fixed <- emmremlMultiKernel(y = y, X = X, Zlist = list(Z), Klist = list(A))
+
+# Pull out estimates and predictions
+beta <- fit_Eg_fixed$betahat %>% 
+  data.frame(environment = row.names(.), ., row.names = NULL, stringsAsFactors = FALSE) %>% 
+  mutate(environment = str_replace(environment, "environment", ""))
+
+g <- fit_Eg_fixed$uhat %>% 
+  data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(pred = value)
+
+# Accuracy of the VP
+g_vp <- g %>% 
+  filter(line_name %in% vp)
+
+
+Eg_fixed_acc <- full_join(g_vp, pheno_vp_use, by = c("line_name")) %>% 
+  group_by(environment) %>%
+  do(as.data.frame(boot_cor(.$pred, .$value, 1000)))
+
+
+```
+
+#### Main Effects Model 2 (Eg)
+
+We re-write Equation 1 to reflect the interpretation of the environment effects as random instead of fixed:
+
+Equation 3:
+$$
+\mathbf{y = X\beta + Zu + Wm + e}
+$$
+
+where $X$ is a design matrix of 1s, $\mathbf{\beta}$ is a vector of fixed effects (means), $\mathbf{Z}$ is a design matrix of that relates the phenotypic observations to the random genotypic effects, $\mathbf{u}$ is a vector of genotype effects, $\mathbf{W}$ is a design matrix relating the phenotypic observations to the random environmental effects, and $\mathbf{m}$ is a vector of environmental effects.
+
+$\mathbf{u}$ is assumed to be a random variable such that $\mathbf{u} \sim N(0, \mathbf{G} \sigma^2_g)$, where $G$ is the genomic relationship matrix, and $\mathbf{m}$ is assumed to be a random variable such that $\mathbf{m} \sim N(0, \sigma^2_e)$.
+
+
+In R code form
+
+
+```{r main.eff.int}
+
+# Define the X matrix
+X <- matrix(1, nrow = nrow(y))
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name, data = pheno_tp)
+
+# Define the W matrix
+W <- model.matrix(~ -1 + environment, data = pheno_tp)
+# Define the covariance structure of this matrix (diag)
+E <- diag(ncol(W)) %>%
+  structure(dimnames = list(colnames(W), colnames(W)))
+
+# Solve the mixed model
+fit_Eg_rand <- emmremlMultiKernel(y = y, X = X, Zlist = list(Z, W), Klist = list(A, E), varbetahat = T, varuhat = T)
+
+# Pull out estimates and predictions
+beta <- fit_Eg_rand$betahat
+
+rand <- fit_Eg_rand$uhat %>% 
+  data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  mutate(kernel = str_extract(line_name, pattern = "K_[0-9]"))
+
+g <- rand %>%
+  filter(kernel == "K_1") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(pred = value)
+
+e <- rand %>%
+  filter(kernel == "K_2") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(environment = line_name)
+
+# Accuracy of the VP
+g_vp <- g %>% 
+  filter(line_name %in% vp)
+
+Eg_rand_acc <- full_join(g_vp, pheno_vp_use, by = c("line_name")) %>% 
+  group_by(environment) %>%
+  do(as.data.frame(boot_cor(.$pred, .$value, 1000)))
+
+
+```
+
+
+#### Main Effects and Interaction Model 1 (Eg x E)
+
+This model expands Equation 1 to include an interaction term between the random genotypic effects (informed by markers) and the environmental effects (information not shared).
+
+Equation 4:
+$$
+y_{ij} = \mu + g_i + E_j + gE_{ij} + \epsilon_{ij}
+$$
+
+where $gE_{ij}$ is the random interaction effect of the $i$th genotype in the $j$th environment. In mixed model equation form, Equation 4 is written
+
+Equation 5:
+$$
+\mathbf{y = X\beta + Zu + Wm + Vn + e}
+$$
+
+where $\mathbf{V}$ is a design matrix of random interaction effects and $\mathbf{n}$ is a vector of genotype-environment interaction effects.
+
+$\mathbf{u}$ is assumed to be a random variable such that $\mathbf{u} \sim N(0, \mathbf{G} \sigma^2_g)$, where $\mathbf{G}$ is the genomic relationship matrix, $\mathbf{m}$ is assumed to be a random variable such that $\mathbf{m} \sim N(0, \sigma^2_e)$, and $\mathbf{n}$ is assumed to be a random variable such that $\mathbf{n} \sim N(0, \mathbf{\Sigma}  \sigma^2_{ge})$, where $\Sigma$ defines the covariance structure of the $\mathbf{n}$ effects and takes the form  $\mathbf{\Sigma = [Z_g G Z'_g] \cdot [W_e W'_e]}$, with $\cdot$ indicating the Hadamard product.
+
+In R code form
+
+
+```{r main.eff.rand}
+
+# Define the X matrix
+X <- matrix(1, nrow = nrow(y))
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name, data = pheno_tp)
+
+# Define the W matrix
+W <- model.matrix(~ -1 + environment, data = pheno_tp)
+# Define the covariance structure of this matrix (diag)
+E <- diag(ncol(W)) %>%
+  structure(dimnames = list(colnames(W), colnames(W)))
+
+# Define the V matrix
+V <- model.matrix(~ -1 + line_name:environment, data = pheno_tp)
+
+# Define the covariance structure of this matrix
+## Incidence matrix of all lines
+Z_all <- model.matrix(~ -1 + line_name, data = pheno_use)
+## Incidence matrix of all environments
+W_all <- model.matrix(~ -1 + environment, data = pheno_use)
+
+G_cov <- Z_all %*% A %*% t(Z_all)
+E_cov <- W_all %*% t(W_all)
+
+ge_comb <- interaction(pheno_use$line_name, pheno_use$environment, sep = ":")
+GE <- matrixcalc::hadamard.prod(G_cov, E_cov) %>%
+  structure(dimnames = list(ge_comb, ge_comb))
+
+# Solve the mixed model
+fit_EgxE <- emmremlMultiKernel(y = y, X = X, Zlist = list(Z, W, V), Klist = list(A, E, GE),
+                               varbetahat = T, varuhat = T)
+
+# Pull out estimates and predictions
+beta <- fit_EgxE$betahat
+
+rand <- fit_EgxE$uhat %>% 
+  data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  mutate(kernel = str_extract(line_name, pattern = "K_[0-9]"))
+
+g <- rand %>%
+  filter(kernel == "K_1") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", ""))
+
+e <- rand %>%
+  filter(kernel == "K_2") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(environment = line_name)
+
+ge <- rand %>%
+  filter(kernel == "K_3") %>% 
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  separate(col = line_name, into = c("line_name", "environment"), sep = ":") %>%
+  mutate(line_name = str_replace(line_name, "line_name", ""),
+         environment = str_replace(environment, "environment", ""))
+
+# Combine main effects and GxE
+g_vp <- full_join(g, ge, by = "line_name") %>%
+  filter(line_name %in% vp) %>%
+  select(-starts_with("kernel")) %>%
+  rename(g_0 = value.x, g_1 = value.y) %>%
+  mutate(pred = g_0 + g_1) %>%
+  select(line_name, environment, g_0, g_1, pred) %>%
+  arrange(environment, line_name)
+
+
+EgxE_acc <- full_join(g_vp, pheno_vp_nospread, by = c("line_name", "environment")) %>% 
+  group_by(environment) %>%
+  do(as.data.frame(boot_cor(.$pred, .$value, 1000)))
+
+
+```
+
+
+### Environmental Covariables
+
+Now we will look at models that incorporate environmental covariables. This essentially allows data to be shared across environments, in the same way that data is shared across genotypes. When data is shared across genotypes, we can predict the value of unobserved genotypes. Similarly, sharing data across environments should allow us to predict unobserved environments.
+
+
+#### Main Effects Model 
+
+The model here is similar to Equation 1, except the main effects of environments are predicted by environmental covariables.
+
+Equation 6:
+$$
+y_{ij} = \mu + g_i + e_j + \epsilon_{ij}
+$$
+
+
+where $y_{ij}$ is the phenotypic observation of the $i$th genotype in the $j$th environment, $\mu$ is the grand mean (fixed), $g_i$ is the fixed effect of the $i$th genotype, $e_j$ is the random effect of the $j$th environment, and $\epsilon_{ij}$ is the randome error term associated with the $i$th genotype in the $j$th environment. In mixed model form, this equation can be re-written as
+
+Equation 7 (same as Equation 3):
+$$
+y = X\beta + Zg + We + \epsilon
+$$
+
+where $X$ is a design matrix of 1s, $\beta$ is a vector of fixed effects (means), $Z$ is a design matrix of that relates the phenotypic observations to the random genotypic effects, $g$ is a vector of genotype effects, $W$ is a design matrix relating the phenotypic observations to the random environmental effects, and $e$ is a vector of environmental effects.
+
+$g$ is assumed to be a random variable such that $g \sim N(0, G \sigma^2_g)$, where $G$ is the genomic relationship matrix, and $e$ is assumed to be a random variable such that $e_j \sim N(0, \Omega \sigma^2_e)$, where $\Omega$ is a covariance matrix between environments.
+
+
+In R code form
+
+```{r main.eff.EC}
+
+# Define the X matrix
+X <- matrix(1, nrow = nrow(y))
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name, data = pheno_tp)
+
+# Define the W matrix
+W <- model.matrix(~ -1 + environment, data = pheno_tp)
+# Define the covariance structure of this matrix (diag)
+envs <- as.character(unique(pheno_tp$environment))
+E <- O[envs, envs]
+
+# Solve the mixed model
+fit_eg <- emmremlMultiKernel(y = y, X = X, Zlist = list(Z, W), Klist = list(A, E), varbetahat = T, varuhat = T)
+
+# Pull out estimates and predictions
+beta <- fit_Eg_rand$betahat
+
+rand <- fit_eg$uhat %>% 
+  data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  mutate(kernel = str_extract(line_name, pattern = "K_[0-9]"))
+
+g <- rand %>%
+  filter(kernel == "K_1") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(pred = value)
+
+e <- rand %>%
+  filter(kernel == "K_2") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(environment = line_name)
+
+# Accuracy of the VP
+g_vp <- g %>% 
+  filter(line_name %in% vp)
+
+eg_acc <- full_join(g_vp, pheno_vp_nospread, by = c("line_name")) %>% 
+  group_by(environment) %>%
+  do(as.data.frame(boot_cor(.$pred, .$value, 1000)))
+
+
+```
+
+
+
+#### Main Effects and Interaction Model 1 (Eg x E)
+
+This model expands Equation 6 to include an interaction term between the random genotypic effects (informed by markers) and the environmental effects (informed by environmental covariables).
+
+Equation 8:
+$$
+y_{ij} = \mu + g_i + e_j + ge_{ij} + \epsilon_{ij}
+$$
+
+where $ge_{ij}$ is the random interaction effect of the $i$th genotype in the $j$th environment. In mixed model equation form, Equation 8 is written
+
+Equation 9 (same as equation 5):
+$$
+y = X\beta + Zg + We + Vge + \epsilon
+$$
+
+where $V$ is a design matrix of random interaction effects and $ge$ is a vector of genotype-environment interaction effects.
+
+$g$ is assumed to be a random variable such that $g \sim N(0, G \sigma^2_g)$, where $G$ is the genomic relationship matrix, $e$ is assumed to be a random variable such that $e_j \sim N(0, \Omega \sigma^2_e)$, where $\Omega$ is a covariance matrix between environments, and $ge$ is assumed to be a random variable such that $ge \sim N(0, \Sigma  \sigma^2_{ge})$, where $\Sigma$ defines the covariance structure of the $ge$ effects and takes the form  $\Sigma = [Z_g G Z'_g] \cdot [W_e \Omega W'_e]$, with $\cdot$ indicating the Hadamard product.
+
+In R code form
+
+
+```{r main.eff.inter.EC}
+
+# Define the X matrix
+X <- matrix(1, nrow = nrow(y))
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name, data = pheno_tp)
+
+# Define the W matrix
+W <- model.matrix(~ -1 + environment, data = pheno_tp)
+# Define the covariance structure of this matrix
+envs <- as.character(unique(pheno_tp$environment))
+E <- O[envs, envs]
+
+# Define the V matrix
+V <- model.matrix(~ -1 + line_name:environment, data = pheno_tp)
+
+# Define the covariance structure of this matrix
+## Incidence matrix of all lines
+Z_all <- model.matrix(~ -1 + line_name, data = pheno_use)
+## Incidence matrix of all environments
+W_all <- model.matrix(~ -1 + environment, data = pheno_use)
+
+G_cov <- Z_all %*% A %*% t(Z_all)
+E_cov <- W_all %*% E %*% t(W_all)
+GE <- matrixcalc::hadamard.prod(G_cov, E_cov) %>%
+  structure(dimnames = list(colnames(V), colnames(V)))
+
+# Solve the mixed model
+fit_egxE <- emmremlMultiKernel(y = y, X = X, Zlist = list(Z, W, V), Klist = list(A, E, GE),
+                               varbetahat = T, varuhat = T)
+
+# Pull out estimates and predictions
+beta <- fit_egxE$betahat
+
+rand <- fit_egxE$uhat %>% 
+  data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  mutate(kernel = str_extract(line_name, pattern = "K_[0-9]"))
+
+g <- rand %>%
+  filter(kernel == "K_1") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", ""))
+
+e <- rand %>%
+  filter(kernel == "K_2") %>%
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  rename(environment = line_name)
+
+ge <- rand %>%
+  filter(kernel == "K_3") %>% 
+  mutate(line_name = str_replace(line_name, "K_[0-9]", "")) %>%
+  separate(col = line_name, into = c("line_name", "environment"), sep = ":") %>%
+  mutate(line_name = str_replace(line_name, "line_name", ""),
+         environment = str_replace(environment, "environment", ""))
+
+# Combine main effects and GxE
+g_vp <- full_join(g, ge, by = "line_name") %>%
+  filter(line_name %in% vp) %>%
+  select(-starts_with("kernel")) %>%
+  rename(g_0 = value.x, g_1 = value.y) %>%
+  mutate(pred = g_0 + g_1) %>%
+  select(line_name, environment, g_0, g_1, pred) %>%
+  arrange(environment, line_name)
+
+
+egxe_acc <- full_join(g_vp, pheno_vp_nospread, by = c("line_name", "environment")) %>% 
+  group_by(environment) %>%
+  do(as.data.frame(boot_cor(.$pred, .$value, 1000)))
+
+
+```
+
+
+
+
+
+## Sandbox
+
+
+Attempts from @Lado2016a
+
+```{r}
+
+# Define the X matrix
+X <- matrix(1, nrow = nrow(y))
+
+# Define the Z matrix
+Z <- model.matrix(~ -1 + line_name:environment, data = pheno_tp)
+
+# Create the random effect covariance matrix
+Sig <- kronecker(Sig_E_chk, A, make.dimnames = TRUE)
+
+# Fit the model
+fit <- mixed.solve(y = y, Z = Z, X = X, K = Sig, method = "REML")
+
+# Pull out estimates and predictions
+beta <- fit$beta
+
+rand <- fit$u %>% 
+  data.frame(line_name = names(.), pred = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+  separate(line_name, into = c("environment", "line_name"), sep = ":")
+
+# Get the vp
+u_vp <- rand %>% 
+  filter(line_name %in% vp)
+
+full_join(u_vp, pheno_vp_use, by = c("line_name", "environment")) %>% 
+  group_by(environment) %>% 
+  summarize(r_MG = cor(pred, value, use = "complete.obs"))
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Matrix Construction
 
@@ -85,7 +1250,7 @@ pheno <- S2.MET.BLUE %>%
 
 # Rename the E matrix
 dimnames(E) <- dimnames(E) %>% 
-  map(str_replace, pattern = "16", replacement = "_2016")
+  lapply(str_replace, pattern = "16", replacement = "_2016")
 
 # Filter the genotype matrix
 M <- s2_imputed_mat[c(tp, vp),]
@@ -286,7 +1451,7 @@ mtm_acc <- sapply(X = seq(ncol(y)), FUN = function(i) {
 # Now try with the multivariate function in EMMREML to allow the genetic variance to vary
 ## across environments
 
-# We have to tranpose some matrices
+# We have to transpose some matrices
 y_t <- t(y)
 y_use <- y_t %*% t(Z)
 
@@ -296,7 +1461,7 @@ X_use <- t(X) %*% t(Z)
 
 
 fit_emm <- emmremlMultivariate(Y = y_use, X = X_use, Z = Z_use, K = Sig_G, 
-                               tolpar=1e-4,varBhat=FALSE, varGhat=FALSE, PEVGhat=FALSE, 
+                               tolpar=1e-6,varBhat=FALSE, varGhat=FALSE, PEVGhat=FALSE, 
                                test=FALSE)
 
 # Check accuracy
@@ -304,6 +1469,7 @@ emm_acc <- sapply(X = seq(ncol(y)), FUN = function(i) {
   vp_hat <- fit_emm$Gpred[i,vp]
   y_vp <- y[vp,i]
   cor(vp_hat, y_vp) })
+
 
 
 
@@ -566,5 +1732,39 @@ m.orth <- model.matrix(~a+b, dd, contrasts = list(a = "contr.helmert"))
 ```
 
 
+
+## Appendix A
+
+Compare two methods of design / covariances matrices
+
+Use data from 2 environments to train, 1 to predict
+
+```{r mat.setup}
+
+# Assign training and prediction environments
+env_train <- sort(c("STP16", "CRM16"))
+env_pred <- c("FND16")
+
+# Only use height data
+pheno_use <- pheno %>%
+  filter(trait == "PlantHeight")
+
+# Pull out the phenotypic data
+pheno_train <- pheno_use %>% 
+  filter(environment %in% env_train, line_name %in% tp)
+pheno_pred <- pheno_use %>% 
+  filter(environment %in% env_pred, line_name %in% vp)
+
+
+# Create the incidence matrix for the genotypes
+Z_g <- model.matrix(~ -1 + line_name, data = pheno_train)
+# Same for environments
+Z_e <- model.matrix(~ -1 + environment, data = pheno_train)
+
+
+```
+
+
+The first method is from @Jarquin2014 where the environment effect vector $
 
 
