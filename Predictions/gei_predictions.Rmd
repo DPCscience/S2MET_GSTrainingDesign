@@ -10,7 +10,7 @@ This notebook will outline some procedures to predict genotypic values in the pr
 
 First we must define some directories and load packages
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 
 library(tidyverse)
 library(stringr)
@@ -308,10 +308,21 @@ Z_e <- model.matrix(~ -1 + environment, data = pheno_train)
 
 Z_ge <- model.matrix(~ -1 + line_name:environment, data = pheno_train)
 
+sommer_time <- system.time({
+  solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
+                                                 E = list(Z = Z_e, K = E_1), 
+                                                 GE = list(Z = Z_ge, K = O_1)))
+  
+})
 
-solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
-                                               E = list(Z = Z_e, K = E_1), 
-                                               GE = list(Z = Z_ge, K = O_1)))
+sherlock_time <- system.time({
+  solve_out <- 
+    SherLMMock::SherLMMock(y = y_train, 
+                           X = X, 
+                           Zlist = list(Z_g, Z_e, Z_ge),
+                           Glist = list(G, E_1, O_1))
+  
+})
 
 # Extract the random effects
 u_hat <- randef(solve_out)
@@ -494,6 +505,10 @@ gblup2_results <- expand.grid(environment = env_pred, trait = traits, stringsAsF
     
     })
 
+# Save the results
+save_file <- file.path(pred_dir, "Results/gblup2_results.RData")
+save("gblup2_results", file = save_file)
+
 # Perform a bootstrap correlation and plot
 gblup2_analysis <- gblup2_results %>% 
   ungroup() %>% 
@@ -516,20 +531,6 @@ gblup2_analysis %>%
     subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
   )
 
-# Combine
-bind_rows(gblup1_analysis, gblup2_analysis) %>%
-  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(position = "dodge", width = 0.5) +
-  facet_grid(facets = trait ~ .) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ylab("Prediction Accuracy") +
-  xlab("Environment") +
-  labs(
-    title = "G-BLUP Prediction Accuracy"
-  )
-  
-
 
 ```
 
@@ -545,24 +546,23 @@ $$
 
 Here we will only use the procedure where all training environments (minus the prediction environment) are used to predict that prediction environment.
 
-The following will be used in a R script and run on MSI
-
 
 ```{r a.geblup2}
 
 # Create a df of traits
-results_df <- data_frame(trait = traits, results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
+a_geblup2_results <- data_frame(trait = traits, 
+                                results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
 
 # Iterate over all traits
-for (i in seq(nrow(results_df))) {
+for (i in seq(nrow(a_geblup2_results))) {
   
-  results_df$results[[i]] <- results_df$results[[i]] %>%
+  a_geblup2_results$results[[i]] <- a_geblup2_results$results[[i]] %>%
     group_by(environment) %>%
     do(pred_out = {
       
       # Training and prediction phenotypes
-      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == results_df$trait[i])
-      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == results_df$trait[i])
+      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == a_geblup2_results$trait[i])
+      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == a_geblup2_results$trait[i])
       
       # Create the y vector
       y_train <- pheno_train %>% 
@@ -609,21 +609,22 @@ for (i in seq(nrow(results_df))) {
   
 }
 
-# Create a file for use on MSI
-list_to_save <- c("env_pred", "traits", "pheno", "tp", "vp", "G", "E_1", "E_2")
-save(list = list_to_save, file = file.path(proj_dir, "Predictions/MSI/aGE-BLUP_start_data_MSI.RData"))
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/a_geblup2_results.RData")
+save("a_geblup2_results", file = save_file)
 
 
 # Perform a bootstrap correlation and plot
-gblup2_analysis <- gblup2_results %>% 
-  ungroup() %>% 
+a_geblup2_analysis <- a_geblup2_results %>% 
+  unnest() %>% 
   unnest() %>% 
   group_by(environment, trait) %>% 
   do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
-  mutate(model = "GBLUP2") %>% 
+  mutate(model = "aGEBLUP2") %>% 
   dplyr::select(model, environment, trait, names(.))
 
-gblup2_analysis %>%
+a_geblup2_analysis %>%
   ggplot(aes(x = environment, y = r_hat)) +
   geom_col() +
   geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
@@ -632,12 +633,12 @@ gblup2_analysis %>%
   ylab("Prediction Accuracy") +
   xlab("Environment") +
   labs(
-    title = "G-BLUP2 Prediction Accuracy",
+    title = "Additive GE-BLUP2 Prediction Accuracy",
     subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
   )
 
 # Combine
-bind_rows(gblup1_analysis, gblup2_analysis) %>%
+bind_rows(a_geblup2_analysis, gblup2_analysis) %>%
   ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
   geom_col(position = "dodge") +
   geom_errorbar(position = "dodge", width = 0.5) +
@@ -654,6 +655,131 @@ bind_rows(gblup1_analysis, gblup2_analysis) %>%
 ```
 
 
+#### Interaction GE-BLUP Model
+
+These models will account for the random environmental effect (using the environmental relationship matrix) and random interaction between genotype and environment
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{Uq} + \mathbf{e} 
+$$
+
+
+Here we will only use the procedure where all training environments (minus the prediction environment) are used to predict that prediction environment.
+
+```{r i.geblup2}
+
+# Create a df of traits
+i_geblup2_results <- data_frame(trait = traits, 
+                                results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
+
+# Iterate over all traits
+for (i in seq(nrow(i_geblup2_results))) {
+  
+  i_geblup2_results$results[[i]] <- i_geblup2_results$results[[i]] %>%
+    group_by(environment) %>%
+    do(pred_out = {
+      
+      # Training and prediction phenotypes
+      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == i_geblup2_results$trait[i])
+      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == i_geblup2_results$trait[i])
+      
+      # Create the y vector
+      y_train <- pheno_train %>% 
+        dplyr::select(line_name, environment, value) %>% 
+        unite(gen_env, line_name, environment, sep = ":") %>% 
+        as.data.frame() %>%
+        remove_rownames() %>% 
+        column_to_rownames("gen_env") %>% 
+        as.matrix()
+      
+      # Create the fixed effect vector (environment)
+      X <- model.matrix(~ 1, data = pheno_train)
+      
+      # Create the incidence matrix for the genotypes
+      Z_g <- model.matrix(~ -1 + line_name, data = pheno_train) %>%
+        structure(dimnames = list(NULL, str_replace(colnames(.), "line_name", "")))
+      
+      # Same for environments
+      Z_e <- model.matrix(~ -1 + environment, data = pheno_train) %>% 
+        structure(dimnames = list(NULL, str_replace(colnames(.), "environment", "")))
+      
+      Z_ge <- model.matrix(~ -1 + line_name:environment, data = pheno_train) %>%
+        structure(dimnames = list(NULL, str_replace_all(colnames(.), c("line_name" = "", "environment" = "")) %>%
+                                    str_split(":") %>% 
+                                    map(rev) %>% 
+                                    map_chr(str_c, collapse = ":") ))
+
+
+      solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
+                                                     E = list(Z = Z_e, K = E_1), 
+                                                     GE = list(Z = Z_ge, K = O_1)))
+      
+      
+      # Convert to data.frames
+      u_hat_df <- randef(solve_out) %>%
+        map(as.matrix) %>%
+        map(~data.frame(id = row.names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE)) %>% 
+        map(~separate(data = ., col = id, into = c("environment", "line_name"), sep = ":", 
+                      fill = ifelse(str_detect(.$id[1], "[A-Z]{3}[0-9]{2}"), "right", "left"))) %>%
+        map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = ""))
+  
+      # Measure accuracy
+      pheno_pred %>% 
+        mutate_at(vars(environment, line_name), parse_character) %>% 
+        left_join(., dplyr::select(u_hat_df$G, -environment), by = "line_name") %>% 
+        left_join(., dplyr::select(u_hat_df$E, -line_name), by = "environment") %>% 
+        left_join(., u_hat_df$GE, by = c("line_name", "environment")) %>% 
+        mutate(pred = u_hat.x + u_hat.y + u_hat) %>%
+        dplyr::select(-u_hat.x, -u_hat.y, -u_hat)
+      
+      })
+  
+}
+
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/a_geblup2_results.RData")
+save("a_geblup2_results", file = save_file)
+
+
+# Perform a bootstrap correlation and plot
+a_geblup2_analysis <- a_geblup2_results %>% 
+  unnest() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "aGEBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+a_geblup2_analysis %>%
+  ggplot(aes(x = environment, y = r_hat)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "Additive GE-BLUP2 Prediction Accuracy",
+    subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
+  )
+
+# Combine
+bind_rows(a_geblup2_analysis, gblup2_analysis) %>%
+  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = "dodge", width = 0.5) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP Prediction Accuracy"
+  )
+  
+
+
+```
 
 
 
