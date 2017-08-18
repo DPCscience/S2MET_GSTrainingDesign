@@ -18,22 +18,20 @@ load(file.path(MSI_proj_dir, "aGE-BLUP_start_data_MSI.RData"))
 # Find the number of cores
 n_cores <- detectCores()
 
-# Divide the df into cores
-model_cores <- expand.grid(environment = env_pred, trait = traits, stringsAsFactors = FALSE) %>%
-  mutate(core = sort(rep(seq(n_cores), length = nrow(.)))) %>%
-  split(.$core)
+# Create a df of traits
+results_df <- data_frame(trait = traits, results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
 
 
-# Iterate over all traits and environments
-aGEBLUP2_E1_results <- mclapply(X = model_cores, FUN = function(df_core) {
+# Iterate over all traits
+for (i in seq(nrow(results_df))) {
   
-  df_core %>%
-    group_by(environment, trait) %>%
+  results_df$results[[i]] <- results_df$results[[i]] %>%
+    group_by(environment) %>%
     do(pred_out = {
       
       # Training and prediction phenotypes
-      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == .$trait)
-      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == .$trait)
+      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == results_df$trait[i])
+      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == results_df$trait[i])
       
       # Create the y vector
       y_train <- pheno_train %>% 
@@ -66,8 +64,7 @@ aGEBLUP2_E1_results <- mclapply(X = model_cores, FUN = function(df_core) {
         map(~data.frame(id = row.names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE)) %>% 
         map(~separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
                       fill = ifelse(str_detect(.$id[1], "[A-Z]{3}[0-9]{2}"), "left", "right"))) %>%
-        map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", 
-                       replacement = ""))
+        map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = ""))
       
       # Measure accuracy
       pheno_pred %>% 
@@ -77,8 +74,9 @@ aGEBLUP2_E1_results <- mclapply(X = model_cores, FUN = function(df_core) {
         mutate(pred = u_hat.x + u_hat.y) %>%
         dplyr::select(-u_hat.x, -u_hat.y)
       
-    }) }, mc.cores = n_cores)
-
+    })
+  
+}
 # ## Use the E_2 relationship matrix
 # 
 # # Iterate over all traits and environments
@@ -137,5 +135,5 @@ aGEBLUP2_E1_results <- mclapply(X = model_cores, FUN = function(df_core) {
 
 # Save the results
 save_file <- file.path(MSI_proj_dir, "aGE-BLUP_results.RData")
-list_to_save <- c("aGEBLUP2_E1_results")
+list_to_save <- c("results_df")
 save(list = list_to_save, file = save_file)
