@@ -64,9 +64,14 @@ for (i in seq(nrow(i_geblup2_results))) {
                                     map_chr(str_c, collapse = ":") ))
       
       
-      solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
-                                                     E = list(Z = Z_e, K = E_1), 
-                                                     GE = list(Z = Z_ge, K = O_1)))
+      # solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G), 
+      #                                                E = list(Z = Z_e, K = E_1), 
+      #                                                GE = list(Z = Z_ge, K = O_1)))
+      
+      # The #2 matrices
+      solve_out <- mmer(Y = y_train, X = X, Z = list(G = list(Z = Z_g, K = G),
+                                                     E = list(Z = Z_e, K = E_2),
+                                                     GE = list(Z = Z_ge, K = O_2)))
       
       
       # Convert to data.frames
@@ -92,6 +97,7 @@ for (i in seq(nrow(i_geblup2_results))) {
 
 
 # Save the results
-save_file <- file.path(MSI_proj_dir, "iGEBLUP_results.RData")
+# save_file <- file.path(MSI_proj_dir, "iGEBLUP_results.RData")
+save_file <- file.path(MSI_proj_dir, "iGEBLUP_results2.RData")
 list_to_save <- c("i_geblup2_results")
 save(list = list_to_save, file = save_file)
