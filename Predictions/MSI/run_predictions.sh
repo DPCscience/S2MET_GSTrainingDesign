@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#PBS -l walltime=04:00:00,mem=2gb,nodes=1:ppn=16
+#PBS -l walltime=12:00:00,mem=24gb,nodes=1:ppn=1
 #PBS -N S2_MET_iGEBLUP_predictios
 #PBS -M neyha001@umn.edu
 #PBS -m abe
