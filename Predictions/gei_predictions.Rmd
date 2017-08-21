@@ -369,6 +369,11 @@ traits <- pheno %>%
   pull() %>% 
   parse_character()
 
+# Save data for MSI
+save_file <- file.path(pred_dir, "MSI/S2MET_MSI_prediction_material.RData")
+# List of objects to save
+object_list <- c("E_1", "E_2", "O_1", "O_2", "env_pred", "G", "pheno", "tp", "traits", "vp")
+save(list = object_list, file = save_file)
 
 ```
 

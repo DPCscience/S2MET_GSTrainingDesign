@@ -13,7 +13,7 @@ package_dir <- "/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-libra
 invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
 
 # Load the starting data
-load(file.path(MSI_proj_dir, "aGE-BLUP_start_data_MSI.RData"))
+load(file.path(MSI_proj_dir, "S2MET_MSI_prediction_material.RData"))
 
 # Find the number of cores
 n_cores <- detectCores()
