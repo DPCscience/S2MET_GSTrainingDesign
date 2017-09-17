@@ -69,6 +69,11 @@ if (MSI) {
   
 }
 
+# # Data to save to MSI
+# to_save <- c("entry_list", "s2_imputed_mat", "S2_MET_tidy", "S2_MET_BLUE", 
+#              "one_year_mat", "multi_year_mat")
+# save(list = to_save, file = file.path(pred_dir, "MSI/S2MET_MSI_prediction_material.RData"))
+
 # Separate into entries and checks
 entries <- entry_list %>% 
   filter(Class %in% c("S2TP", "S2C1R"))
