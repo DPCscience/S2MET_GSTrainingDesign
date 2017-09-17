@@ -19,10 +19,6 @@ load(file.path(MSI_proj_dir, "S2MET_MSI_prediction_material.RData"))
 n_cores <- detectCores()
 
 # Create a df of traits
-results_df <- data_frame(trait = traits, results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
-
-
-# Create a df of traits
 i_geblup2_results <- data_frame(trait = traits, 
                                 results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
 
@@ -33,9 +29,12 @@ for (i in seq(nrow(i_geblup2_results))) {
     group_by(environment) %>%
     do(pred_out = {
       
+      # Determine the environment
+      env <- .$environment
+      
       # Training and prediction phenotypes
-      pheno_train <- filter(pheno, line_name %in% tp, environment != .$environment, trait == i_geblup2_results$trait[i])
-      pheno_pred <- filter(pheno, line_name %in% vp, environment == .$environment, trait == i_geblup2_results$trait[i])
+      pheno_train <- filter(pheno, line_name %in% tp, environment != env, trait == i_geblup2_results$trait[i])
+      pheno_pred <- filter(pheno, line_name %in% vp, environment == env, trait == i_geblup2_results$trait[i])
       
       # Create the y vector
       y_train <- pheno_train %>% 

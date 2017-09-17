@@ -84,22 +84,30 @@ world_nass <- full_join(x = world1, y = nass_data1, by = c("region" = "State", "
 
 # Map
 g <- ggplot(data = world_nass, aes(x = long, y = lat, group = group)) +
-  geom_polygon(aes(fill = Value / 1000), color = NA) +
+  # geom_polygon(aes(fill = Value / 1000), color = NA) +
+  geom_polygon(fill = "grey70") +
   geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "white") +
   geom_point(data = trial_info_summ, aes(x = long, y = lat, group = Location, size = 1)) +
   coord_fixed(ratio = 1.5, xlim = c(-125, -65), ylim = c(35, 50)) +
   scale_fill_continuous(low = "lightgreen", high = "darkgreen", na.value = "grey", 
                         name = "2016 Planted\nBarley Acres\n(thousand)") +
-  scale_size_continuous(name = "Project Site", labels = "", range = c(2)) + 
+  scale_size_continuous(name = "Project Site", labels = "", range = c(2)) +
   xlab("Longitude") +
   ylab("Latitude") +
   theme(
     panel.background = element_blank(),
     legend.title = element_text(size = 8),
     legend.text = element_text(size = 8),
-    legend.position = "bottom")
+    # legend.position = "bottom"
+    legend.position = "none",
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  )
 
-ggsave(filename = "sites_and_barley_acreage.jpg", plot = g, width = 4, height = 2.667, dpi = 500)
+# ggsave(filename = "sites_and_barley_acreage.jpg", plot = g, width = 4, height = 2.667, dpi = 500)
+ggsave(filename = "sites.jpg", plot = g, width = 5, height = 3.75, dpi = 500)
+
 
 ```
 

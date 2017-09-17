@@ -1,0 +1,556 @@
+---
+title: "S2 MET Environmental Clustering and Prediction"
+output: html_notebook
+bibliography: C:/Users/Jeff/Documents/Literature/library.bib
+---
+
+## Introduction
+
+This notebook covers prediction by clustering environments to reduce GxE and then perform predictions
+
+
+```{r setup}
+
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(neyhart)
+library(rrBLUP)
+library(gws)
+library(pbr)
+library(cluster)
+library(purrrlyr)
+
+
+# The head directory
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+fig_dir <- file.path(proj_dir, "Figures/")
+
+# Prediction directory
+pred_dir <- file.path(proj_dir, "Predictions")
+
+# Other directories
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
+pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/Phenotype_Data/"
+# Directory where entry data is located
+entry_dir <- file.path(proj_dir, "Plant_Materials")
+
+
+## Load Data
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+
+# Load the phenotypic data
+load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
+load(file.path(pheno_dir, "S2_MET_tidy.RData"))
+
+# Load environmental data
+load(file.path(env_var_dir, "environmental_data_compiled.RData"))
+
+## Load the entry data
+entry_list <- file.path(entry_dir, "S2MET_project_entries.xlsx") %>%
+  read_excel()
+
+# Separate into entries and checks
+entries <- entry_list %>% 
+  filter(Class %in% c("S2TP", "S2C1R"))
+
+## Separate the TP and VP
+tp <- entries %>%
+  filter(Class == "S2TP") %>%
+  pull(Line)
+
+vp <- entries %>%
+  filter(Class == "S2C1R") %>%
+  pull(Line)
+
+checks <- entry_list %>% 
+    filter(Class == "Check") %>%
+    pull(Line)
+
+# Filter the BLUEs for the entries
+S2_MET_BLUE_entries <- S2_MET_BLUE %>%
+  filter(line_name %in% c(tp, vp))
+
+S2_MET_tidy_use <- S2_MET_tidy %>%
+  mutate_at(vars(line_name), as.character) %>%
+  mutate(line = ifelse(!line_name %in% checks, line_name, "00check"),
+         check = ifelse(line_name %in% checks, line_name, "00entry"),
+         ge = interaction(line, environment))
+
+```
+
+
+
+
+### Clustering Methods
+
+What is the point of clustering?
+    + Prediction of single environments is difficult.
+    + Clustering will take environments and group them into mega-environemnts of similar environments.
+    + The idea is that environments should be clustered such that the GxE deviation within the mega-environment is minimized. Thus the mean of each line within each mega-environment is more representative of the genotypic value of that line in that mega-environment. Therefore the prediction accuracy of other lines in a new environment that is within that mega-environment will be more accurate.
+
+I will look at four different distance methods:
+    + Performance data on all lines in all environments
+    + GxE deviation BLUPs from all environments (PCA)
+    + Factor analysis to reduce cross-over interaction
+    + Environmental covariates (via principal components)
+    
+The measure for performance data distance comes from the formula in @Bernardo2010 and the GxE BLUP deviation comes from @Beavis1996. These clustering methods may be better, since the use the observed phenotypes, however they do not allow a new environment to be predicted.
+
+The fourth method will use environment data to cluster environments. As long as the environmental data explains some of the GxE, this method should be effective. It's greatest strength comes from the ability to predict new environments.
+
+
+### Evaluating Cluster Effectiveness
+
+If the GxE deviation is minimized within mega-environments, the heritability should improve. To compare clustering effectiveness, the heritability of selection within mega-environments will be compared to the base heritability and the heritability of selection across mega-environments
+
+The base heritability will be calculated as:
+
+$$
+H = \frac{\sigma^2_g}
+{\sigma^2_g + \frac{\sigma^2_{ge}}{n_e} + \frac{\sigma^2_\epsilon}{n_r n_e}},
+$$
+
+where $\sigma^2_g$ is the genetic variance, $\sigma^2_{ge}}$ is the GxE variance, $\sigma^2_\epsilon$ is the variance due to experimental error, $n_e$ is the number of environments and $n_r$ is the number of replications within environments.
+
+The heritability of selection across mega-environments is
+
+$$
+H_a = \frac{\sigma^2_g}
+{\sigma^2_g + \frac{\sigma^2_{gs}}{n_s} + \frac{\sigma^2_{ge(s)}}{n_e} + \frac{\sigma^2_\epsilon}{n_r n_e}},
+$$
+
+where $\sigma^2_{gs}$ is the variance due to genotype-by-megaenvironment interactions, $\sigma^2_{ge(s)}$ is the variance of GxE interactions nested within megaenvironments, and $n_s$ is the number of mega-environments.
+
+The heritability of selection within mega-environments is
+
+$$
+H_w = \frac{\sigma^2_g + \sigma^2_{gs}}
+{\sigma^2_g + \sigma^2_{gs} + n_s \bigg( \frac{\sigma^2_{ge(s)}}{n_e} + \frac{\sigma^2_\epsilon}{n_r n_e} \bigg)},
+$$
+
+
+## Methods
+
+I will perform clustering first and then predictions later
+
+### Clustering
+
+Cluster first on all available data - including the validation set
+
+Load and plot results of the heritabilities
+
+```{r cluster.herit}
+
+load_file <- file.path(proj_dir, "Predictions/Results/cluster_heritability.RData")
+load(load_file)
+
+# Make some adjustments
+herit_clust1 <- herit_clust %>% 
+  unnest(out_df) %>% 
+  mutate(method = str_replace_all(method, "_clust", ""), 
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi")))
+
+# Plot
+(g_herit_clust <- herit_clust1 %>% 
+    ggplot(aes(x = k, y = heritability, col = method, shape = selection)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(. ~ trait) +
+    labs(
+      title = "Broad-Sense Heritability of Clustering Methods",
+      subtitle = "'across' defines the heritability of selection across all mega-environments, and\n'within' defines the heritability of selection within mega-environments",
+      caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
+    ))
+  
+# Save it
+save_file <- file.path(fig_dir, "cluster_heritability.jpg")
+ggsave(filename = save_file, plot = g_herit_clust, width = 10, height = 8)
+
+
+```
+
+
+### Predictions
+
+Using the clustering procedures from above, perform predictions among mega-environments
+
+```{r cluster.pred}
+
+# Load the data 
+load_file <- file.path(proj_dir, "Predictions/Results/cluster_predictions.RData")
+load(load_file)
+
+pred_acc_clust1 <- cluster_pred_acc %>% 
+  unnest(acc_df) %>% 
+  unnest() %>% 
+  select(-`NA`) %>%
+  mutate(method = str_replace_all(method, "_clust", ""), 
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi")))
+
+# Take the mean accuracy within clusters for each k and method
+pred_acc_clust_mean <- pred_acc_clust1 %>% 
+  group_by_at(vars(trait:cluster)) %>% 
+  summarize(mean_acc = mean(r_hat, na.rm = T))
+
+# Now take the mean across each k and plot
+(g_pred_acc_mean <- pred_acc_clust_mean %>% 
+    group_by(trait, method, k) %>% 
+    summarize(mean_acc_k = mean(mean_acc, na.rm = T)) %>%
+    ggplot(aes(x = k, y = mean_acc_k, col = method)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(. ~ trait) +
+    labs(
+      title = "Prediction Accuracy Within Clusters",
+      subtitle = expression("For each of ", ita,
+      caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
+    ))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Appendix
+
+### Cluster Testing
+
+Use the gauch_soy dataset to test these procedures
+
+```{r app.setup}
+
+# Find balanced environments
+gauch_soy <- gauch.soy %>% 
+  modify_if(is.factor, as.character) %>%
+  group_by(env, gen) %>% 
+  filter(n_distinct(rep) == 4) %>%
+  group_by(env) %>%
+  filter(n_distinct(gen) == 7) %>%
+  ungroup() %>%
+  mutate(ge = interaction(gen, env, sep = ":"))
+
+```
+
+
+
+#### Method 1 - Distance and Gap Method
+
+```{r D}
+# Fit a model for the base heritability
+base_mod <- lmer(yield ~ (1|gen) + env + (1|gen:env) + (1|env:rep), data = gauch_soy)
+
+# Calculate the base heritability
+herit_base <- base_herit(mod = base_mod)
+
+
+
+
+# Find the pairwise environmental distances
+D <- dist_env(x = gauch_soy)
+
+# Max clusters
+max_K <- n_distinct(gauch_soy$env) - 1
+
+# Use gap method to determine mega-environments
+D_cluster <- clusGap(x = as.matrix(D), FUNcluster = hclusCut, 
+                     K.max = max_K, B = 500, verbose = FALSE)
+
+# Determine the optimal number of clusters by the "firstSEmax" method
+opt_clust <- maxSE(D_cluster$Tab[,"gap"], D_cluster$Tab[,"SE.sim"], method = "firstSEmax", SE.factor = 1)
+
+# Cluster and cut the tree
+clusters <- hclusCut(x = D, k = 2)$cluster %>%
+  data_frame(env = names(.), cluster = .)
+
+# Assign clusters to the dataset
+gauch_soy_clust <- gauch_soy %>%
+  full_join(., clusters, "env") %>%
+  mutate(cluster = as.factor(cluster))
+
+
+# Fit a new model with clusters
+clust_mod <- lmer(yield ~ (1|gen) + env + (1|env:rep) + (1|gen:env) + (1|gen:env:cluster), 
+                  data = gauch_soy_clust)
+
+# Heritability
+(herit_clust <- clust_herit(clust_mod))
+
+# Combine
+herit <- add_row(herit_clust, selection = "base", heritability = herit_base)
+
+
+
+```
+
+
+Attempt here an iterative procedure where clusters are formed based on the heritability of selection within the clusters
+
+```{r clust.iter}
+
+# Max clusters
+max_K <- n_distinct(gauch_soy$env) - 1
+
+# Build a data.frame
+cluster_out <- data_frame(k = seq(max_K))
+
+# Iterate over clusters
+cluster_herit <- cluster_out %>%
+  by_row(function(line) {
+    
+    # Cluster and cut the tree
+    clusters <- hclusCut(x = D, k = line$k)$cluster %>%
+      data_frame(env = names(.), cluster = .)
+
+    # Assign clusters to the dataset
+    gauch_soy_clust <- left_join(gauch_soy, clusters, "env") %>%
+      mutate(cluster = as.factor(cluster))
+
+
+    # Fit a new model with clusters
+    clust_mod <- lmer(yield ~ (1|gen) + env + (1|env:rep) + (1|gen:env) + (1|gen:env:cluster), 
+                      data = gauch_soy_clust)
+    
+    clust_herit(clust_mod) }, .to = "out_df")
+
+
+# Plot
+cluster_herit %>%
+  unnest() %>%
+  ggplot(aes(x = k, y = heritability, group = selection, col = selection)) +
+  geom_point() +
+  geom_line()
+
+
+
+```
+
+
+#### Method 2 - PCA of GxE BLUP effects
+
+```{r gxe.blup.pca}
+
+# GxE term
+ge_term <- "ge"
+
+# Re-fit the base model
+base_mod <- lmer(yield ~ (1|gen) + env + (1|ge) + (1|env:rep), data = gauch_soy)
+
+# Get the interaction blups and form a matrix
+ge_effect <- ranef(base_mod)[[ge_term]] %>%
+  rownames_to_column("grp") %>%
+  separate(grp, c("gen", "env")) %>%
+  rename(effect = `(Intercept)`) %>%
+  spread(env, effect) %>% 
+  remove_rownames() %>% 
+  column_to_rownames("gen") %>% 
+  as.matrix()
+
+# Run PCA
+ge_svd <- prcomp(ge_effect)
+
+# Variance explained by first two PCs
+(ge_svd$sdev / sum(ge_svd$sdev))[1:2] %>%
+  structure(names = c("PC1", "PC2"))
+
+# Plot
+plot(ge_svd$rotation)
+
+# Calculate a distance using first two PCs
+D2 <- dist(ge_svd$rotation[,1:2])
+
+plot(hclust(D2, method = "average"))
+
+
+## Iterate over k = 1, 2, ..., K clusters and calculate within and between H
+
+# Max clusters
+max_K <- n_distinct(gauch_soy$env) - 1
+
+# Use gap method to determine mega-environments
+D2_cluster <- clusGap(x = as.matrix(D2), FUNcluster = hclusCut, 
+                     K.max = max_K, B = 500, verbose = FALSE)
+
+# Determine the optimal number of clusters by the "firstSEmax" method
+opt_clust <- maxSE(D2_cluster$Tab[,"gap"], D2_cluster$Tab[,"SE.sim"], method = "firstSEmax", SE.factor = 1)
+
+# Build a data.frame
+cluster_out <- data_frame(k = seq(max_K))
+
+# Iterate over clusters
+cluster_herit <- cluster_out %>%
+  by_row(function(line) {
+    
+    # Cluster and cut the tree
+    clusters <- hclusCut(x = D2, k = line$k)$cluster %>%
+      data_frame(env = names(.), cluster = .)
+
+    # Assign clusters to the dataset
+    gauch_soy_clust <- left_join(gauch_soy, clusters, "env") %>%
+      mutate(cluster = as.factor(cluster))
+
+
+    # Fit a new model with clusters
+    clust_mod <- lmer(yield ~ (1|gen) + env + (1|env:rep) + (1|gen:env) + (1|gen:env:cluster), 
+                      data = gauch_soy_clust)
+    
+    clust_herit(clust_mod) }, .to = "out_df")
+
+
+# Plot
+cluster_herit %>%
+  unnest() %>%
+  ggplot(aes(x = k, y = heritability, group = selection, col = selection)) +
+  geom_point() +
+  geom_line() + 
+  geom_vline(xintercept = opt_clust)
+  
+
+
+```
+
+
+#### Method 3 - Factor Analysis
+
+The factor analysis is performed on the random effect of the *i*th genotype in the *j*th environment
+
+```{r factor.analysis}
+
+library(psych)
+
+# Response of genotype in environment
+gauch_soy_geno_mean_df <- gauch_soy %>% 
+  group_by(gen, env) %>% 
+  summarize(mean = mean(yield)) %>%
+  mutate(ge = interaction(gen, env))
+
+gauch_soy_geno_mean <- gauch_soy_geno_mean_df%>% 
+  spread(env, mean) %>% 
+  as.data.frame() %>% 
+  remove_rownames() %>% 
+  column_to_rownames("gen") %>%
+  scale() %>%
+  as.data.frame()
+
+fa2 <- fa(r = gauch_soy_geno_mean, nfactors = 2, rotate = "varimax")
+
+# Get the loadings and residuals
+delta <- fa2$loadings
+psi <- diag(fa2$uniquenesses)
+
+# Estimate of the correlation matrix
+sigma <- tcrossprod(delta) + psi
+
+# Identity matrix for the relationship between genotypes
+A <- diag(n_distinct(gauch_soy$gen)) %>%
+  structure(dimnames = list(unique(gauch_soy$gen), unique(gauch_soy$gen)))
+
+G <- kronecker(sigma, A, make.dimnames = TRUE) 
+
+# Model frame
+mf <- model.frame(formula = mean ~ gen + env + ge, data = gauch_soy_geno_mean_df)
+
+y <- model.response(mf)
+X <- model.matrix(~ env, data = mf)
+Zlist <- model.matrix(~ ge, data = mf)
+
+fa_fit <- mixed.solve(y = y, X = X, Z = Zlist$ge$Z, K = G)
+
+# Cluster using the environmental loadings
+delta_dist <- hclust(dist(delta), method = "average")
+max_K <- length(delta_dist$labels) - 1
+
+# Iterate over cluster numbers
+# Assign clusters
+# Refit the FA model using clusters instead of environments
+# Find the loadings and apply to all environments in the cluster
+cluster_out <- data_frame(k = seq(max_K, 1))
+
+# Iterate over clusters
+cluster_herit <- cluster_out %>%
+  by_row(function(line) {
+    
+    # Cut the tree
+    clusters <- cutree(delta_dist, k = line$k) %>%
+      data_frame(env = names(.), cluster = .) %>%
+      mutate(cluster = str_c("C", cluster))
+    
+    gauch_soy_geno_mean_df <- gauch_soy %>% 
+      left_join(., clusters, "env") %>%
+      group_by(gen, cluster) %>% 
+      mutate(mean = mean(yield)) %>%
+      distinct(gen, env, cluster, mean)
+
+    gauch_soy_geno_mean <- gauch_soy_geno_mean_df %>% 
+      distinct(gen, cluster, mean) %>%
+      spread(cluster, mean) %>% 
+      as.data.frame() %>% 
+      remove_rownames() %>% 
+      column_to_rownames("gen") %>%
+      scale() %>%
+      as.data.frame()
+
+    fa2 <- fa(r = gauch_soy_geno_mean, nfactors = 2, rotate = "varimax")
+
+    # Get the loadings and residuals
+    delta <- fa2$loadings
+    psi <- fa2$uniquenesses %>%
+      data_frame(cluster = names(.), psi = .)
+    
+    # Convert loadings to data frame and merge
+    delta_df <- structure(delta, class = "matrix") %>% 
+      as.data.frame() %>% 
+      rownames_to_column("cluster") 
+    
+    # Merge
+    cluster_att_merge <- list(gauch_soy_geno_mean_df, delta_df, psi) %>% 
+      reduce(left_join, "cluster") %>%
+      ungroup() %>% 
+      distinct(env, MR1, MR2, psi) %>% 
+      as.data.frame() %>%
+      column_to_rownames("env") %>% 
+      as.matrix()
+    
+    delta_mat <- cluster_att_merge[,c("MR1", "MR2")]
+    psi_mat <- cluster_att_merge[,"psi"]
+    
+    sigma <- tcrossprod(delta_mat) + diag(psi_mat)
+    
+    # New covariance matrix
+    G <- kronecker(sigma, A, make.dimnames = TRUE) 
+
+    # Solve
+    fa_fit <- mixed.solve(y = y, X = X, Z = Zlist, K = G)
+    
+    # Assign clusters to the dataset
+    gauch_soy_clust <- left_join(gauch_soy, clusters, "env") %>%
+      mutate(cluster = as.factor(cluster))
+
+
+    # Fit a new model with clusters
+    clust_mod <- lmer(yield ~ (1|gen) + env + (1|env:rep) + (1|gen:env) + (1|gen:env:cluster), 
+                      data = gauch_soy_clust)
+    
+    clust_herit(clust_mod) }, .to = "out_df")
+
+
+
+# Fit full model
+mixed.solve()
+fa_fit <-
+
+```
+

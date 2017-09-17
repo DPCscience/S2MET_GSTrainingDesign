@@ -7,8 +7,9 @@ output: html_notebook
 
 This notebook will provide some phenotyping data summaries for the S2MET project. It will include:
 
-1. Heritability estimates
-2. Correlations among environments
+1. Basic model for g + e + gxe
+2. Heritability estimates
+3. Correlations among environments
 
 ```{r prep}
 
@@ -17,7 +18,7 @@ library(broom)
 library(stringr)
 library(readxl)
 library(pbr)
-library(EMMREML)
+library(lmerTest)
 
 # Directories
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
@@ -36,19 +37,19 @@ entry_list <- read_excel(entry_file)
 # Grab the entry names that are not checks
 tp <- entry_list %>% 
   filter(Class == "S2TP") %>% 
-  .[["Line"]]
+  pull(Line)
 
 vp <- entry_list %>% 
   filter(Class == "S2C1R") %>% 
-  .[["Line"]]
+  pull(Line)
 
 # Define the checks
 checks <- entry_list %>% 
   filter(Class == "Check") %>% 
-  .[["Line"]]
+  pull(Line)
 
 entries <- entry_list %>% 
-  .[["Line"]]
+  pull(Line)
 
 
 ```
@@ -181,46 +182,31 @@ s2_met_tidy_model <- S2_MET_tidy %>%
   mutate(value_rescale = as.numeric(scale(value))) %>%
   ungroup()
 
-# Group by trait and environment
-var_comp_env <- s2_met_tidy_model %>%
-  group_by(trait, environment) %>%
-  # Calculate the average number of replications
-  mutate(avg_rep = pbr:::avg_reps(table(line_name))) %>%
-  group_by(avg_rep, add = TRUE) %>%
-  do({
-    # Fit the model
-    fit <- lmer(value_rescale ~ check + (1|line), data = .)
-    
-    # Extract variances and return variance components
-    as.data.frame(VarCorr(fit)) %>%
-      select(grp, vcov) %>% 
-      spread(grp, vcov) %>% 
-      rename(V_G = line, V_R = Residual)
-  })
-
-
-# Group by trait and calculate variance components
-var_comp <- s2_met_tidy_model %>%
+# Fit a model across all environments
+s2met_mod_all <- s2_met_tidy_model %>%
   group_by(trait) %>%
-  # Calculate the average number of replications and other counts
-  mutate(e = n_distinct(environment),
-         l = n_distinct(location),
-         y = n_distinct(year),
-         avg_rep = pbr:::avg_reps(table(line_name)) / e) %>%
-  group_by(e, l, y, avg_rep, add = TRUE) %>%
-  do({
-    # Fit the model
-    fit <- lmer(value_rescale ~ check + (1|line) + environment + (1|line:location) + (1|line:year) + (1|line:location:year), data = .)
-    
-    # Extract variances and return variance components
-    as.data.frame(VarCorr(fit)) %>%
-      select(grp, vcov) %>% 
-      spread(grp, vcov) %>% 
-      rename(V_G = line, V_GL = `line:location`, V_GY = `line:year`, V_GLY = `line:location:year`, V_R = Residual)
-  })
-
+  do(mod = lmer(value_rescale ~ (1|line) + check + environment + (1|line:environment), data = .),
+     mod2 = lmer(value_rescale ~ (1|line) + check + environment, data = .))
+  
 
 ```
+
+
+First test for significance of the $gt$ term using a liklihood ratio test
+
+```{r lrt}
+# Perform the liklihood ratio test for GxE
+s2met_mod_lrt <- s2met_mod_all %>% 
+  group_by(trait) %>%
+  do(tidy(anova(.$mod[[1]], .$mod2[[1]])))
+
+s2met_mod_lrt %>% 
+  select(trait, p.value) %>% 
+  na.omit()
+  
+
+```
+
 
 
 
@@ -237,13 +223,13 @@ H = \frac{ \sigma^2_G }{ \sigma^2_G  + \frac{\sigma^2_R}{r} }
 $$
 
 
-where $e$ is the number of environments and $r$ is the number of replicates. In the case of an augmented design, where the number of replicates is uneven, the following formula is used to calculate the average number of replications:
+where $e$ is the number of environments and $r$ is the number of replicates. In the case of an augmented design, where the number of replicates is uneven, the following formula is used to calculate the harmonic mean of the number of replications:
 
 $$
-r = \frac{ R_1 - \frac{R_2}{R_1} }{n - 1}
+p_h = \frac{n}{\sum^n_{i=1} \frac{1}{p_i}}
 $$
 
-where $R_1 = \sum r_i$, $R_2 = \sum r^2_i$, $r_i$ is the number of replications of the $i$th entry, and $n$ is the number of entries (i.e. $n_g + n_c$).
+where $p_h$ is the harmonic mean, $n$ is the number of genotypes, and $p_i$ is the number of replicates of the *i*th genotype.
 
 
 Here are the estimates of heritability for each trait in each environment
@@ -252,15 +238,16 @@ Here are the estimates of heritability for each trait in each environment
 ```{r calc.herit.env}
 
 # Calculate a heritability per environment
-herit_env <- model_vars_env %>%
-  group_by(trait, environment) %>%
-  summarize(H = V_G / (V_G + (V_R / avg_rep)))
-
-    
+s2met_herit <- s2_mod %>% 
+  mutate(herit = list(herit(mod, geno.term = "line"))) %>%
+  ungroup() %>%
+  select(-mod) %>%
+  unnest()
 
 # Plot
-herit_env %>%
-  ggplot(aes(x = environment, y = H)) +
+s2met_herit %>%
+  filter(Term == "heritability") %>%
+  ggplot(aes(x = environment, y = Estimate)) +
   geom_col() +
   facet_grid(trait ~ ., switch = "y") +
   ylab("Heritability") +
@@ -277,6 +264,15 @@ Now calculate heritability across all environments
 ```{r calc.herit}
 
 # Calculate a heritability over all environments
+s2met_herit_all <- s2met_mod_all %>%
+  mutate(herit = list(herit(mod, geno.term = "line", env.term = "environment", 
+                            ge.term = "line:environment"))) %>%
+  ungroup() %>%
+  select(-mod, -mod2) %>%
+  unnest()
+
+
+
 (herit <- var_comp %>%
   group_by(trait) %>%
   summarize(V_G = V_G, V_GL = V_GL, V_GY = V_GY, V_GLY = V_GLY, V_R = V_R,
