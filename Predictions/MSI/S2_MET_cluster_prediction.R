@@ -402,93 +402,107 @@ clust_df_tomodel <- clust_df %>%
 # First do this using clusters created by all entries
 cluster_pred_acc_all <- clust_df_tomodel %>%
   filter(population == "all") %>%
+  rename(tr = trait) %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
+  rowwise() %>%
+  
+  # Cut the tree and assign environments to clusters
+  mutate(clust_df = list({
+    cutree(clust, k = k) %>%
+      data_frame(cluster_env = names(.), cluster = .) %>%
+      mutate(cluster = paste("cluster", cluster, sep = "")) })) %>%
+  
+  # Add the clusters to the BLUEs data
+  mutate(phenos_cluster = list({
+    left_join(S2_MET_BLUE_entries, clust_df, c("environment" = "cluster_env")) %>%
+      mutate(cluster = as.factor(cluster)) %>%
+      filter(trait == as.character(tr)) %>%
+      droplevels() })) %>%
+  
+  # Create a df of the the training and testing data for each cluster/environmnent
+  mutate(pred_df = list({
+    clust_df %>% 
+      group_by(cluster, cluster_env) %>% 
+      do(data = filter(phenos_cluster, cluster == .$cluster)) %>%
+      mutate(
+        train_df = list(filter(data, environment != cluster_env, line_name %in% tp)), 
+        test_df = list(filter(data, environment == cluster_env, line_name %in% vp))) %>%
+      select(-data) })) %>%
+  
+  # Remove unnecessary columns
+  select(-clust_df, -phenos_cluster)
+  
+
+# Run predictions
+cluster_pred_acc_all_results <- cluster_pred_acc_all %>%
+  unnest(pred_df) %>%
   # Split by core
-  split(.$core) #%>%
-  # mclapply(X = ., FUN = function(core_df) {
-
-core_df <- cluster_pred_acc_all[[1]]
-
+  split(.$core) %>%
+  mclapply(X = ., FUN = function(core_df) {
+    
     core_df %>%
       by_row(function(i) {
-        
-        # Cluster and cut the tree
-        clusters <- cutree(i$clust[[1]], k = i$k) %>%
-          data_frame(cluster_env = names(.), cluster = .) %>%
-          mutate(cluster = paste("cluster", cluster, sep = ""))
-        
-        # Assign clusters to the dataset
-        S2_MET_BLUE_entries_clust <- 
-          left_join(S2_MET_BLUE_entries, clusters, c("environment" = "cluster_env")) %>%
-          mutate(cluster = as.factor(cluster)) %>%
-          filter(trait == as.character(i$trait)) %>%
-          droplevels()
-        
-        # Create a df of the the training and testing data for each cluster/environmnent
-        pred_df <- clusters %>% 
-          group_by(cluster, cluster_env) %>% 
-          do(data = filter(S2_MET_BLUE_entries_clust, cluster == .$cluster)) %>%
-          mutate(
-            train_df = list(filter(data, environment != cluster_env, line_name %in% tp)), 
-            test_df = list(filter(data, environment == cluster_env, line_name %in% vp))) %>%
-          select(-data)
-        
-        # Iterate and detemine prediction accuracy
-        pred_df %>% 
-          by_row(function(ii) pred_acc_out(train_df = ii$train_df[[1]], 
-                                           test_df = ii$test_df[[1]]),
-                 .to = "acc") %>%
-          select(cluster, pred_env = cluster_env, acc)
-        
-      }, .to = "acc_df") }, mc.cores = n_cores)
+        pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
+        }, .to = "acc") %>%
+      select(cluster, pred_env = cluster_env, acc)
+    
+    }, mc.cores = n_cores)
         
 
 # Next do this using clusters created by only the tp entries
 # Remove the EC clustering strategies because these are identical to above
 cluster_pred_acc_tp <- clust_df_tomodel %>%
   filter(population == "tp", !str_detect(method, "EC")) %>%
+  rename(tr = trait) %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
+  rowwise() %>%
+  
+  # Cut the tree and assign environments to clusters
+  mutate(clust_df = list({
+    cutree(clust, k = k) %>%
+      data_frame(cluster_env = names(.), cluster = .) %>%
+      mutate(cluster = paste("cluster", cluster, sep = "")) })) %>%
+  
+  # Add the clusters to the BLUEs data
+  mutate(phenos_cluster = list({
+    left_join(S2_MET_BLUE_entries, clust_df, c("environment" = "cluster_env")) %>%
+      mutate(cluster = as.factor(cluster)) %>%
+      filter(trait == as.character(tr)) %>%
+      droplevels() })) %>%
+  
+  # Create a df of the the training and testing data for each cluster/environmnent
+  mutate(pred_df = list({
+    clust_df %>% 
+      group_by(cluster, cluster_env) %>% 
+      do(data = filter(phenos_cluster, cluster == .$cluster)) %>%
+      mutate(
+        train_df = list(filter(data, environment != cluster_env, line_name %in% tp)), 
+        test_df = list(filter(data, environment == cluster_env, line_name %in% vp))) %>%
+      select(-data) })) %>%
+  
+  # Remove unnecessary columns
+  select(-clust_df, -phenos_cluster)
+
+# Run predictions
+cluster_pred_acc_tp_results <- cluster_pred_acc_tp %>%
+  unnest(pred_df) %>%
   # Split by core
   split(.$core) %>%
   mclapply(X = ., FUN = function(core_df) {
+    
     core_df %>%
       by_row(function(i) {
+        pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
+      }, .to = "acc") %>%
+      select(cluster, pred_env = cluster_env, acc)
     
-        # Cluster and cut the tree
-        clusters <- cutree(i$clust[[1]], k = i$k) %>%
-          data_frame(cluster_env = names(.), cluster = .) %>%
-          mutate(cluster = paste("cluster", cluster, sep = ""))
-        
-        # Assign clusters to the dataset
-        S2_MET_BLUE_entries_clust <- 
-          left_join(S2_MET_BLUE_entries, clusters, c("environment" = "cluster_env")) %>%
-          mutate(cluster = as.factor(cluster)) %>%
-          filter(trait == as.character(i$trait)) %>%
-          droplevels()
-        
-        # Create a df of the the training and testing data for each cluster/environmnent
-        pred_df <- clusters %>% 
-          group_by(cluster, cluster_env) %>% 
-          do(data = filter(S2_MET_BLUE_entries_clust, cluster == .$cluster)) %>%
-          mutate(
-            train_df = list(filter(data, environment != cluster_env, line_name %in% tp)), 
-            test_df = list(filter(data, environment == cluster_env, line_name %in% vp))) %>%
-          select(-data)
-        
-        # Iterate and detemine prediction accuracy
-        pred_df %>% 
-          by_row(function(ii) pred_acc_out(train_df = ii$train_df[[1]], 
-                                           test_df = ii$test_df[[1]]),
-                 .to = "acc") %>%
-          select(cluster, pred_env = cluster_env, acc)
-        
-      }, .to = "acc_df") }, mc.cores = n_cores)
+  }, mc.cores = n_cores)
 
 # Save the data
 save_file <- file.path(pred_dir, "Results/cluster_predictions.RData")
-save("cluster_pred_acc_all", "cluster_pred_acc_tp", file = save_file)
+save("cluster_pred_acc_tp_results", "cluster_pred_acc_all_results", file = save_file)
  
 
 
