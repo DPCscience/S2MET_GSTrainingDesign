@@ -344,57 +344,56 @@ clust_df_tomodel <- clust_df %>%
   by_row(function(i) seq(2, length(i$clust[[1]]$order) - 1), .to = "k") %>% 
   unnest(k, .drop = FALSE)
 
-# Iterate over clusters and calculate the heritabilities
-# Do this first for all entries in the population
-cluster_herit_all <- clust_df_tomodel %>%
-  filter(population == "all") %>%
-  by_row(function(i) {
-    
-    # Cluster and cut the tree
-    clusters <- cutree(i$clust[[1]], k = i$k) %>%
-      data_frame(environment = names(.), cluster = .)
-    
-    # Assign clusters to the dataset
-    S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
-      mutate(cluster = as.factor(cluster)) %>%
-      filter(trait == i$trait) %>%
-      droplevels()
-    
-    # Fit a new model with clusters
-    clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
-                        (1|line:environment) + (1|line:environment:cluster), 
-                      data = S2_MET_tidy_use_clust)
-    
-    clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
-    
-
-# Repeat for just the TP
-cluster_herit_tp <- clust_df_tomodel %>%
-  filter(population == "tp", !str_detect(method, "EC")) %>%
-  by_row(function(i) {
-    
-    # Cluster and cut the tree
-    clusters <- cutree(i$clust[[1]], k = i$k) %>%
-      data_frame(environment = names(.), cluster = .)
-    
-    # Assign clusters to the dataset
-    S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
-      mutate(cluster = as.factor(cluster)) %>%
-      filter(trait == i$trait, line_name %in% c(tp, checks)) %>%
-      droplevels()
-    
-    # Fit a new model with clusters
-    clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
-                        (1|line:environment) + (1|line:environment:cluster), 
-                      data = S2_MET_tidy_use_clust)
-    
-    clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
-
-# Save the data
-save_file <- file.path(pred_dir, "Results/cluster_heritability.RData")
-save("cluster_herit_all", "cluster_herit_tp", file = save_file)
-
-# TESTING
+# # Iterate over clusters and calculate the heritabilities
+# # Do this first for all entries in the population
+# cluster_herit_all <- clust_df_tomodel %>%
+#   filter(population == "all") %>%
+#   by_row(function(i) {
+#     
+#     # Cluster and cut the tree
+#     clusters <- cutree(i$clust[[1]], k = i$k) %>%
+#       data_frame(environment = names(.), cluster = .)
+#     
+#     # Assign clusters to the dataset
+#     S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
+#       mutate(cluster = as.factor(cluster)) %>%
+#       filter(trait == i$trait) %>%
+#       droplevels()
+#     
+#     # Fit a new model with clusters
+#     clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
+#                         (1|line:environment) + (1|line:environment:cluster), 
+#                       data = S2_MET_tidy_use_clust)
+#     
+#     clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
+#     
+# 
+# # Repeat for just the TP
+# cluster_herit_tp <- clust_df_tomodel %>%
+#   filter(population == "tp", !str_detect(method, "EC")) %>%
+#   by_row(function(i) {
+#     
+#     # Cluster and cut the tree
+#     clusters <- cutree(i$clust[[1]], k = i$k) %>%
+#       data_frame(environment = names(.), cluster = .)
+#     
+#     # Assign clusters to the dataset
+#     S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
+#       mutate(cluster = as.factor(cluster)) %>%
+#       filter(trait == i$trait, line_name %in% c(tp, checks)) %>%
+#       droplevels()
+#     
+#     # Fit a new model with clusters
+#     clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
+#                         (1|line:environment) + (1|line:environment:cluster), 
+#                       data = S2_MET_tidy_use_clust)
+#     
+#     clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
+# 
+# # Save the data
+# save_file <- file.path(pred_dir, "Results/cluster_heritability.RData")
+# save("cluster_herit_all", "cluster_herit_tp", file = save_file)
+# 
 
 ## Prediction
 # For all clusters, drop one environment and use the remaining environments to predict
@@ -407,9 +406,9 @@ cluster_pred_acc_all <- clust_df_tomodel %>%
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
   # Split by core
   split(.$core) #%>%
-  mclapply(X = ., FUN = function(core_df) {
+  # mclapply(X = ., FUN = function(core_df) {
 
-#core_df <- cluster_pred_acc_all[[1]]
+core_df <- cluster_pred_acc_all[[1]]
 
     core_df %>%
       by_row(function(i) {
