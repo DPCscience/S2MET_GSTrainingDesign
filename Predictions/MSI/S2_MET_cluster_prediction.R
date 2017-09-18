@@ -3,11 +3,11 @@
 ## This script is designed to be run on a local machine or on MSI
 
 # Is this MSI?
-MSI <- TRUE
+MSI <- FALSE
 
 # List of packages
 packages <- c("tidyverse", "stringr", "readxl", "rrBLUP", "gws", "pbr", "purrrlyr",
-              "psych", "parallel")
+              "psych", "parallel", "mclust")
 
 if (MSI) {
   ## MSI directories
@@ -20,9 +20,6 @@ if (MSI) {
   # Load all packages
   invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
   
-  # Detect cores
-  n_cores <- detectCores()
-  
 } else {
   ## Local directories
   # The head directory
@@ -30,11 +27,11 @@ if (MSI) {
   
   # Load all packages
   invisible(lapply(packages, library, character.only = TRUE))
-  
-  # Local = 1 core
-  n_cores <- 1
-  
+
 }
+
+# Detect cores
+n_cores <- detectCores()
 
 # Prediction directory
 pred_dir <- file.path(proj_dir, "Predictions")
@@ -188,7 +185,7 @@ pred_acc_out <- function(train_df, test_df) {
     Z <- model.matrix(~ line_name, data = mf)
     
     # Solve the mixed model
-    rr_out <- mixed.solve(y = y, Z = Z, K = G_1, X = X, method = "REML")
+    rr_out <- mixed.solve(y = y, X = X, Z = Z, K = G_1)
 
     # Extract the predictions for the test set
     test_pred <- rr_out$u %>% 
@@ -344,56 +341,59 @@ clust_df_tomodel <- clust_df %>%
   by_row(function(i) seq(2, length(i$clust[[1]]$order) - 1), .to = "k") %>% 
   unnest(k, .drop = FALSE)
 
-# # Iterate over clusters and calculate the heritabilities
-# # Do this first for all entries in the population
-# cluster_herit_all <- clust_df_tomodel %>%
-#   filter(population == "all") %>%
-#   by_row(function(i) {
-#     
-#     # Cluster and cut the tree
-#     clusters <- cutree(i$clust[[1]], k = i$k) %>%
-#       data_frame(environment = names(.), cluster = .)
-#     
-#     # Assign clusters to the dataset
-#     S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
-#       mutate(cluster = as.factor(cluster)) %>%
-#       filter(trait == i$trait) %>%
-#       droplevels()
-#     
-#     # Fit a new model with clusters
-#     clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
-#                         (1|line:environment) + (1|line:environment:cluster), 
-#                       data = S2_MET_tidy_use_clust)
-#     
-#     clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
-#     
-# 
-# # Repeat for just the TP
-# cluster_herit_tp <- clust_df_tomodel %>%
-#   filter(population == "tp", !str_detect(method, "EC")) %>%
-#   by_row(function(i) {
-#     
-#     # Cluster and cut the tree
-#     clusters <- cutree(i$clust[[1]], k = i$k) %>%
-#       data_frame(environment = names(.), cluster = .)
-#     
-#     # Assign clusters to the dataset
-#     S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
-#       mutate(cluster = as.factor(cluster)) %>%
-#       filter(trait == i$trait, line_name %in% c(tp, checks)) %>%
-#       droplevels()
-#     
-#     # Fit a new model with clusters
-#     clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) + 
-#                         (1|line:environment) + (1|line:environment:cluster), 
-#                       data = S2_MET_tidy_use_clust)
-#     
-#     clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
-# 
-# # Save the data
-# save_file <- file.path(pred_dir, "Results/cluster_heritability.RData")
-# save("cluster_herit_all", "cluster_herit_tp", file = save_file)
-# 
+
+
+
+# Iterate over clusters and calculate the heritabilities
+# Do this first for all entries in the population
+cluster_herit_all <- clust_df_tomodel %>%
+  filter(population == "all") %>%
+  by_row(function(i) {
+
+    # Cluster and cut the tree
+    clusters <- cutree(i$clust[[1]], k = i$k) %>%
+      data_frame(environment = names(.), cluster = .)
+
+    # Assign clusters to the dataset
+    S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
+      mutate(cluster = as.factor(cluster)) %>%
+      filter(trait == i$trait) %>%
+      droplevels()
+
+    # Fit a new model with clusters
+    clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) +
+                        (1|line:environment) + (1|line:environment:cluster),
+                      data = S2_MET_tidy_use_clust)
+
+    clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
+
+
+# Repeat for just the TP
+cluster_herit_tp <- clust_df_tomodel %>%
+  filter(population == "tp") %>%
+  by_row(function(i) {
+
+    # Cluster and cut the tree
+    clusters <- cutree(i$clust[[1]], k = i$k) %>%
+      data_frame(environment = names(.), cluster = .)
+
+    # Assign clusters to the dataset
+    S2_MET_tidy_use_clust <- left_join(S2_MET_tidy_use, clusters, "environment") %>%
+      mutate(cluster = as.factor(cluster)) %>%
+      filter(trait == i$trait, line_name %in% c(tp, checks)) %>%
+      droplevels()
+
+    # Fit a new model with clusters
+    clust_mod <- lmer(value ~ (1|line) + environment + (1|line:cluster) +
+                        (1|line:environment) + (1|line:environment:cluster),
+                      data = S2_MET_tidy_use_clust)
+
+    clust_herit(clust_mod, g = "line", e = "environment", cl = "cluster") }, .to = "out_df")
+
+# Save the data
+save_file <- file.path(pred_dir, "Results/cluster_heritability.RData")
+save("cluster_herit_all", "cluster_herit_tp", file = save_file)
+
 
 ## Prediction
 # For all clusters, drop one environment and use the remaining environments to predict
@@ -401,7 +401,7 @@ clust_df_tomodel <- clust_df %>%
 # Iterate over clusters
 # First do this using clusters created by all entries
 cluster_pred_acc_all <- clust_df_tomodel %>%
-  filter(population == "all") %>%
+  filter(population == "all", between(k, 4, 6)) %>%
   rename(tr = trait) %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
@@ -434,26 +434,20 @@ cluster_pred_acc_all <- clust_df_tomodel %>%
   select(-clust_df, -phenos_cluster)
   
 
-# Run predictions
 cluster_pred_acc_all_results <- cluster_pred_acc_all %>%
   unnest(pred_df) %>%
-  # Split by core
-  split(.$core) %>%
-  mclapply(X = ., FUN = function(core_df) {
-    
-    core_df %>%
-      by_row(function(i) {
-        pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
-        }, .to = "acc") %>%
-      select(cluster, pred_env = cluster_env, acc)
-    
-    }, mc.cores = n_cores)
+  by_row(function(i) {
+    pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
+  }, .to = "acc") %>%
+  select(cluster, pred_env = cluster_env, acc)
+  
+
         
 
 # Next do this using clusters created by only the tp entries
 # Remove the EC clustering strategies because these are identical to above
 cluster_pred_acc_tp <- clust_df_tomodel %>%
-  filter(population == "tp", !str_detect(method, "EC")) %>%
+  filter(population == "tp", between(k, 4, 6)) %>%
   rename(tr = trait) %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
@@ -488,17 +482,10 @@ cluster_pred_acc_tp <- clust_df_tomodel %>%
 # Run predictions
 cluster_pred_acc_tp_results <- cluster_pred_acc_tp %>%
   unnest(pred_df) %>%
-  # Split by core
-  split(.$core) %>%
-  mclapply(X = ., FUN = function(core_df) {
-    
-    core_df %>%
-      by_row(function(i) {
-        pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
-      }, .to = "acc") %>%
-      select(cluster, pred_env = cluster_env, acc)
-    
-  }, mc.cores = n_cores)
+  by_row(function(i) {
+    pred_acc_out(train_df = i$train_df[[1]], test_df = i$test_df[[1]])
+  }, .to = "acc") %>%
+  select(cluster, pred_env = cluster_env, acc)
 
 # Save the data
 save_file <- file.path(pred_dir, "Results/cluster_predictions.RData")

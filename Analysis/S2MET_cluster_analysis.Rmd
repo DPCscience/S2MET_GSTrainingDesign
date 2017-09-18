@@ -141,6 +141,33 @@ I will perform clustering first and then predictions later
 
 Cluster first on all available data - including the validation set
 
+Load the heritability results
+
+```{r cluster.herit.load}
+
+load_file <- file.path(proj_dir, "Predictions/Results/cluster_heritability.RData")
+load(load_file)
+
+# Combine the tp and all datasets
+cluster_herit <- bind_rows(cluster_herit_all, cluster_herit_tp)
+
+
+
+
+# Max clusters
+max_K <- n_distinct(gauch_soy$env) - 1
+
+# Use gap method to determine mega-environments
+D2_cluster <- clusGap(x = as.matrix(D2), FUNcluster = hclusCut, 
+                     K.max = max_K, B = 500, verbose = FALSE)
+
+# Determine the optimal number of clusters by the "firstSEmax" method
+opt_clust <- maxSE(D2_cluster$Tab[,"gap"], D2_cluster$Tab[,"SE.sim"], method = "firstSEmax", SE.factor = 1)
+
+
+
+```
+
 Load and plot results of the heritabilities
 
 ```{r cluster.herit}
@@ -149,7 +176,7 @@ load_file <- file.path(proj_dir, "Predictions/Results/cluster_heritability.RData
 load(load_file)
 
 # Make some adjustments
-herit_clust1 <- herit_clust %>% 
+herit_clust1 <- bind_rows(cluster_herit_all, cluster_herit_tp) %>% 
   unnest(out_df) %>% 
   mutate(method = str_replace_all(method, "_clust", ""), 
          method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi")))
@@ -159,7 +186,7 @@ herit_clust1 <- herit_clust %>%
     ggplot(aes(x = k, y = heritability, col = method, shape = selection)) + 
     geom_point() + 
     geom_line() + 
-    facet_grid(. ~ trait) +
+    facet_grid(population ~ trait) +
     labs(
       title = "Broad-Sense Heritability of Clustering Methods",
       subtitle = "'across' defines the heritability of selection across all mega-environments, and\n'within' defines the heritability of selection within mega-environments",
@@ -168,7 +195,7 @@ herit_clust1 <- herit_clust %>%
   
 # Save it
 save_file <- file.path(fig_dir, "cluster_heritability.jpg")
-ggsave(filename = save_file, plot = g_herit_clust, width = 10, height = 8)
+ggsave(filename = save_file, plot = g_herit_clust, width = 10, height = 10)
 
 
 ```
