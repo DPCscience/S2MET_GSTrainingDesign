@@ -3,7 +3,7 @@
 ## This script is designed to be run on a local machine or on MSI
 
 # Is this MSI?
-MSI <- FALSE
+MSI <- TRUE
 
 # List of packages
 packages <- c("tidyverse", "stringr", "readxl", "rrBLUP", "gws", "pbr", "purrrlyr",
@@ -394,6 +394,7 @@ cluster_herit_tp <- clust_df_tomodel %>%
 save_file <- file.path(pred_dir, "Results/cluster_heritability.RData")
 save("cluster_herit_all", "cluster_herit_tp", file = save_file)
 
+# TESTING
 
 ## Prediction
 # For all clusters, drop one environment and use the remaining environments to predict
@@ -405,8 +406,11 @@ cluster_pred_acc_all <- clust_df_tomodel %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
   # Split by core
-  split(.$core) %>%
+  split(.$core) #%>%
   mclapply(X = ., FUN = function(core_df) {
+
+#core_df <- cluster_pred_acc_all[[1]]
+
     core_df %>%
       by_row(function(i) {
         

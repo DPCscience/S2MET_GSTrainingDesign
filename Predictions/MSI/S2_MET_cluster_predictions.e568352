@@ -1,0 +1,89 @@
+Loading tidyverse: ggplot2
+Loading tidyverse: tibble
+Loading tidyverse: tidyr
+Loading tidyverse: readr
+Loading tidyverse: purrr
+Loading tidyverse: dplyr
+Conflicts with tidy packages ---------------------------------------------------
+filter(): dplyr, stats
+lag():    dplyr, stats
+Loading pbr: lme4
+Loading pbr: agridat
+
+Attaching package: 'psych'
+
+The following objects are masked from 'package:ggplot2':
+
+    %+%, alpha
+
+Loading required namespace: GPArotation
+Joining, by = c("population", "trait")
+Joining, by = c("population", "trait")
+Joining, by = c("population", "trait")
+Warning message:
+Column `population` joining character vector and factor, coercing into character vector 
+Warning message:
+Grouping rowwise data frame strips rowwise nature 
+There were 50 or more warnings (use warnings() to see the first 50)
+There were 50 or more warnings (use warnings() to see the first 50)
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Warning message:
+In mclapply(X = ., FUN = function(core_df) { :
+  all scheduled cores encountered errors in user code
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Joining, by = "line_name"
+Warning message:
+In mclapply(X = ., FUN = function(core_df) { :
+  all scheduled cores encountered errors in user code
