@@ -211,36 +211,49 @@ Using the clustering procedures from above, perform predictions among mega-envir
 load_file <- file.path(proj_dir, "Predictions/Results/cluster_predictions.RData")
 load(load_file)
 
-pred_acc_clust1 <- cluster_pred_acc %>% 
-  unnest(acc_df) %>% 
-  unnest() %>% 
+pred_acc_results1 <- pred_acc_results %>% 
+  unnest(acc) %>% 
   select(-`NA`) %>%
-  mutate(method = str_replace_all(method, "_clust", ""), 
-         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi")))
+  filter(!is.na(trait)) %>%
+  mutate(method = str_replace_all(method, "_clust$", ""), 
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi", "no_cluster"))) %>%
+  complete(trait, method, pred_env)
 
-# Take the mean accuracy within clusters for each k and method
-pred_acc_clust_mean <- pred_acc_clust1 %>% 
-  group_by_at(vars(trait:cluster)) %>% 
-  summarize(mean_acc = mean(r_hat, na.rm = T))
+# How many environments have no predictions?
+n_blank_env <- pred_acc_results1 %>% 
+  group_by(pred_env) %>% 
+  summarize(p_na = mean(is.na(r_hat))) %>%
+  filter(p_na == 1) %>%
+  nrow()
 
-# Now take the mean across each k and plot
-(g_pred_acc_mean <- pred_acc_clust_mean %>% 
-    group_by(trait, method, k) %>% 
-    summarize(mean_acc_k = mean(mean_acc, na.rm = T)) %>%
-    ggplot(aes(x = k, y = mean_acc_k, col = method)) + 
-    geom_point() + 
-    geom_line() + 
-    facet_grid(. ~ trait) +
-    labs(
-      title = "Prediction Accuracy Within Clusters",
-      subtitle = expression("For each of ", ita,
-      caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
-    ))
+# Plot the accuracy to predict each environment under different clustering procedures
+(g_pred_clust <- pred_acc_results1 %>% 
+  # Filter completely blank envs
+  group_by(pred_env) %>%
+  filter(mean(is.na(r_hat)) < 1) %>%
+  ggplot(aes(x = pred_env, y = r_hat, group = method, fill = method)) + 
+  geom_col(position = "dodge") + 
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = method), position = "dodge") +
+  facet_grid(trait ~ .) +
+  labs(
+    title = "Prediction Accuracy Within Clusters",
+    subtitle = expression("Compared prediction accuracy of each environment under k = 5 clusters or without clustering"),
+    caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)))
+
+# Save it
+save_file <- file.path(fig_dir, "cluster_k5_predictions.jpg")
+ggsave(filename = save_file, plot = g_pred_clust, width = 12, height = 8)
+
+
 
 ```
 
 
+It appears that the effect of clustering on the accuracy to predict each environment is highly dependent on the environment itself. Clustering seems to help in some cases - it is worth exploring the conditions under which prediction accuracy is improved for an environmen (compared to not clustering).
 
+Hypothesis: the heritability 
 
 
 
