@@ -79,11 +79,13 @@ stage_two <- S2_MET_BLUEs %>%
     
     # Find the number of environments
     n_e <- plot_table %>% 
+      ifelse(. > 1, 1, .) %>%
       rowSums() %>% 
       harm_mean()
     
     # Now replicates
     n_r <- plot_table %>% 
+      rowSums() %>%
       harm_mean()
     
     # Use regress function
