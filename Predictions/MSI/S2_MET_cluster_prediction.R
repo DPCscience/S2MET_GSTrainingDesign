@@ -111,11 +111,6 @@ M <- s2_imputed_mat[c(tp, vp), ]
 G_1 <- A.mat(X = M, min.MAF = 0, max.missing = 1)
 
 
-
-
-
-
-
 # Define some functions for calculating heritability
 
 # Functions
@@ -427,7 +422,7 @@ clust_df_tomodel <- clust_df %>%
 # Iterate over clusters
 # First do this using clusters created by all entries
 cluster_pred_acc_setup <- clust_df_tomodel %>%
-  filter(k == 5) %>%
+  filter(between(k, 3, 6)) %>%
   rename(tr = trait) %>%
   # Add core
   mutate(core = sort(rep(seq(1, n_cores), length.out = nrow(.)))) %>%
@@ -492,8 +487,7 @@ nocluster_pred_acc_all_results <- nocluster_pred_acc_all %>%
 
 # Combine
 pred_acc_results <- bind_rows(
-  cluster_pred_acc_all_results,
-  cluster_pred_acc_tp_results,
+  cluster_pred_acc,
   nocluster_pred_acc_all_results)
 
 # Save the data

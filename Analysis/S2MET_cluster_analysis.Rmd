@@ -211,13 +211,24 @@ Using the clustering procedures from above, perform predictions among mega-envir
 load_file <- file.path(proj_dir, "Predictions/Results/cluster_predictions.RData")
 load(load_file)
 
+## Pull out the no-cluster results
+pred_acc_no_cluster <- pred_acc_results %>%
+  unnest(acc) %>% 
+  select(-`NA`) %>%
+  mutate(method = str_replace_all(method, "_clust$", ""), 
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi", "no_cluster")),
+         pred_env = as.factor(pred_env),
+         k = 1) %>%
+  filter(method == "no_cluster")
+
 pred_acc_results1 <- pred_acc_results %>% 
   unnest(acc) %>% 
   select(-`NA`) %>%
-  filter(!is.na(trait)) %>%
   mutate(method = str_replace_all(method, "_clust$", ""), 
-         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi", "no_cluster"))) %>%
-  complete(trait, method, pred_env)
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi", "no_cluster")),
+         pred_env = as.factor(pred_env)) %>%
+  complete(trait, method, pred_env, population, k) %>%
+  filter(method != "no_cluster")
 
 # How many environments have no predictions?
 n_blank_env <- pred_acc_results1 %>% 
@@ -226,25 +237,119 @@ n_blank_env <- pred_acc_results1 %>%
   filter(p_na == 1) %>%
   nrow()
 
-# Plot the accuracy to predict each environment under different clustering procedures
-(g_pred_clust <- pred_acc_results1 %>% 
-  # Filter completely blank envs
-  group_by(pred_env) %>%
-  filter(mean(is.na(r_hat)) < 1) %>%
-  ggplot(aes(x = pred_env, y = r_hat, group = method, fill = method)) + 
-  geom_col(position = "dodge") + 
-  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = method), position = "dodge") +
-  facet_grid(trait ~ .) +
-  labs(
-    title = "Prediction Accuracy Within Clusters",
-    subtitle = expression("Compared prediction accuracy of each environment under k = 5 clusters or without clustering"),
-    caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
-  ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)))
 
-# Save it
-save_file <- file.path(fig_dir, "cluster_k5_predictions.jpg")
-ggsave(filename = save_file, plot = g_pred_clust, width = 12, height = 8)
+# Join the cluster-based and non cluster-based results
+pred_acc_comparison <- pred_acc_results1 %>%
+  filter(k == 5) %>%
+  full_join(., select(pred_acc_no_cluster, trait, pred_env:CI_upper), by = c("trait", "pred_env")) %>%
+  # Is the cluster accuracy better than the non-cluster accuracy?
+  mutate(cluster_better = r_hat.x >= r_hat.y,
+         cluster_worse = r_hat.x < r_hat.y,
+         cluster_sig_better = r_hat.x > CI_upper.y,
+         cluster_sig_worse = r_hat.x < CI_lower.y)
+
+# How often is some form of clustering better than not clustering?
+pred_acc_comparison %>%
+  group_by(trait, population, pred_env) %>%
+  summarize(n_better = sum(cluster_better, na.rm = T),
+            n_worse = sum(cluster_worse, na.rm = T),
+            n_sig_better = sum(cluster_sig_better, na.rm = T),
+            n_sig_worse = sum(cluster_sig_worse, na.rm = T)) %>%
+  group_by(trait, population) %>%
+  summarize(prop_one_better = mean(n_better >= 1),
+            prop_all_worse = mean(n_better == 0),
+            prop_one_sig_better = mean(n_sig_better >= 1))
+
+# How often are different forms of clustering better than not clustering?
+pred_acc_comparison_by_method <- pred_acc_comparison %>%
+  group_by(trait, population, method) %>%
+  summarize(prop_better = mean(cluster_better, na.rm = T),
+            prop_worse = mean(cluster_worse, na.rm = T),
+            prop_sig_better = mean(cluster_sig_better, na.rm = T),
+            prop_sig_worse = mean(cluster_sig_worse, na.rm = T))
+
+# Plot
+(g_pred_acc_comp <- pred_acc_comparison_by_method %>%
+    gather(metric, value, -trait:-method) %>%
+    mutate(metric = parse_factor(metric, levels = c("prop_sig_better", "prop_better",
+                                                    "prop_worse", "prop_sig_worse"))) %>%
+    ggplot(aes(x = metric, y = value, fill = method)) +
+    geom_col(position = "dodge") +
+    facet_grid(trait ~ population) +
+    ylim(c(0,1)) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = "Proportion of Superior/Inferior Clustering",
+      subtitle = "Proportion of observations in which the clustering method is superior or inferior to not clustering."
+  ))
+
+save_file <- file.path(fig_dir, "cluster_method_comparison.jpg")
+ggsave(filename = save_file, plot = g_pred_acc_comp, width = 8, height = 6)
+            
+
+```
+
+
+For each of $k \in \{3, ..., 6\}$, plot the comparison among clustering methods and non-clustering
+
+```{r plot.k}
+
+# Iterate over 
+Kset <- unique(pred_acc_results_plot$k)
+
+for (K in Kset) {
+  
+  # Plot the accuracy to predict each environment under different clustering procedures
+  (g_pred_clust_all <- pred_acc_results1 %>%
+     filter(population != "tp", k == K) %>%
+     # Add the no-cluster data
+     bind_rows(., pred_acc_no_cluster) %>%
+     # Filter completely blank envs
+     group_by(pred_env) %>%
+     filter(mean(is.na(r_hat)) < 1) %>%
+     ggplot(aes(x = pred_env, y = r_hat, group = method, fill = method)) + 
+     labs(
+       title = "Prediction Accuracy Within Clusters",
+       subtitle = str_c("Compared prediction accuracy of each environment under k = ", K, " clusters determined by all entries or without clustering"),
+       caption = str_c("D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables\nNote: ", n_blank_env, " environments were removed because predictions could not be made.")
+     ) +
+     geom_col(position = "dodge") + 
+     geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = method), position = "dodge") +
+     facet_grid(trait ~ .) +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+     theme_bw() +
+     ylim(c(-0.75, 1)))
+  
+  # Save it
+  save_file <- file.path(fig_dir, str_c("cluster_k", K, "_predictions_all.jpg"))
+  ggsave(filename = save_file, plot = g_pred_clust_all, width = 12, height = 8)
+
+  (g_pred_clust_tp <- pred_acc_results1 %>% 
+    filter(population != "all", k == K) %>%
+    # Add the no-cluster data
+    bind_rows(., pred_acc_no_cluster) %>%
+    # Filter completely blank envs
+    group_by(pred_env) %>%
+    filter(mean(is.na(r_hat)) < 1) %>%
+    ggplot(aes(x = pred_env, y = r_hat, group = method, fill = method)) + 
+    labs(
+      title = "Prediction Accuracy Within Clusters",
+      subtitle = str_c("Compared prediction accuracy of each environment under k = ", K, " clusters determined by training population entries or without clustering"),
+      caption = str_c("D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables\nNote: ", n_blank_env, " environments were removed because predictions could not be made.")
+    ) +
+     geom_col(position = "dodge") + 
+     geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = method), position = "dodge") +
+     facet_grid(trait ~ .) +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+     theme_bw() +
+     ylim(c(-0.75, 1)))            
+
+  # Save it
+  save_file <- file.path(fig_dir, str_c("cluster_k", K, "_predictions_tp.jpg"))
+  ggsave(filename = save_file, plot = g_pred_clust_tp, width = 12, height = 8)
+  
+}
 
 
 
@@ -258,8 +363,109 @@ Hypothesis: the heritability
 
 
 
+For each of the clustering methods, plot the comparison among k clusters versus no clustering
 
 
+```{r plot.methods}
+
+# Iterate over 
+methods_set <- unique(pred_acc_results_plot$method)
+
+for (met in methods_set) {
+  
+  # Plot the accuracy to predict each environment under different clustering procedures
+  (g_pred_clust_all <- pred_acc_results1 %>%
+     filter(population != "tp", method == met) %>%
+     # Add the no-cluster data
+     bind_rows(., pred_acc_no_cluster) %>%
+     mutate(k = as.factor(k)) %>%
+     # Filter completely blank envs
+     group_by(pred_env) %>%
+     filter(mean(is.na(r_hat)) < 1) %>%
+     ggplot(aes(x = pred_env, y = r_hat, group = k, fill = k)) + 
+     labs(
+       title = "Prediction Accuracy Within Clusters",
+       subtitle = str_c("Compared prediction accuracy of each environment under method: ", met, " clusters determined by all entries or without clustering"),
+       caption = str_c("Note: ", n_blank_env, " environments were removed because predictions could not be made.")
+     ) +
+     geom_col(position = "dodge") + 
+     geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = k), position = "dodge") +
+     facet_grid(trait ~ .) +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+     theme_bw() +
+     ylim(c(-0.75, 1)) +
+     scale_fill_brewer(type = "qual", palette = "Accent"))
+  
+  # Save it
+  save_file <- file.path(fig_dir, str_c("cluster_met", met, "_predictions_all.jpg"))
+  ggsave(filename = save_file, plot = g_pred_clust_all, width = 12, height = 8)
+
+  (g_pred_clust_tp <- pred_acc_results1 %>% 
+    filter(population != "all", method == met) %>%
+    # Add the no-cluster data
+    mutate(k = as.factor(k)) %>%
+    # Filter completely blank envs
+    group_by(pred_env) %>%
+    filter(mean(is.na(r_hat)) < 1) %>%
+    ggplot(aes(x = pred_env, y = r_hat, group = k, fill = k)) + 
+    labs(
+      title = "Prediction Accuracy Within Clusters",
+      subtitle = str_c("Compared prediction accuracy of each environment under method: ", met, " clusters determined by training population entries or without clustering"),
+      caption = str_c("Note: ", n_blank_env, " environments were removed because predictions could not be made.")
+    ) +
+     geom_col(position = "dodge") + 
+     geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = k), position = "dodge") +
+     facet_grid(trait ~ .) +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+     theme_bw() +
+     ylim(c(-0.75, 1)) +
+     scale_fill_brewer(type = "qual", palette = "Accent"))
+
+  # Save it
+  save_file <- file.path(fig_dir, str_c("cluster_met", met, "_predictions_tp.jpg"))
+  ggsave(filename = save_file, plot = g_pred_clust_tp, width = 12, height = 8)
+  
+}
+
+
+
+```
+
+
+Model differences among prediction accuracy
+
+
+```{r cluster.mod}
+
+# Analyze the two populations and traits separately
+cluster_mod <- pred_acc_results1 %>% 
+  group_by(population, trait) %>% 
+  filter(k == as.factor(k)) %>%
+  do(mod = lm(r_hat ~ method + pred_env + k + method:pred_env, data = .)) %>%
+  mutate(summary = list(summary(mod)),
+         anova = list(anova(mod)))
+
+# Check which terms are significant
+cluster_sig <- cluster_mod %>%
+  mutate(anova = list(broom::tidy(anova))) %>%
+  unnest(anova) %>%
+  filter(term != "Residuals") %>% 
+  group_by(term) %>% 
+  summarize(prop_sig = mean(p.value < 0.05))
+
+## Run Tukey's to get significant method and method:pred_env comparisons
+cluster_tukeys <- cluster_mod %>% 
+  mutate(tukeys_method = list(TukeyHSD(aov(mod), which = "method")),
+         tukeys_method_tidy = list(broom::tidy(tukeys_method)))
+  
+# Significant method comparisons
+cluster_tukeys %>% 
+  unnest(tukeys_method_tidy) %>% 
+  filter(adj.p.value < 0.05)
+
+
+
+```
 
 
 
