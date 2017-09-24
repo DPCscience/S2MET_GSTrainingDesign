@@ -129,10 +129,9 @@ reduced_mod <- S2_MET_BLUEs %>%
     data_frame(mod = list(fit))  })
 
 
-
-
-
-
+## Save the data
+save_file <- "S2_MET_heritability_results.RData"
+save("stage_two", "reduced_mod", file = save_file) 
 
 
 
