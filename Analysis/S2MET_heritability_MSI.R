@@ -4,10 +4,11 @@
 ## Script was designed to run on MSI
 
 # List of packages
-packages <- c("tidyverse", "stringr", "readxl", "pbr", "regress", "rrBLUP")
+packages <- c("tidyverse", "stringr", "readxl", "pbr", "regress", "rrBLUP", "Matrix")
 
 # Set the directory of the R packages
 package_dir <- "/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-library/3.4/"
+# package_dir <- NULL
 
 # Load all packages
 invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
@@ -15,13 +16,19 @@ invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir
 
 ## Directories
 proj_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/" 
+# proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 
 fig_dir <- file.path(proj_dir, "Figures/")
 pred_dir <- file.path(proj_dir, "Predictions")
-geno_dir <-  "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/GBS_Genos"
 env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
-pheno_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Phenos"
 entry_dir <- file.path(proj_dir, "Plant_Materials")
+
+geno_dir <-  "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/GBS_Genos"
+pheno_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Phenos"
+
+# # Alternative directories
+# geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+# pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
 
 # Load the phenotypic data
 load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
@@ -102,7 +109,16 @@ stage_two <- S2_MET_BLUEs %>%
                sep = "\\.", fill = "right") %>%
       select(-term)
     
-    data_frame(mod = list(fit), BLUPs = list(BLUPs), BLUP_Covar = list(blup_out$Covariance), 
+    # Convert the covariance of BLUPs to sparse matrix
+    BLUP_Covar <- blup_out$Covariance %>%
+      diag() %>%
+      Diagonal(x = .)
+    
+    # Extract the useful components of the model fit
+    # log likelihood, sigma, beta
+    fit_use <- fit[c("llik", "sigma", "beta")]
+    
+    data_frame(mod = list(fit_use), BLUPs = list(BLUPs), BLUP_Covar = list(BLUP_Covar), 
                n_e = n_e, n_r = n_r)  })
 
 
@@ -126,15 +142,16 @@ reduced_mod <- S2_MET_BLUEs %>%
                    Vformula = ~ line_name + R, 
                    data = df, identity = FALSE, pos = rep(TRUE, 2))
     
-    data_frame(mod = list(fit))  })
+    # Extract the useful components of the model fit
+    # log likelihood, sigma, beta
+    fit_use <- fit[c("llik", "sigma", "beta")]
+    
+    data_frame(mod = list(fit_use))  })
 
 
 ## Save the data
 save_file <- "S2_MET_heritability_results.RData"
 save("stage_two", "reduced_mod", file = save_file) 
-
-
-
 
 
 

@@ -1,0 +1,448 @@
+---
+title: "S2MET Phenotypic Data Summary"
+output: html_notebook
+bibliography: C:/Users/Jeff/Documents/Literature/library.bib
+---
+
+## Introduction
+
+This notebook will provide some phenotyping data summaries for the S2MET project. It will include:
+
+1. Basic model for g + e + gxe
+2. Heritability estimates
+3. Correlations among environments
+
+```{r prep}
+
+library(tidyverse)
+library(broom)
+library(stringr)
+library(readxl)
+library(pbr)
+library(lmerTest)
+library(rrBLUP)
+library(regress)
+
+## Directories
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+fig_dir <- file.path(proj_dir, "Figures/")
+pred_dir <- file.path(proj_dir, "Predictions")
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
+pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
+entry_dir <- file.path(proj_dir, "Plant_Materials")
+analysis_dir <- file.path(proj_dir, "Analysis")
+
+# Load the phenotypic data
+load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+
+# Load an entry file
+entry_list <- read_excel(file.path(entry_dir, "S2MET_project_entries.xlsx"))
+
+
+# Grab the entry names that are not checks
+tp <- entry_list %>% 
+  filter(Class == "S2TP") %>% 
+  pull(Line)
+
+vp <- entry_list %>% 
+  filter(Class == "S2C1R") %>% 
+  pull(Line)
+
+# Find the tp and vp that are genotypes
+tp_geno <- intersect(tp, row.names(s2_imputed_mat))
+vp_geno <- intersect(vp, row.names(s2_imputed_mat))
+
+# Define the checks
+checks <- entry_list %>% 
+  filter(Class == "Check") %>% 
+  pull(Line)
+
+entries <- entry_list %>% 
+  pull(Line)
+
+# Extract the tp and vp from the G matrix
+s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
+
+
+```
+
+
+## Basic Summaries
+
+Look at the number of lines per environment
+
+```{r line.summ}
+
+# Find the total number of possible line x environment combinations and find
+# the proportion that are observed
+(prob_observed <- S2_MET_BLUEs %>% 
+  distinct(environment, line_name) %>%
+  mutate(observed = TRUE) %>% 
+  complete(environment, line_name, fill = list(observed = FALSE)) %>%
+  summarize(prop_obs = mean(observed)))
+
+
+```
+
+Find the proportion of unbalance in the dataset
+
+Do this for the TP, then for the VP, then for both
+
+```{r prop.unbal}
+
+s2_met_tidy_count <- s2_met_tidy_filt %>%
+  # Add a dummy variables for all observations
+  mutate(dummy = 1) %>%
+  distinct(trait, line_name, environment, dummy) %>%
+  select(trait, line_name, environment, dummy)
+
+# Create count tables for the TP, then the VP
+s2_met_tidy_count_tp <- s2_met_tidy_count %>% 
+  filter(line_name %in% tp)
+
+s2_met_tidy_count_vp <- s2_met_tidy_count %>% 
+  filter(line_name %in% vp)
+
+# Find the proportion of balance
+tp_bal <- s2_met_tidy_count_tp %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy)) %>%
+  mutate(pop = "tp")
+
+vp_bal <- s2_met_tidy_count_vp %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy))  %>%
+  mutate(pop = "vp")
+
+# Intersect the environments with both the TP and VP
+common_env <- intersect(
+  distinct(s2_met_tidy_count_tp, environment), 
+  distinct(s2_met_tidy_count_vp, environment) )
+
+# Filter the larger tidy set on these environments and find the level of balance
+common_bal <- s2_met_tidy_count %>% 
+  filter(environment %in% common_env$environment) %>% 
+  group_by(trait) %>% 
+  complete(environment, line_name, fill = list(dummy = 0)) %>% 
+  summarize(prop_bal = mean(dummy))  %>%
+  mutate(pop = "all")
+
+# Print
+list(tp_bal, vp_bal, common_bal) %>% 
+  reduce(full_join, by = c("trait", "prop_bal", "pop")) %>% 
+  spread(trait, prop_bal)
+
+```
+
+
+## Heritability
+
+### Between Environment
+
+
+The heritability will be calcuted for each trait across all environments by fitting the following model:
+
+$$
+y_{ij} = \mu + g_i + t_j + (gt)_{ij} + \epsilon_{ij}
+$$
+
+where $y_{ij}$ is the adjusted mean of the *i*th genotype in the *j*th environment, $\mu$ is the grand mean, $g_i$ is the random effect of the *i*th genotype, $t_j$ is the fixed effect of the $j$th environment, $(gt)_{ij}$ is the random effect of the interaction between the $i$th genotype and the $j$th environment, and $\epsilon_{ij}$ is the error associated with the observation.
+
+We will assume the random effects are distributed such that $g \sim N(0, \sigma^2_g)$, $(gt) \sim N(0, \sigma^2_{(gt)})$, and $\epsilon \sim N(0, \mathbf{R}\sigma^2_\epsilon)$, where $\mathbf{R}$ is a diagonal matrix with elements equal to the inverse of the variances of the adjusted genotype means.
+
+This will be run on MSI?
+
+
+```{r herit.across}
+
+# Group by trait
+stage_two <- S2_MET_BLUEs %>%
+  mutate(gt = interaction(line_name, environment)) %>%
+  mutate_if(is.character, as.factor) %>%
+  group_by(trait) %>%
+  do(mod = {
+    
+    # Create an object for the data.frame
+    df <- .
+    
+    # Extract the standard errors
+    R <- solve(diag(df$std_error^2))
+    R <- structure(R, dimnames = replicate(2, str_c(df$line_name, df$environment, sep = ":"), 
+                                           simplify = FALSE))
+    
+    # Table of lines by environments (i.e. plots)
+    plot_table <- xtabs(formula = ~ line_name + environment, data = df)
+    
+    # Find the number of environments
+    n_e <- plot_table %>% 
+      rowSums() %>% 
+      harm_mean()
+    
+    # Now replicates
+    n_r <- plot_table %>% 
+      harm_mean()
+    
+    # Use regress function
+    fit <- regress(formula = value ~ environment,
+                   Vformula = ~ line_name + gt + R, 
+                   data = df, identity = FALSE, pos = rep(TRUE, 3))
+    
+    # Reorganize the BLUPs
+    blup_out <- BLUP(model = fit)
+    
+    BLUPs <- blup_out$Mean %>% 
+      data_frame(term = names(.), value = .) %>% 
+      separate(col = term, into = c("term", "line_name", "environment"), 
+               sep = "\\.", fill = "right") %>%
+      select(-term)
+    y
+    data_frame(mod = list(fit), BLUPs = list(BLUPs), BLUP_Covar = list(blup_out$Covariance), 
+               n_e = n_e, n_r = n_r)  })
+
+## Load the data that was generated via MSI
+load(file.path(pheno_dir, "S2_MET_heritability_results.RData"))
+
+
+```
+
+
+First test for significance of the $gt$ term using a liklihood ratio test
+
+The likelihood ratio is calculated as
+
+$$
+LR = -2[\log(L_{Red}) - \log(L_{Full})]
+$$
+
+The $LR$ is $\chi^2$ distributed with 1 degree of freedom (since we dropped one variance component to get the reduced model). The hypothesis test is $H_0: \sigma^2_i = 0$ and $H_A: \sigma^2_i > 0$
+
+```{r lrt}
+
+# Combine Log-likelihoods
+reduced_mod_llik <- reduced_mod %>% 
+  mutate(reduced_mod_llik = sapply(mod, "[", "llik")) %>% 
+  select(trait, reduced_mod_llik) %>% 
+  unnest()
+
+full_mod_llik <- stage_two %>% 
+  mutate(full_mod_llik = sapply(mod, "[", "llik")) %>% 
+  select(trait, full_mod_llik) %>% 
+  unnest()
+
+# Perform the likelihood ratio test and test the significance
+full_join(reduced_mod_llik, full_mod_llik) %>% 
+  mutate(lr = -2 * (reduced_mod_llik - full_mod_llik), 
+         p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2)
+
+
+```
+
+
+
+
+The broad-sense heritability is calculated on a entry-mean basis according to the formula
+
+$$
+H = \frac{ \sigma^2_G }{ \sigma^2_G + \frac{\sigma^2_{GE}}{r} + \frac{\sigma^2_R}{er} }
+$$
+
+for overall heritability calculations, and 
+
+$$
+H = \frac{ \sigma^2_G }{ \sigma^2_G  + \frac{\sigma^2_R}{r} }
+$$
+
+
+where $e$ is the number of environments and $r$ is the number of replicates. In the case of an augmented design, where the number of replicates is uneven, the following formula is used to calculate the harmonic mean of the number of replications:
+
+$$
+p_h = \frac{n}{\sum^n_{i=1} \frac{1}{p_i}}
+$$
+
+where $p_h$ is the harmonic mean, $n$ is the number of genotypes, and $p_i$ is the number of replicates of the *i*th genotype.
+
+Now calculate heritability across all environments
+
+
+
+```{r calc.herit.all}
+
+# Calculate heritability across environments
+var_comp_all <- stage_two %>% 
+  mutate(sigma = lapply(mod, "[[", "sigma") %>% 
+           lapply(t) %>% 
+           lapply(as.data.frame)) %>% 
+  select(trait, sigma, n_e, n_r) %>% 
+  unnest(sigma)
+
+(s2met_herit <- var_comp_all %>% 
+  mutate(H = (line_name) / (line_name + (gt / n_e) + (R / (n_e * n_e)))))
+
+# Plot
+s2met_herit %>%
+  ggplot(aes(x = trait, y = H)) +
+  geom_col() +
+  ylab("Heritability") +
+  xlab("Trait")
+  
+```
+  
+
+
+## Environmental Correlations
+
+Estimate the genetic variance-covariance matrix across environments using the method by @Lado2016a and @Rebonato2000
+
+In this method, a correlation matrix is first calculated using Pearson correlations, then this correlation matrix is decomposed to estimate the genetic correlation.
+
+
+
+```{r functions}
+
+# Define a function to correct the correlation matrix
+corr_decomp <- function(x) {
+  
+  # Decomposition
+  s <- eigen(x)
+
+  # Set anything less than 0 to 0
+  la <- ifelse(s$values <= 0, 0, s$values)
+
+  # Get the eigenvectors
+  S <- s$vectors
+  
+  # Diagonal matrix of eigenvalues
+  La <- diag(la)
+
+  B_prime <- S %*% sqrt(La)
+
+  # Normalization matrix
+  T_mat <- solve(diag(as.vector(S^2 %*% la)))
+
+  # Return B matrix
+  B <- sqrt(T_mat) %*% B_prime * -1
+  
+  # tcrossprod
+  C_prime <- tcrossprod(B)
+  dimnames(C_prime) <- dimnames(x)
+  return(C_prime)
+  
+}
+
+```
+
+
+
+Calculate the genetic correlation between environments using the training population
+
+```{r env.corr.tp}
+
+# Calculate environmental correlations using all pairwise information on the tp
+# First subset the data
+pheno_use <- S2.MET.BLUE %>%
+  filter(year != 2014)
+
+# Extract tp and correlate
+env_cor <- pheno_use %>% 
+  filter(line_name %in% tp) %>%
+  select(trait, line_name, environment, value) %>%
+  # Split by trait
+  split(.$trait) %>%
+  map(spread, environment, value) %>%
+  map(group_by, trait) %>%
+  map(function(trait_mat) do(trait_mat, cor_mat = cor(.[,-1:-2], use = "pairwise.complete.obs", method = "pearson"))) %>%
+  bind_rows()
+
+# For each matrix, adjust using the function above
+env_cor_tp <- env_cor %>% 
+  mutate(adj_cor_mat = list(corr_decomp(cor_mat)))
+
+# Reconfigure the data and plot a heatmap
+env_cor_tp_tidy <- env_cor_tp %>%
+  split(.$trait) %>%
+  map(group_by, trait) %>%
+  map(function(trait_df) do(trait_df, {
+    .$adj_cor_mat %>% as.data.frame() %>% rownames_to_column("env1") %>% gather(env2, correlation, -env1) }) ) %>%
+  bind_rows()
+
+env_cor_tp_tidy %>%
+  ggplot(aes(x = env1, y = env2, fill = correlation)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("blue", "white", "red"), na.value = "transparent", breaks = c(-1, 0, 1), limits = c(-1, 1), 
+                       guide = guide_colorbar(title = "Genetic Correlation")) +
+  ylab("Environment 2") +
+  xlab("Environment 1") +
+  facet_wrap(~ trait, nrow = 2, ncol = 2) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6)
+  ) 
+
+
+```
+
+
+Calculate the genetic correlation between environments using the checks
+
+```{r env.corr.chk}
+
+# Calculate environmental correlations using all pairwise information on the checks
+# First subset the data
+pheno_use <- S2.MET.BLUE %>%
+  filter(year != 2014)
+
+# Extract tp and correlate
+env_cor <- pheno_use %>% 
+  filter(line_name %in% checks,
+         !str_detect(trial, "S2C1F4")) %>%
+  select(trait, line_name, environment, value) %>%
+  # Split by trait
+  split(.$trait) %>%
+  map(spread, environment, value) %>%
+  map(group_by, trait) %>%
+  map(function(trait_mat) do(trait_mat, cor_mat = cor(.[,-1:-2], use = "pairwise.complete.obs", method = "pearson"))) %>%
+  bind_rows()
+
+# For each matrix, adjust using the function above
+env_cor_chk <- env_cor %>% 
+  mutate(adj_cor_mat = list(corr_decomp(cor_mat)))
+
+# Reconfigure the data and plot a heatmap
+env_cor_chk_tidy <- env_cor_chk %>%
+  split(.$trait) %>%
+  map(group_by, trait) %>%
+  map(function(trait_df) do(trait_df, {
+    .$adj_cor_mat %>% as.data.frame() %>% rownames_to_column("env1") %>% gather(env2, correlation, -env1) }) ) %>%
+  bind_rows()
+
+env_cor_chk_tidy %>%
+  ggplot(aes(x = env1, y = env2, fill = correlation)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("blue", "white", "red"), na.value = "transparent", breaks = c(-1, 0, 1), limits = c(-1, 1), 
+                       guide = guide_colorbar(title = "Genetic Correlation")) +
+  ylab("Environment 2") +
+  xlab("Environment 1") +
+  facet_wrap(~ trait, nrow = 2, ncol = 2) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6)
+  ) 
+
+```
+
+
+Save the correlation matrices for further use
+
+```{r}
+
+save_file <- file.path(proj_dir, "Environmental_Variables/env_cov_mat_correlation.RData")
+save("env_cor_tp", "env_cor_chk", file = save_file)
+
+
+```
+
