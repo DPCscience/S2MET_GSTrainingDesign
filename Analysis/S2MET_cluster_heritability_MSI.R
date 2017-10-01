@@ -4,8 +4,47 @@
 ## and calculate the within and across-cluster heritabilities.
 
 # List of packages
-packages <- c("tidyverse", "stringr", "readxl", "modelr", "pbr", "psych", "parallel",
+packages <- c("tidyverse", "stringr", "readxl", "modelr", "psych", "parallel",
               "purrrlyr")
+
+# Add a function from pbr that is not working
+herit <- function(object, exp, ...) {
+  
+  # Remove colons from the expression
+  exp1 <- str_replace_all(string = exp, pattern = ":", replacement = "")
+  
+  # Get variance components
+  var_comp <- as.data.frame(VarCorr(object))
+  
+  # Capture the other arguments
+  other_args <- list(...)
+  
+  # Create a new environment to evaluate expressions and assign values
+  exp_env <- new.env(parent = parent.frame())
+  
+  # Extract other terms and create objects
+  for (obj in names(other_args)) assign(x = obj, value = other_args[[obj]], envir = exp_env)
+  
+  # Parse the equation text
+  exp_parsed <- parse(text = exp1)
+  
+  # Extract the variance components from the model and assign to individual objects
+  for (term in var_comp$grp) {
+    # Remove colons
+    term_name <- str_replace_all(string = term, pattern = ":", replacement = "")
+    
+    assign(x = term_name, value = subset(var_comp, grp == term, vcov, drop = TRUE),
+           envir = exp_env)
+    
+  }
+  
+  # Assign the parsed expression to the environment
+  assign(x = "exp_parsed", value = exp_parsed, envir = exp_env)
+  
+  # Evaluate the exp expression and return the heritability
+  eval(expr = exp_parsed, envir = exp_env)
+  
+}
 
 # Set the directory of the R packages
 package_dir <- NULL
@@ -339,9 +378,6 @@ cluster_herit_all <- clust_df_tomodel %>%
     
         herit_summ <- herits %>%
           rename_all(str_replace_all, pattern = "exp", replacement = "herit")
-        
-        # %>%
-        #   add_column(herit_type = c("h_a", "h_w"), .before = "heritability")
         
         # Return data_frame
         data_frame(fit_summ = list(fits_summs), herit = list(herit_summ))
