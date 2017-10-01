@@ -26,9 +26,10 @@ library(purrrlyr)
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 
 fig_dir <- file.path(proj_dir, "Figures/")
-
-# Prediction directory
 pred_dir <- file.path(proj_dir, "Predictions")
+entry_dir <- file.path(proj_dir, "Plant_Materials")
+analysis_dir <- file.path(proj_dir, "Analysis")
+result_dir <- file.path(proj_dir, "Results")
 
 # Other directories
 geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
@@ -43,8 +44,7 @@ entry_dir <- file.path(proj_dir, "Plant_Materials")
 load(file.path(geno_dir, "S2_genos_mat.RData"))
 
 # Load the phenotypic data
-load(file.path(pheno_dir, "S2_MET_BLUE.RData"))
-load(file.path(pheno_dir, "S2_MET_tidy.RData"))
+load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
 
 # Load environmental data
 load(file.path(env_var_dir, "environmental_data_compiled.RData"))
@@ -69,16 +69,6 @@ vp <- entries %>%
 checks <- entry_list %>% 
     filter(Class == "Check") %>%
     pull(Line)
-
-# Filter the BLUEs for the entries
-S2_MET_BLUE_entries <- S2_MET_BLUE %>%
-  filter(line_name %in% c(tp, vp))
-
-S2_MET_tidy_use <- S2_MET_tidy %>%
-  mutate_at(vars(line_name), as.character) %>%
-  mutate(line = ifelse(!line_name %in% checks, line_name, "00check"),
-         check = ifelse(line_name %in% checks, line_name, "00entry"),
-         ge = interaction(line, environment))
 
 ```
 
@@ -141,48 +131,22 @@ I will perform clustering first and then predictions later
 
 Cluster first on all available data - including the validation set
 
-Load the heritability results
-
-```{r cluster.herit.load}
-
-load_file <- file.path(proj_dir, "Predictions/Results/cluster_heritability.RData")
-load(load_file)
-
-# Combine the tp and all datasets
-cluster_herit <- bind_rows(cluster_herit_all, cluster_herit_tp)
-
-
-
-
-# Max clusters
-max_K <- n_distinct(gauch_soy$env) - 1
-
-# Use gap method to determine mega-environments
-D2_cluster <- clusGap(x = as.matrix(D2), FUNcluster = hclusCut, 
-                     K.max = max_K, B = 500, verbose = FALSE)
-
-# Determine the optimal number of clusters by the "firstSEmax" method
-opt_clust <- maxSE(D2_cluster$Tab[,"gap"], D2_cluster$Tab[,"SE.sim"], method = "firstSEmax", SE.factor = 1)
-
-
-
-```
-
 Load and plot results of the heritabilities
 
 ```{r cluster.herit}
 
-load_file <- file.path(proj_dir, "Predictions/Results/cluster_heritability.RData")
-load(load_file)
+load(file.path(result_dir, "S2_MET_cluster_heritability.RData"))
 
-# Make some adjustments
-herit_clust1 <- bind_rows(cluster_herit_all, cluster_herit_tp) %>% 
-  unnest(out_df) %>% 
-  mutate(method = str_replace_all(method, "_clust", ""), 
-         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one", "EC_multi")))
+#Extract heritability results and plot
+cluster_herit_all1 <- cluster_herit_all %>% 
+  ungroup() %>% 
+  unnest(herit) %>% 
+  select(-fit_summ) %>% 
+  gather(herit_type, value, -trait:-k) %>%
+  mutate(method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
 
 # Plot
-(g_herit_clust <- herit_clust1 %>% 
+(g_herit_clust <- cluster_herit_all1 %>% 
     ggplot(aes(x = k, y = heritability, col = method, shape = selection)) + 
     geom_point() + 
     geom_line() + 

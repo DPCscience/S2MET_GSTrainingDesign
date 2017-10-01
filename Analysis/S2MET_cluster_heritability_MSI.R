@@ -4,40 +4,47 @@
 ## and calculate the within and across-cluster heritabilities.
 
 # List of packages
-packages <- c("tidyverse", "stringr", "readxl", "pbr", "regress", "rrBLUP", "Matrix", 
-              "psych", "parallel")
+packages <- c("tidyverse", "stringr", "readxl", "modelr", "pbr", "psych", "parallel",
+              "purrrlyr")
 
 # Set the directory of the R packages
+package_dir <- NULL
 package_dir <- "/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-library/3.4/"
-# package_dir <- NULL
 
 # Load all packages
 invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
 
 
 ## Directories
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 proj_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/" 
-# proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 
-fig_dir <- file.path(proj_dir, "Figures/")
-pred_dir <- file.path(proj_dir, "Predictions")
-env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
-entry_dir <- file.path(proj_dir, "Plant_Materials")
-analysis_dir <- file.path(proj_dir, "Analysis")
+# Geno, pheno, and enviro data
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
+env_var_dir <- file.path(proj_dir, "Environmental_Variables")
 
 geno_dir <-  "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/GBS_Genos"
 pheno_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Phenos"
+env_var_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Environmental_Data"
 
-# # Alternative directories
-# geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
-# pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
+
+# Other directories
+fig_dir <- file.path(proj_dir, "Figures/")
+pred_dir <- file.path(proj_dir, "Predictions")
+entry_dir <- file.path(proj_dir, "Plant_Materials")
+analysis_dir <- file.path(proj_dir, "Analysis")
+result_dir <- file.path(proj_dir, "Results")
+
+
+
 
 # Load the phenotypic data
 load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
 # Load the genotypic data
 load(file.path(geno_dir, "S2_genos_mat.RData"))
-# Load the heritability results (i.e. BLUPs)
-load(file.path(pheno_dir, "S2_MET_heritability_results.RData"))
+# Load environmental data
+load(file.path(env_var_dir, "environmental_data_compiled.RData"))
 
 # Load an entry file
 entry_list <- read_excel(file.path(entry_dir, "S2MET_project_entries.xlsx"))
@@ -71,73 +78,95 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 n_cores <- detectCores()
 
 
-
-
-## Define some functions for calculating hertiability
-# Function to calculate across and within cluster heritabilities
-clust_herit <- function(mod, g, e, cl) {
-  # Model frame
-  mf <- model.frame(mod)
-  # Unique environments
-  n_e <- n_distinct(mf[[e]])
-  # Reps in environments
-  n_r <- pbr::harm_mean(table(subset(mf, , c(g, e))))
-  # Clusters
-  n_s <- n_distinct(mf[[cl]])
-  
-  varcomp <- as.data.frame(VarCorr(mod))
-  varG <- subset(varcomp, grp == g, vcov, drop = TRUE)
-  varGE <- subset(varcomp, grp == paste(g, e, sep = ":"), vcov, drop = TRUE)
-  varR <- subset(varcomp, grp == "Residual", vcov, drop = TRUE)
-  varGS <- subset(varcomp, grp == paste(g, cl, sep = ":"), vcov, drop = TRUE)
-  
-  # Heritability - across
-  H_a <- varG / (varG + (varGS / n_s) + (varGE / n_e) + (varR / (n_e * n_r)))
-  # Heritability - within
-  H_w <- (varG + varGS) / ((varG + varGS) + (n_s * ( (varGE / n_e) + (varR / (n_e * n_r)) ) ))
-  data.frame(selection = c("across", "within"), heritability = c(H_a, H_w))
-}
-
-
 # Create a new data.frame to hold the different datasets
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   group_by(trait) %>% 
-  nest()
+  nest() %>%
+  mutate(data = map(data, droplevels))
 
-# For each dataset, fit the full model
+
+
+
+## For each dataset, fit the base model (i.e. no clusters) and pull out G blups
+# The model will allow separate genetic variance per environment
+# This follows from Burgueno et al 2008
 S2_MET_BLUPs <- S2_MET_BLUEs_use %>%
   group_by(trait) %>%
-  mutate(data = list(mutate(data[[1]], gt = interaction(line_name, environment, drop = TRUE)) %>%
-                       mutate_if(is.character, as.factor)))  %>%
-  do(mod = {
+  do({
     
     # Create an object for the data.frame
-    df <- unnest(.)
+    ## Center and scale the data
+    df <- unnest(.) %>%
+      mutate(value = scale(value))
     
     # Extract the standard errors
-    R <- solve(diag(df$std_error^2))
-    R <- structure(R, dimnames = replicate(2, str_c(df$line_name, df$environment, sep = ":"), 
-                                           simplify = FALSE))
+    wts <- df$std_error^2
     
-    # Use regress function
-    fit <- regress(formula = value ~ environment,
-                   Vformula = ~ line_name + gt + R, 
-                   data = df, identity = FALSE, pos = rep(TRUE, 3))
+    # lmer control
+    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+                                calc.derivs = FALSE)
     
-    # Reorganize the BLUPs
-    blup_out <- BLUP(model = fit)
+    # Fit the model
+    form <- value ~ (environment|line_name) + environment + (1|line_name:environment)
+    fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
     
-    # Return the BLUPs
-    blup_out$Mean %>% 
-      data_frame(term = names(.), value = .) %>% 
-      separate(col = term, into = c("term", "line_name", "environment"), 
-               sep = "\\.", fill = "right") %>%
-      select(-term) })
+    # Extract the model.frame
+    mf <- model.frame(fit)
+    
+    # Extract the BLUPs of each genotype in each environment
+    blups <- ranef(fit)$line_name %>%
+      rename_all(funs(str_replace_all), pattern = "\\(Intercept\\)", 
+                 replacement = levels(mf$environment)[1]) %>%
+      rename_all(funs(str_replace_all), pattern = "environment", replacement = "")
+    
+    # Extract the variance components
+    var_comp <- as.data.frame(VarCorr(fit)) %>% 
+      filter(is.na(var2))
+    
+    # Return a data.frame
+    data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
 
 
-# Save these results
-save_file <- file.path(pheno_dir, "S2_MET_BLUPs.RData")
-save("S2_MET_BLUPs", file = save_file)
+# # Save these results
+# save_file <- file.path(result_dir, "S2_MET_BLUPs.RData")
+# save("S2_MET_BLUPs", file = save_file)
+
+
+# Fit a new model with compound symmetry and get the GxE BLUPs
+S2_MET_BLUPs_ge <- S2_MET_BLUEs_use %>%
+  group_by(trait) %>%
+  do({
+    
+    # Create an object for the data.frame
+    ## Center and scale the data
+    df <- unnest(.) %>%
+      mutate(value = scale(value))
+    
+    # Extract the standard errors
+    wts <- df$std_error^2
+    
+    # lmer control
+    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+                                calc.derivs = FALSE)
+    
+    # Fit the model
+    form <- value ~ (1|line_name) + environment + (1|line_name:environment)
+    fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
+    
+    # Extract the model.frame
+    mf <- model.frame(fit)
+    
+    # Extract the BLUPs of each genotype in each environment
+    blups <- ranef(fit)$`line_name:environment` %>%
+      rownames_to_column("term") %>%
+      separate(term, c("line_name", "environment"), sep = ":") %>%
+      rename(value = "(Intercept)")
+    
+    # Extract the variance components
+    var_comp <- as.data.frame(VarCorr(fit))
+    
+    # Return a data.frame
+    data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
 
 
 
@@ -152,67 +181,178 @@ ge_mean_D <- S2_MET_BLUEs_use %>%
     dist1[is.na(dist1)] <- mean(dist1, na.rm = T)
     dist1 })
 
+
+
 # Factor analysis
-## Fit a diagonal model to get the BLUP of each genotype in each environment
-S2_MET_BLUPs_diag <- S2_MET_BLUEs_use %>%
-  group_by(trait) %>%
-  mutate(data = list(mutate(data[[1]], gt = interaction(line_name, environment, drop = TRUE)) %>%
-                       mutate_if(is.character, as.factor)))  %>%
-  do(mod = {
+ge_mean_FA <- S2_MET_BLUPs %>%
+  summarize(fa_out = list(fa(r = BLUP[[1]], nfactors = 2))) %>%
+  # Grab the loadings
+  mutate(delta = list(structure(fa_out[[1]]$loadings, class = "matrix"))) %>%
+  # Distance matrix
+  mutate(FA = list(dist(delta[[1]])))
+
+
+# Number of PCs to choose for GxE BLUPs and ECs
+n_PC <- 2
+
+# Extract the GxE BLUPs and run PCA
+ge_blup_PCA <- S2_MET_BLUPs_ge %>% 
+  do(mat = {
+    .$BLUP[[1]] %>%
+      spread(environment, value) %>% 
+      as.data.frame() %>%
+      remove_rownames() %>% 
+      column_to_rownames("line_name") %>%
+      as.matrix() }) %>%
+  mutate(prcomp = list({
+    mat %>% 
+      apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>% 
+      prcomp() })) %>%
+  mutate(PCs = list(prcomp$rotation)) %>%
+  mutate(PCs_use = list(PCs[,1:n_PC])) %>%
+  mutate(PCA = list(dist(PCs_use)))
+
+
+## Use the PCs of the environmental covariates to form clusters
+EC_PCA <- as_data_frame(expand.grid(
+  trait = unique(S2_MET_BLUEs$trait),
+  EC_one = list(prcomp(t(one_year_mat))$rotation[,1:n_PC]),
+  EC_multi = list(prcomp(t(multi_year_mat))$rotation[,1:n_PC])
+)) %>%
+  rowwise() %>%
+  mutate(EC_one_dist = list(dist(EC_one)),
+         EC_multi_dist = list(dist(EC_multi)))
+
+
+# Combine all matrices, including PCAs and distance matrices
+clust_method_df <- list(
+  ge_mean_D,
+  ge_blup_PCA,
+  ge_mean_FA,
+  EC_PCA) %>%
+  reduce(full_join)
+
+# # Save this
+# save_file <- file.path(result_dir, "S2_MET_cluster_df.RData")
+# save("clust_method_df", file = save_file)
+
+
+# Combine the relevant distance matrices into a single DF
+dist_df <- clust_method_df %>%
+  select(trait, D, PCA, FA, EC_one_dist, EC_multi_dist)
+
+
+
+# Mapping function
+map_hclust <- function(x) map(x, hclust, method = "average")
+
+# For all distance matrices, create cluster objects
+clust_df <- dist_df %>% 
+  group_by(trait) %>% 
+  summarize_all(funs(map_hclust))
+
+# Set a maximum for the number of clusters
+max_K <- 10
+
+
+
+
+# For each trait and cluster strategy, determine the within and across cluster heritability
+# Build a data.frame and add the appropriate number of clusters (n_e - 1)
+clust_df_tomodel <- clust_df %>% 
+  gather(method, clust, -trait) %>% 
+  # Add k's for clusters
+  by_row(function(i) seq(2, max_K), .to = "k") %>% 
+  unnest(k, .drop = FALSE)
+
+cluster_herit_all <- clust_df_tomodel %>%
+  mutate(core = sort(rep(seq(n_cores), length.out = nrow(.)))) %>%
+  split(.$core) %>%
+  # Apply by core
+  mclapply(function(core_df) {
+    core_df %>%
+      group_by(trait, method, k) %>%
+      do({
     
-    # Create an object for the data.frame
-    df <- unnest(.)
+        i <- .
+        
+        # Cluster and cut the tree
+        clusters <- cutree(i$clust[[1]], k = i$k) %>%
+          data_frame(environment = names(.), cluster = .)
     
-    # Extract the standard errors
-    R <- solve(Diagonal(x = df$std_error^2))
-    dimnames(R) <- replicate(2, str_c(df$line_name, df$environment, sep = ":"), 
-                             simplify = FALSE)
+        # Assign clusters to the dataset
+        S2_MET_BLUEs_clusters <- left_join(S2_MET_BLUEs, clusters, "environment") %>%
+          mutate(cluster = as.factor(cluster)) %>%
+          filter(trait == i$trait) %>%
+          droplevels()
+        
+        # Calculate clusters, environments, reps
+        n_e <- xtabs(~ line_name + environment, data = S2_MET_BLUEs_clusters) %>%
+          ifelse(. > 1, 1, .) %>%
+          rowSums() %>% 
+          harm_mean()
+        
+        # Now clusters
+        n_c <- xtabs(~ line_name + cluster, data = S2_MET_BLUEs_clusters) %>%
+          ifelse(. > 1, 1, .) %>%
+          rowSums() %>% 
+          harm_mean()
+        
+        # Now replicates
+        n_r <- xtabs(~ line_name + environment, data = S2_MET_BLUEs_clusters) %>% 
+          harm_mean()
+        
+        wts <- S2_MET_BLUEs_clusters$std_error^2
     
-    # Model frame
-    mf <- model.frame(value ~ line_name + environment + gt, data = df)
-    y <- model.response(data = mf)
-    X <- model.matrix(~ environment, data = mf)
-    Z <- gws::ranef_model_matrix(~ at(environment):line_name, data = mf)
+        # List of models
+        forms <- formulas(~ value,
+                          no_gc = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
+                            (1 |line_name:environment:cluster),
+                          no_gce = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
+                            (1 | line_name:cluster),
+                          full = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
+                            (1 | line_name:cluster) + (1 | line_name:environment:cluster) )
+        
+        # lmer control
+        lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+                                    calc.derivs = FALSE)
+        
+        # Fit all the models
+        fits <- fit_with(data = S2_MET_BLUEs_clusters, lmer, forms, control = lmer_control,
+                         weights = wts) %>%
+          data_frame(mod = names(.), fit = .)
+        
+        # Extract variance components and logLikihoods
+        fits_summs <- fits %>% 
+          group_by(mod) %>%
+          summarize(var_comp = map(fit, VarCorr) %>% map(as.data.frame),
+                    llik = map(fit, logLik))
+        
+        # Calculate heritability
+        ## Define some expressions
+        herits <- list(
+          exp_a = "line_name / (line_name + (line_name:cluster / n_c) + (line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))",
+          exp_w = "(line_name + line_name:cluster) / (line_name + line_name:cluster + (n_c * ((line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))))"
+          ) %>%
+          map_df(function(x) herit(object = subset(fits, mod == "full")$fit[[1]], exp = x,
+                                   n_r = n_r, n_c = n_c, n_e = n_e))
     
-    # Fit
-    fit <- sommer::mmer(Y = y, X = X, Z = Z, R = list(res = R), constraint = TRUE)
+        herit_summ <- herits %>%
+          rename_all(str_replace_all, pattern = "exp", replacement = "herit")
+        
+        # %>%
+        #   add_column(herit_type = c("h_a", "h_w"), .before = "heritability")
+        
+        # Return data_frame
+        data_frame(fit_summ = list(fits_summs), herit = list(herit_summ))
+     
+      })
     
-    # Return the BLUPs
-    fit$u.hat %>% 
-      map(as.data.frame) %>% 
-      map(rownames_to_column, "term") %>% 
-      map(rename, value = T1) %>% 
-      map(~separate(., col = "term", into = c("environment", "line_name"), sep = ":")) %>% 
-      map(mutate, environment = str_replace_all(string = environment, 
-                                                pattern = "at\\(|\\)", replacement = "")) %>% 
-      bind_rows()
-    
-  })
-
-# Save this data
-save_file <- file.path(pheno_dir, "S2_MET_BLUPs_diag.RData")
-save("S2_MET_BLUPs_diag", file = save_file)
+  }, mc.cores = n_cores)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+save_file <- file.path(result_dir, "S2_MET_cluster_heritability.RData")
+save("cluster_herit_all", file = save_file)
 
 
 

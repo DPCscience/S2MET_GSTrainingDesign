@@ -19,9 +19,8 @@ library(broom)
 library(stringr)
 library(readxl)
 library(pbr)
-library(lmerTest)
 library(rrBLUP)
-library(regress)
+library(ggridges)
 
 ## Directories
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
@@ -72,20 +71,36 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 
 ## Basic Summaries
 
+Visualization of distributions
+
+```{r pheno.viz}
+
+S2_MET_BLUEs %>%
+  ggplot(aes(x = value, y = environment, fill = environment)) +
+  geom_density_ridges() +
+  facet_grid(. ~ trait, scales = "free_x")
+
+```
+
+
 Look at the number of lines per environment
 
 ```{r line.summ}
 
 # Find the total number of possible line x environment combinations and find
-# the proportion that are observed
+# the proportion that are observed for each trait
 (prob_observed <- S2_MET_BLUEs %>% 
-  distinct(environment, line_name) %>%
+  distinct(trait, environment, line_name) %>%
   mutate(observed = TRUE) %>% 
-  complete(environment, line_name, fill = list(observed = FALSE)) %>%
+  complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
+  group_by(trait) %>%
   summarize(prop_obs = mean(observed)))
 
 
 ```
+
+
+
 
 Find the proportion of unbalance in the dataset
 
@@ -160,26 +175,25 @@ This will be run on MSI?
 
 ```{r herit.across}
 
-# Group by trait
+
+# Group by trait and fit the multi-environment model
 stage_two <- S2_MET_BLUEs %>%
-  mutate(gt = interaction(line_name, environment)) %>%
-  mutate_if(is.character, as.factor) %>%
   group_by(trait) %>%
-  do(mod = {
+  # Fit the models
+  do({
     
-    # Create an object for the data.frame
-    df <- .
+    # Model formula
+    form <- value ~ environment + (1|line_name) + (1|line_name:environment)
+    form_reduced <- value ~ environment + (1|line_name)
     
-    # Extract the standard errors
-    R <- solve(diag(df$std_error^2))
-    R <- structure(R, dimnames = replicate(2, str_c(df$line_name, df$environment, sep = ":"), 
-                                           simplify = FALSE))
+    to_model <- droplevels(.)
     
     # Table of lines by environments (i.e. plots)
-    plot_table <- xtabs(formula = ~ line_name + environment, data = df)
+    plot_table <- xtabs(formula = ~ line_name + environment, data = to_model)
     
     # Find the number of environments
-    n_e <- plot_table %>% 
+    n_e <- plot_table %>%
+      ifelse(. > 1, 1, .) %>%
       rowSums() %>% 
       harm_mean()
     
@@ -187,26 +201,25 @@ stage_two <- S2_MET_BLUEs %>%
     n_r <- plot_table %>% 
       harm_mean()
     
-    # Use regress function
-    fit <- regress(formula = value ~ environment,
-                   Vformula = ~ line_name + gt + R, 
-                   data = df, identity = FALSE, pos = rep(TRUE, 3))
+    wts <- pull(to_model, std_error)^2
     
-    # Reorganize the BLUPs
-    blup_out <- BLUP(model = fit)
+    # Control for lmer
+    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+
+    # Fit the model
+    fit <- lmer(formula = form, data = to_model, control = lmer_control, weights = wts)
     
-    BLUPs <- blup_out$Mean %>% 
-      data_frame(term = names(.), value = .) %>% 
-      separate(col = term, into = c("term", "line_name", "environment"), 
-               sep = "\\.", fill = "right") %>%
-      select(-term)
-    y
-    data_frame(mod = list(fit), BLUPs = list(BLUPs), BLUP_Covar = list(blup_out$Covariance), 
-               n_e = n_e, n_r = n_r)  })
-
-## Load the data that was generated via MSI
-load(file.path(pheno_dir, "S2_MET_heritability_results.RData"))
-
+    # Fit a reduced model
+    suppressWarnings(fit_reduced <- lmer(formula = form_reduced, data = to_model, control = lmer_control, 
+                        weights = wts))
+    
+    # Calculate heritability
+    suppressWarnings(herit <- herit_boot(object = fit, 
+                        exp = "line_name / (line_name + (line_name:environment / n_e) + (Residual / n_r))", 
+                        boot.reps = 500, n_e = n_e, n_r = n_r))
+    
+    bind_cols(data_frame(mod = list(fit), mod_reduced = list(fit_reduced),
+                         n_e = n_e, n_r = n_r), herit) })
 
 ```
 
@@ -223,21 +236,18 @@ The $LR$ is $\chi^2$ distributed with 1 degree of freedom (since we dropped one 
 
 ```{r lrt}
 
-# Combine Log-likelihoods
-reduced_mod_llik <- reduced_mod %>% 
-  mutate(reduced_mod_llik = sapply(mod, "[", "llik")) %>% 
-  select(trait, reduced_mod_llik) %>% 
-  unnest()
+# Calculate the log-likelihoods and LRT
+log_likelihoods <- stage_two %>% 
+  select(trait, contains("mod")) %>% 
+  gather(type, model, -trait) %>% 
+  mutate(logLik = map_dbl(model, logLik))
 
-full_mod_llik <- stage_two %>% 
-  mutate(full_mod_llik = sapply(mod, "[", "llik")) %>% 
-  select(trait, full_mod_llik) %>% 
-  unnest()
+(LRT <- log_likelihoods %>%
+  select(trait, type, logLik) %>% 
+  spread(type, logLik) %>%
+  mutate(lr = -2 * (mod_reduced - mod),
+         p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2))
 
-# Perform the likelihood ratio test and test the significance
-full_join(reduced_mod_llik, full_mod_llik) %>% 
-  mutate(lr = -2 * (reduced_mod_llik - full_mod_llik), 
-         p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2)
 
 
 ```
@@ -272,23 +282,21 @@ Now calculate heritability across all environments
 
 ```{r calc.herit.all}
 
-# Calculate heritability across environments
-var_comp_all <- stage_two %>% 
-  mutate(sigma = lapply(mod, "[[", "sigma") %>% 
-           lapply(t) %>% 
-           lapply(as.data.frame)) %>% 
-  select(trait, sigma, n_e, n_r) %>% 
-  unnest(sigma)
-
-(s2met_herit <- var_comp_all %>% 
-  mutate(H = (line_name) / (line_name + (gt / n_e) + (R / (n_e * n_e)))))
-
 # Plot
-s2met_herit %>%
-  ggplot(aes(x = trait, y = H)) +
+stage_two %>% 
+  mutate(H_corr = heritability - bias) %>%
+  ggplot(aes(x = trait, y = H_corr, ymin = ci_lower, ymax = ci_upper)) +
   geom_col() +
+  geom_errorbar(width = 0.5) +
   ylab("Heritability") +
-  xlab("Trait")
+  xlab("Trait") +
+  labs(
+    title = "Broad-Sense Heritability of Each Trait Across All Environments",
+    subtitle = "Estimates have been corrected for bias and error bars reflect\na 95% confidence interval of 500 bootstrap replications."
+  )
+
+# Calculate the proportion of the phenotypic variance explained by each variance component
+
   
 ```
   
