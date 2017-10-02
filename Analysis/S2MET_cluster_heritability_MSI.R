@@ -291,7 +291,7 @@ clust_df <- dist_df %>%
   summarize_all(funs(map_hclust))
 
 # Set a maximum for the number of clusters
-max_K <- 10
+max_K <- 22
 
 
 

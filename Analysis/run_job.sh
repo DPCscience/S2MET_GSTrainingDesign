@@ -15,4 +15,4 @@ cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET
 module load R/3.4.0
 
 # Heritability
-Rscript Analysis/S2_MET_heritability_MSI.R
+Rscript Analysis/S2MET_cluster_heritability_MSI.R
