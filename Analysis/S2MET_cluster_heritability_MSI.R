@@ -167,8 +167,8 @@ S2_MET_BLUPs <- S2_MET_BLUEs_use %>%
 
 
 # # Save these results
-# save_file <- file.path(result_dir, "S2_MET_BLUPs.RData")
-# save("S2_MET_BLUPs", file = save_file)
+save_file <- file.path(result_dir, "S2_MET_BLUPs.RData")
+save("S2_MET_BLUPs", file = save_file)
 
 
 # Fit a new model with compound symmetry and get the GxE BLUPs
@@ -224,11 +224,11 @@ ge_mean_D <- S2_MET_BLUEs_use %>%
 
 # Factor analysis
 ge_mean_FA <- S2_MET_BLUPs %>%
-  summarize(fa_out = list(fa(r = BLUP[[1]], nfactors = 2))) %>%
+  do(fa_out = fa(r = .$BLUP[[1]], nfactors = 2, rotate = "varimax")) %>%
   # Grab the loadings
-  mutate(delta = list(structure(fa_out[[1]]$loadings, class = "matrix"))) %>%
+  mutate(delta = list(structure(fa_out$loadings, class = "matrix"))) %>%
   # Distance matrix
-  mutate(FA = list(dist(delta[[1]])))
+  mutate(FA = list(dist(delta)))
 
 
 # Number of PCs to choose for GxE BLUPs and ECs

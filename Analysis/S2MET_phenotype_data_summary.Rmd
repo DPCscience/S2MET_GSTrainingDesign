@@ -18,6 +18,7 @@ library(tidyverse)
 library(broom)
 library(stringr)
 library(readxl)
+library(modelr)
 library(pbr)
 library(rrBLUP)
 library(ggridges)
@@ -75,10 +76,21 @@ Visualization of distributions
 
 ```{r pheno.viz}
 
-S2_MET_BLUEs %>%
+(g_met_dist <- S2_MET_BLUEs %>%
   ggplot(aes(x = value, y = environment, fill = environment)) +
   geom_density_ridges() +
-  facet_grid(. ~ trait, scales = "free_x")
+  facet_grid(. ~ trait, scales = "free_x") +
+  scale_fill_discrete(guide = FALSE) +
+  ylab("Environment") +
+  xlab("") +
+  labs(
+    title = "Trait Distributions in All Environments"
+  ))
+
+# Save it
+save_file <- file.path(fig_dir, "met_trait_dist.jpg")
+ggsave(filename = save_file, plot = g_met_dist, width = 7, height = 5)
+
 
 ```
 
@@ -175,18 +187,13 @@ This will be run on MSI?
 
 ```{r herit.across}
 
-
 # Group by trait and fit the multi-environment model
-stage_two <- S2_MET_BLUEs %>%
+stage_two_fits <- S2_MET_BLUEs %>%
   group_by(trait) %>%
-  # Fit the models
   do({
     
-    # Model formula
-    form <- value ~ environment + (1|line_name) + (1|line_name:environment)
-    form_reduced <- value ~ environment + (1|line_name)
-    
-    to_model <- droplevels(.)
+    to_model <- droplevels(.) %>%
+      mutate(value = scale(value))
     
     # Table of lines by environments (i.e. plots)
     plot_table <- xtabs(formula = ~ line_name + environment, data = to_model)
@@ -201,25 +208,26 @@ stage_two <- S2_MET_BLUEs %>%
     n_r <- plot_table %>% 
       harm_mean()
     
+    # Define the models to fit
+    forms <- formulas(~ value,
+                      base = ~ environment + (1|line_name),
+                      full = ~ environment + (1|line_name) + (1 | line_name:environment),
+                      fuller = ~ environment + (1|line_name) + (1|line_name:year) + 
+                        (1|line_name:location) + (1|line_name:location:year))
+
+    # Lmer control
+    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+        
+    # Get the weights
     wts <- pull(to_model, std_error)^2
     
-    # Control for lmer
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+    # Fit the models and return
+    fits <- fit_with(data = to_model, lmer, forms, weights = wts, control = lmer_control)
+    
+    # Return data_frame
+    data_frame(fits = list(fits), n_e = n_e, n_r = n_r) })
 
-    # Fit the model
-    fit <- lmer(formula = form, data = to_model, control = lmer_control, weights = wts)
-    
-    # Fit a reduced model
-    suppressWarnings(fit_reduced <- lmer(formula = form_reduced, data = to_model, control = lmer_control, 
-                        weights = wts))
-    
-    # Calculate heritability
-    suppressWarnings(herit <- herit_boot(object = fit, 
-                        exp = "line_name / (line_name + (line_name:environment / n_e) + (Residual / n_r))", 
-                        boot.reps = 500, n_e = n_e, n_r = n_r))
-    
-    bind_cols(data_frame(mod = list(fit), mod_reduced = list(fit_reduced),
-                         n_e = n_e, n_r = n_r), herit) })
+
 
 ```
 
@@ -236,18 +244,12 @@ The $LR$ is $\chi^2$ distributed with 1 degree of freedom (since we dropped one 
 
 ```{r lrt}
 
-# Calculate the log-likelihoods and LRT
-log_likelihoods <- stage_two %>% 
-  select(trait, contains("mod")) %>% 
-  gather(type, model, -trait) %>% 
-  mutate(logLik = map_dbl(model, logLik))
-
-(LRT <- log_likelihoods %>%
-  select(trait, type, logLik) %>% 
-  spread(type, logLik) %>%
-  mutate(lr = -2 * (mod_reduced - mod),
+(stage_two_lrt <- stage_two_fits %>% 
+  mutate(llik = map(fits, ~map_df(., logLik))) %>% 
+  unnest(llik) %>%
+  select(-fits:-n_r, -fuller) %>%
+  mutate(lr = -2 * (base - full),
          p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2))
-
 
 
 ```
@@ -282,8 +284,20 @@ Now calculate heritability across all environments
 
 ```{r calc.herit.all}
 
+# Extract the full model and calculate heritability
+stage_two_herit <- stage_two_fits %>% 
+  ungroup() %>% 
+  mutate(full_fit = lapply(.$fits, "[[", "full")) %>%
+  group_by(trait) %>%
+  do({
+    # Calculate heritability
+    suppressWarnings(herit_boot(object = .$full_fit[[1]], 
+                        exp = "line_name / (line_name + (line_name:environment / n_e) + (Residual / n_r))", 
+                        boot.reps = 500, n_e = .$n_e, n_r = .$n_r)) })
+    
+
 # Plot
-stage_two %>% 
+stage_two_herit %>% 
   mutate(H_corr = heritability - bias) %>%
   ggplot(aes(x = trait, y = H_corr, ymin = ci_lower, ymax = ci_upper)) +
   geom_col() +
@@ -292,14 +306,50 @@ stage_two %>%
   xlab("Trait") +
   labs(
     title = "Broad-Sense Heritability of Each Trait Across All Environments",
-    subtitle = "Estimates have been corrected for bias and error bars reflect\na 95% confidence interval of 500 bootstrap replications."
+    subtitle = "Estimates have been corrected for bias and error bars reflect\na 95% confidence interval of 500 bootstrap replications.",
+    caption = expression("Equation: "~frac(sigma[g]^2, sigma[g]^2 + frac(sigma[ge]^2, n[e]) + 
+                                                  frac(sigma[epsilon]^2, n[e]*n[r]))))
   )
-
-# Calculate the proportion of the phenotypic variance explained by each variance component
 
   
 ```
   
+
+What is the proportion of each variance component to the total phenotypic variance?
+
+```{r var.prop}
+
+stage_two_prop_varcomp <- stage_two_fits %>% 
+  ungroup() %>% 
+  mutate(full_fit = lapply(.$fits, "[[", "full")) %>%
+  group_by(trait) %>% 
+  mutate(var_comp = list(as.data.frame(VarCorr(full_fit[[1]])))) %>%
+  # Calculate variance components
+  unnest(var_comp) %>% 
+  select(trait:grp, vcov) %>% 
+  spread(grp, vcov) %>% 
+  rename(varG = line_name) %>%
+  mutate(varGE = `line_name:environment` / n_e, 
+         varR = Residual / (n_e * n_r), 
+         varP = varG + varGE + varR) %>%
+  select(trait, starts_with("var")) %>% 
+  gather(var_comp, value, -trait, -varP) %>%
+  mutate(prop_value = value / varP)
+
+# Plot
+stage_two_prop_varcomp %>%
+  ggplot(aes(x = trait, y = prop_value, fill = var_comp)) +
+  geom_col() +
+  ylab("Proportion") +
+  xlab("Trait") + 
+  scale_fill_discrete(guide = guide_legend(title = "Variance Component")) +
+  labs(
+    title = "Proportion of Variance Components to Phenotypic Variance"
+  ) +
+  theme_bw()
+
+
+```
 
 
 ## Environmental Correlations
