@@ -4,8 +4,8 @@
 ## and calculate the within and across-cluster heritabilities.
 
 # List of packages
-packages <- c("tidyverse", "stringr", "readxl", "modelr", "psych", "parallel", "pbr",
-              "purrrlyr")
+packages <- c("dplyr", "tidyr", "tibble", "purrr", "readr", "stringr", "readxl", "modelr", 
+              "psych", "parallel", "pbr", "purrrlyr")
  
 # Set the directory of the R packages
 package_dir <- NULL
