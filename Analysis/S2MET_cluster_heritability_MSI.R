@@ -4,48 +4,9 @@
 ## and calculate the within and across-cluster heritabilities.
 
 # List of packages
-packages <- c("tidyverse", "stringr", "readxl", "modelr", "psych", "parallel",
+packages <- c("tidyverse", "stringr", "readxl", "modelr", "psych", "parallel", "pbr",
               "purrrlyr")
-
-# Add a function from pbr that is not working
-herit <- function(object, exp, ...) {
-  
-  # Remove colons from the expression
-  exp1 <- str_replace_all(string = exp, pattern = ":", replacement = "")
-  
-  # Get variance components
-  var_comp <- as.data.frame(VarCorr(object))
-  
-  # Capture the other arguments
-  other_args <- list(...)
-  
-  # Create a new environment to evaluate expressions and assign values
-  exp_env <- new.env(parent = parent.frame())
-  
-  # Extract other terms and create objects
-  for (obj in names(other_args)) assign(x = obj, value = other_args[[obj]], envir = exp_env)
-  
-  # Parse the equation text
-  exp_parsed <- parse(text = exp1)
-  
-  # Extract the variance components from the model and assign to individual objects
-  for (term in var_comp$grp) {
-    # Remove colons
-    term_name <- str_replace_all(string = term, pattern = ":", replacement = "")
-    
-    assign(x = term_name, value = subset(var_comp, grp == term, vcov, drop = TRUE),
-           envir = exp_env)
-    
-  }
-  
-  # Assign the parsed expression to the environment
-  assign(x = "exp_parsed", value = exp_parsed, envir = exp_env)
-  
-  # Evaluate the exp expression and return the heritability
-  eval(expr = exp_parsed, envir = exp_env)
-  
-}
-
+ 
 # Set the directory of the R packages
 package_dir <- NULL
 package_dir <- "/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-library/3.4/"
@@ -291,7 +252,7 @@ clust_df <- dist_df %>%
   summarize_all(funs(map_hclust))
 
 # Set a maximum for the number of clusters
-max_K <- 22
+max_K <- 20
 
 
 
@@ -321,7 +282,9 @@ cluster_herit_all <- clust_df_tomodel %>%
     
         # Assign clusters to the dataset
         S2_MET_BLUEs_clusters <- left_join(S2_MET_BLUEs, clusters, "environment") %>%
-          mutate(cluster = as.factor(cluster)) %>%
+          mutate(cluster = as.factor(cluster),
+                 ge = interaction(line_name, environment),
+                 gc = interaction(line_name, cluster)) %>%
           filter(trait == i$trait) %>%
           droplevels()
         
@@ -345,12 +308,8 @@ cluster_herit_all <- clust_df_tomodel %>%
     
         # List of models
         forms <- formulas(~ value,
-                          no_gc = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
-                            (1 |line_name:environment:cluster),
-                          no_gce = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
-                            (1 | line_name:cluster),
-                          full = ~ (1 | line_name) + environment + (1 | line_name:environment) + 
-                            (1 | line_name:cluster) + (1 | line_name:environment:cluster) )
+                          no_gc = ~ (1 | line_name) + environment + (1|ge) + (1|cluster/ge),
+                          full = ~ (1 | line_name) + environment + (1|ge) + (1|gc) + (1|cluster/ge) )
         
         # lmer control
         lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
@@ -370,8 +329,8 @@ cluster_herit_all <- clust_df_tomodel %>%
         # Calculate heritability
         ## Define some expressions
         herits <- list(
-          exp_a = "line_name / (line_name + (line_name:cluster / n_c) + (line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))",
-          exp_w = "(line_name + line_name:cluster) / (line_name + line_name:cluster + (n_c * ((line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))))"
+          exp_a = "line_name / (line_name + (gc / n_c) + (ge:cluster / n_e) + (Residual / (n_r * n_e)))",
+          exp_w = "(line_name + gc) / (line_name + gc + (n_c * ((ge:cluster / n_e) + (Residual / (n_r * n_e)))))"
           ) %>%
           map_df(function(x) herit(object = subset(fits, mod == "full")$fit[[1]], exp = x,
                                    n_r = n_r, n_c = n_c, n_e = n_e))
@@ -380,7 +339,7 @@ cluster_herit_all <- clust_df_tomodel %>%
           rename_all(str_replace_all, pattern = "exp", replacement = "herit")
         
         # Return data_frame
-        data_frame(fit_summ = list(fits_summs), herit = list(herit_summ))
+        bind_cols(data_frame(fit_summ = list(fits_summs)), herit_summ)
      
       })
     
