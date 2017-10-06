@@ -76,7 +76,19 @@ Visualization of distributions
 
 ```{r pheno.viz}
 
+# Sort on grain yield environmental mean
+env_order <- S2_MET_BLUEs %>% 
+  mutate_if(is.character, as.factor) %>% 
+  group_by(environment, trait) %>% 
+  mutate(env_mean = mean(value, na.rm = TRUE)) %>% 
+  filter(trait == "GrainYield") %>% 
+  complete(environment) %>%
+  arrange(env_mean) %>%
+  pull(environment) %>% 
+  unique()
+
 (g_met_dist <- S2_MET_BLUEs %>%
+  mutate(environment = parse_factor(environment, levels = env_order)) %>%
   ggplot(aes(x = value, y = environment, fill = environment)) +
   geom_density_ridges() +
   facet_grid(. ~ trait, scales = "free_x") +
@@ -86,6 +98,8 @@ Visualization of distributions
   labs(
     title = "Trait Distributions in All Environments"
   ))
+
+# Sort
 
 # Save it
 save_file <- file.path(fig_dir, "met_trait_dist.jpg")

@@ -149,57 +149,78 @@ mds_method <- clust_method_df %>%
   group_by(trait) %>%
   summarize_all(funs(map_cmdscale)) %>%
   gather(method, data, -trait) %>% 
+  mutate(method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist"))) %>%
   unnest() %>%
   # Assign years to environments
   mutate(year = str_c("20", str_extract(environment, "[0-9]{2}$")))
 
+# Normal plot with facet_wrap
+(g_clust_spat <- mds_method %>%
+  ggplot(aes(x = PCo1, y = PCo2, col = year)) +
+  geom_point() +
+  facet_wrap(trait ~ method, scales = "free", ncol = 5) +
+  scale_color_discrete(guide = guide_legend(title = "Year")) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 5)
+  ) +
+  labs(
+    title = "Spatial Relationship of Environments",
+    subtitle = "Environmental relationships defined by 5 different distance methods."
+  ))
 
-# Plot per trait
-traits <- unlist(distinct(mds_method, trait))
-
-# List to store ggpots
-gg_list <- list()
-
-for (i in seq_along(traits)) {
-  
-  tr <- traits[i]
-  
-   g <- mds_method %>%
-    filter(trait == tr) %>%
-    ggplot(aes(x = PCo1, y = PCo2, col = year)) +
-    geom_point() +
-    facet_wrap(~ method, scales = "free", ncol = 5) +
-    theme(
-      axis.text = element_text(size = 5)
-    )
-  
-  if (i == 1) {
-    g <- g + 
-      ylab("") + 
-      xlab("") +
-      scale_color_discrete(guide = FALSE)
-    
-  } else if (i == 2) {
-    g <- g + 
-      theme(strip.background = element_blank(),
-            strip.text = element_blank())  +
-      xlab("")
-
-  } else if (i == 3) {
-    g <- g + 
-      theme(strip.background = element_blank(),
-            strip.text = element_blank())  +
-      ylab("") +
-      scale_color_discrete(guide = FALSE)
-  }
-   
-  gg_list[[tr]] <- g
-  
-}
-
-gg_list1 <- map(gg_list, ggplotGrob)
+save_file <- file.path(fig_dir, "env_spatial_rel.jpg")
+ggsave(filename = save_file, plot = g_clust_spat, width = 8, height = 6)
 
 
+
+# 
+# # Plot per trait
+# traits <- as.character(unique(mds_method$trait))
+# 
+# # List to store ggpots
+# gg_list <- list()
+# 
+# for (i in seq_along(traits)) {
+#   
+#   tr <- traits[i]
+#   
+#    g <- mds_method %>%
+#     filter(trait == tr) %>%
+#     ggplot(aes(x = PCo1, y = PCo2, col = year)) +
+#     geom_point() +
+#     facet_wrap(trait ~ method, scales = "free", ncol = 5, ) +
+#     theme(
+#       axis.text = element_text(size = 5),
+#       plot.margin = unit(x = c(0, 0.1, 0, 0.1), units = "cm")
+#     )
+#   
+#   if (i == 1) {
+#     g <- g + 
+#       ylab("") + 
+#       xlab("") +
+#       scale_color_discrete(guide = FALSE)
+#     
+#   } else if (i == 2) {
+#     g <- g + 
+#       theme(strip.background = element_blank(),
+#             strip.text = element_blank())  +
+#       xlab("")
+# 
+#   } else if (i == 3) {
+#     g <- g + 
+#       theme(strip.background = element_blank(),
+#             strip.text = element_blank())  +
+#       ylab("") +
+#       scale_color_discrete(guide = FALSE)
+#   }
+#    
+#   gg_list[[tr]] <- g
+#   
+# }
+# 
+# (g_merge <- cowplot::plot_grid(plotlist = gg_list, ncol = 1, align = "v", 
+#                               axis = "tblr"))
 
 ```
 
@@ -214,6 +235,7 @@ load(file.path(result_dir, "S2_MET_cluster_heritability.RData"))
 
 # Convert some variables
 cluster_herit_all_use <- cluster_herit_all %>% 
+  bind_rows() %>%
   ungroup() %>%
   mutate(k = as.factor(k),
          method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
@@ -221,7 +243,6 @@ cluster_herit_all_use <- cluster_herit_all %>%
 #Extract heritability results and plot
 cluster_herit_all1 <- cluster_herit_all_use %>% 
   ungroup() %>% 
-  unnest(herit) %>% 
   select(-fit_summ) %>% 
   gather(herit_type, value, -trait:-k) %>%
   mutate(k = parse_number(k))
@@ -240,7 +261,7 @@ cluster_herit_all1 <- cluster_herit_all_use %>%
   
 # Save it
 save_file <- file.path(fig_dir, "cluster_heritability.jpg")
-ggsave(filename = save_file, plot = g_herit_clust, width = 10, height = 10)
+ggsave(filename = save_file, plot = g_herit_clust, width = 8, height = 5)
 
 
 ```
@@ -274,17 +295,21 @@ cluster_varcomp <- cluster_herit_all_use %>%
          grp != "Residual") %>% 
   select(trait:grp, vcov)
 
+# What is the range in cluster k?
+k_range <- 
+
 
 # Plot G and GxS sd over methods and k
-(g_cluster_varcomp <- full_join(cluster_varcomp, gc_lrt) %>% 
-  filter(grp %in% c("line_name", "line_name:cluster")) %>%
-  mutate(k = as.factor(k),
-         grp = parse_factor(grp, levels = c("line_name", "line_name:cluster")),
+(g_cluster_varcomp <- full_join(cluster_varcomp, gc_lrt, by = c("trait", "method", "k", "grp")) %>% 
+  filter(grp %in% c("line_name", "gc")) %>%
+  mutate(grp = parse_factor(grp, levels = c("line_name", "gc")),
          sig = ifelse(p_value < 0.001, "***", 
                       ifelse(p_value < 0.01, "**", ifelse(p_value < 0.05, "*", "")))) %>% 
   # Find the proportion of the usable genetic variance explained by g or gc
   group_by(trait, method, k) %>% 
-  mutate(prop_var = vcov / sum(vcov)) %>% 
+  mutate(prop_var = vcov / sum(vcov, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(k = parse_number(k)) %>%
   ggplot(aes(x = k, y = prop_var, fill = method, alpha = grp, group = method)) +
   geom_col(position = "stack", col = "black") + 
   # geom_label(aes(y = 0.5, label = sig, angle = 90)) +
@@ -295,9 +320,8 @@ cluster_varcomp <- cluster_herit_all_use %>%
   xlab("Number of Clusters") +
   labs(
     title = "Contributions to Usable Genetic Variance",
-    subtitle = expression('Relative proportions of'~sigma[g]^2~'and'~sigma[gs]^2~'to the usable genetic variance'),
-    caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
-    ) +
+    subtitle = expression('Relative proportions of'~sigma[g]^2~'and'~sigma[gs]^2~'to the usable genetic variance')
+  ) +
   theme_bw())
 
 # Save it
@@ -309,11 +333,67 @@ ggsave(filename = save_file, plot = g_cluster_varcomp, width = 8, height = 6)
 
 
 
-
-
-
-
 ### Predictions
+
+#### Add More Distance Enviroments
+
+Using the distance metrics above, start with each prediction environment and add increasingly more distant environments. Fit the model (assuming homogeneity of genetic variance) and assess prediction accuracy.
+
+
+```{r}
+
+# Load the data
+load(file.path(result_dir, "S2MET_pred_by_env_dist.RData"))
+
+# Remove missing
+add_one_env_pred1 <- add_one_env_pred %>%
+  .[!map_lgl(., inherits, "try-error")] %>% 
+  bind_rows() %>%
+  unnest() %>% 
+  select(-trait1:-environment1)
+
+# Standardize the cumulative distance
+add_one_env_pred_stand <- add_one_env_pred1 %>% 
+  # group_by(method) %>% 
+  # mutate(distance = scale(distance)) %>%
+  group_by(trait, method, environment) %>% 
+  # mutate(cum_mean_dist = cummean(distance)) %>%
+  mutate(cum_mean_scale = scale(cum_mean_dist),
+         n = 1, n_env = cumsum(n)) %>%
+  ungroup() %>%
+  mutate(cum_mean_scale = cum_mean_scale - min(cum_mean_scale))
+
+# Summarize across all environments for a method
+add_one_env_pred_summ <- add_one_env_pred_stand %>% 
+  group_by(trait, method, n_env) %>% 
+  summarize(mean_cor = mean(cor), sd_cor = sd(cor), avg_dist = mean(distance)) %>%
+  mutate(cum_mean_dist = cummean(avg_dist),
+         cum_mean_scale = scale(cum_mean_dist)) %>%
+  ungroup() %>%
+  mutate(cum_mean_scale = cum_mean_scale - min(cum_mean_scale))
+
+
+
+# add_one_env_pred_stand %>%
+add_one_env_pred_summ %>%
+  # filter(environment == "CRM16") %>%
+  ggplot(aes(x = cum_mean_scale, y = mean_cor, col = method, shape = method)) +
+  geom_point() +
+  geom_line() +
+  # geom_errorbar(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor)) +
+  facet_wrap( ~ trait, ncol = 2) +
+  ylab("Prediction Accuracy") +
+  xlab("Cumulative Environmental Distance")
+  
+
+
+
+```
+
+
+
+
+
 
 Using the clustering procedures from above, perform predictions among mega-environments
 

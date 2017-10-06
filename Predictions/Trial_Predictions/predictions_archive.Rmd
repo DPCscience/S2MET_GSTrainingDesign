@@ -881,6 +881,429 @@ VP_env <- pheno %>%
 
 
 
+### More predictions
+
+This has become a dump for old code
+
+
+### Model Description
+
+We will test a number of models and compare predictions
+
+#### Base Model
+
+Say there are *n* phenotypic observations total. Say also there are *I* genotypes total, and $I_o$ have phenotypic data and $I_u$ are unobserved. Say also there are *J* environments, and $J_o$ have phenotypic data and $J_u$ are unobserved. The $I_o$ unobserved genotypes are to be predicted in the $J_u$ environments.
+
+The basic model for genotypic and environment main effects is
+
+$$
+y_{ij} = G_i + E_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{e} 
+$$
+
+where $\mathbf{y}$ is a $n \times 1$ vector of phenotypes, $\mathbf{X}$ is a $n \times (I_o + J_o)$ design matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{\beta}$, which is a $(I_o + J_o) \times 1$ vector of fixed effects, and $\mathbf{e}$ is a $n \times 1$ vector of residual effects
+
+The above model assumes that genotypes and environments are fixed effects, and therefore predictions cannot be extended to unobserved genotypes or unobserved environments.
+
+#### Random Genotypes, Fixed Environments Model
+
+We can allow for prediction of unobserved genotypes by using a covariance structure to model the random genotype effects in the model
+
+$$
+y_{ij} = g_i + E_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{e} 
+$$
+
+where $\mathbf{Z}$ is a $n \times v$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{g}$, which is a $I \times 1$ vector of genotypic effects, assumed a random variable $\mathbf{g} \sim N(0, \mathbf{G} \sigma^2_g)$ and where $\mathbf{G}$ is a $I \times I$ genomic relationship matrix.
+
+Again, this model does not allow new environments to be predicted because information between environments is not shared.
+
+#### Random Genotypes, Random Environments Model
+
+We can allow for prediction of unobserved environments by using a covariance structure to model the random environmental effects in the model
+
+$$
+y_{ij} = g_i + t_j + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{e} 
+$$
+
+where $\mathbf{W}$ is a $n \times J$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{t}$, which is a $J \times 1$ vector of environmental effects, assumed a random variable $\mathbf{t} \sim N(0, \mathbf{E} \sigma^2_t)$ and where $\mathbf{E}$ is a $J \times J$ genomic relationship matrix.
+
+#### Random Genotypes, Random Environments, Random GxE Model
+
+We can allow for prediction of unobserved genotypes in unobserved environments by modeling the product of the covariance of environments and that of genotypes
+
+
+$$
+y_{ij} = g_i + t_j + (gt)_{ij} + \epsilon_{ij}
+$$
+
+and in matrix form
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{Uq} + \mathbf{e} 
+$$
+
+where $\mathbf{U}$ is a $n \times (v * l)$ incidence matrix relating the vector $\mathbf{y}$ with the vector $\mathbf{q}$, which is a $IJ\times 1$ vector of genotype-by-environmental effects, assumed a random variable $\mathbf{t} \sim N(0, \mathbf{\Omega} \sigma^2_t)$ and where $\mathbf{\Omega}$ is a $IJ \times IJ$ GEI relationship matrix computed by $\Omega = G \otimes E$
+
+
+## Methods
+
+## Phenotypic Data Manipulation
+
+### Matrix Construction
+
+
+#### Genomic Relationship Matrix
+
+The genomic relationship matrix $\mathbf{G}$ will be calculated as
+
+$$
+\mathbf{G} = \frac{\mathbf{ZZ'}}{c}
+$$
+
+where $\mathbf{Z} = \mathbf{M} - \mathbf{P}$, $\mathbf{M}$ is a $n \times m$ matrix of genotype calls with elements $m = \{ -1, 0, 1\}$, $\mathbf{P}$ is a $1 \times m$ vector of allele frequencies expressed as $P_i = 2(p_i - 0.5)$, $c$ is equal to $c = 2 \sum p_i(1 - p_i)$ and $p_i$ is the frequency of the 1 allele at the *i*th marker locus.
+
+Note the standardization constant is calculate among a population of unselected individuals [@VanRaden2008], in this case the training population
+
+
+#### Environmental Relationship Matrix
+
+We will look at two ways of making the environmental relationship matrix:
+
+The first is similar to the method above for the matrix $\mathbf{G}$, where the environment relationship matrix 
+
+$$
+\mathbf{E} = \frac{\mathbf{NN'}}{p}
+$$
+
+where $\mathbf{N}$ is a $J \times p$ matrix of environmental covariances that are centered and scaled for *J* environments and *p* enviornmental covariates.
+
+Assumptions
+
+- This method likely assumes that the environmental covariates are independent, which is certainly not the case (i.e. for daily temp covariances, which are highly correlated)
+- 
+
+
+Another method is to reduce the number of environmental covariates down to a series of linearly independent principal componments and use the correlation among principal components as the relationship matrix
+
+
+#### GEI Relationship Matrix
+
+The GEI relationship matrix $\Omega$ is calculated as the Kronecker product of the genomic and environmental relationship matrices
+
+$$
+\mathbf{\Omega} = \mathbf{G} \otimes \mathbf{E}
+$$
+
+where $\mathbf{\Omega}$ is a $IJ \times IJ$ matrix of genotype-environment interaction covariances
+
+
+
+### Predictions
+
+We need to develope a framework for predicting the vp in any environment using the tp from one or more other environments. We will first consider predicting the vp in Fargo using data from St Paul and Crookston.
+
+Here we will work to develop some functions or procedures for pulling out the phenotypic data from environments to predict and train. Additionally, we will develop incidence matrices for the genotypic effects, the environmental effects, and the interaction effects.
+
+
+Designate environments for prediction or validation
+
+
+#### Homogenous Variance
+
+The following models will operate under the assumption of homogeneous genetic variance across environment.
+
+
+##### Normal G-BLUP Model
+
+With this framework established, we will first predict using the regular G-BLUP model
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{e} 
+$$
+
+
+We will restrict our predictions to a single environment in all cases
+
+Now for each validation environment, use all training data except that environment
+
+
+
+```{r gblup2}
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/gblup2_results.RData")
+save("gblup2_results", file = save_file)
+
+# Load
+load_file <- file.path(pred_dir, "Results/gblup2_results.RData")
+load(load_file)
+
+# Perform a bootstrap correlation and plot
+gblup2_analysis <- gblup2_results %>% 
+  ungroup() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "GBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+# Plot
+gblup2_analysis %>%
+  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = "dodge", width = 0.5) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  scale_fill_manual(values = umn_palette("Secondary_Tier1")) +
+  labs(title = "G-BLUP Prediction Accuracy")
+
+
+# Save the analysis
+save_file <- file.path(proj_dir, "Analysis/gblup2_analysis.RData")
+save("gblup2_analysis", file = save_file)
+
+
+
+```
+
+
+##### Addtive GE-BLUP Model
+
+These models will account for the random environmental effect (using the environmental relationship matrix), but will not include interaction.
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{e} 
+$$
+
+
+Here we will only use the procedure where all training environments (minus the prediction environment) are used to predict that prediction environment.
+
+
+```{r a.geblup2}
+
+# Create a df of traits
+a_geblup2_results <- data_frame(
+  trait = traits, 
+  results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
+
+# Iterate over all traits
+## Predictions are done on MSI
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/a_geblup2_results.RData")
+save("a_geblup2_results", file = save_file)
+
+# Load
+load_file <- file.path(pred_dir, "Results/aGEBLUP_results.RData")
+load(load_file)
+
+# Perform a bootstrap correlation and plot
+a_geblup2_analysis <- a_geblup2_results %>% 
+  unnest() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "aGEBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+# Save the analysis
+save_file <- file.path(proj_dir, "Analysis/a_geblup2_analysis.RData")
+save("a_geblup2_analysis", file = save_file)
+
+
+
+```
+
+
+##### Interaction GE-BLUP Model
+
+These models will account for the random environmental effect (using the environmental relationship matrix) and random interaction between genotype and environment
+
+$$
+\mathbf{y} = \mathbf{X \beta} + \mathbf{Zg} + \mathbf{Wt} + \mathbf{Uq} + \mathbf{e} 
+$$
+
+
+Here we will only use the procedure where all training environments (minus the prediction environment) are used to predict that prediction environment.
+
+```{r i.geblup2}
+
+# Create a df of traits
+i_geblup2_results <- data_frame(trait = traits, 
+                                results = replicate(length(traits), data_frame(environment = env_pred), simplify = FALSE))
+
+# Iterate over all traits
+## The predictions are performed on MSI
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/i_geblup2_results.RData")
+save("i_geblup2_results", file = save_file)
+
+# Load results
+load_file <- file.path(pred_dir, "Results/iGEBLUP_results.RData")
+load(load_file)
+
+# Perform a bootstrap correlation and plot
+i_geblup2_analysis <- i_geblup2_results %>% 
+  unnest() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "iGEBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+# Save the analysis
+save_file <- file.path(proj_dir, "Analysis/i_geblup2_analysis.RData")
+save("i_geblup2_analysis", file = save_file)
+
+
+
+
+```
+
+
+Plot analyses
+
+```{r plot.analyses}
+
+load_files <- list.files(file.path(proj_dir, "Analysis"), pattern = "analysis.RData", full.names = TRUE)
+load(load_file)
+
+
+# Combine
+bind_rows(i_geblup2_analysis, a_geblup2_analysis, gblup2_analysis) %>%
+  mutate(model = parse_factor(model, levels = c("GBLUP2", "aGEBLUP2", "iGEBLUP2"))) %>%
+  ggplot(aes(x = environment, y = r_hat, fill = model, group = model, ymin = CI_lower, ymax = CI_upper)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = "dodge", width = 0.5) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  scale_fill_manual(values = umn_palette("Secondary_Tier1")) +
+  labs(title = "G-BLUP Prediction Accuracy")
+  
+
+
+```
+
+
+
+
+
+#### Heterogenous Variance Models
+
+The following models will assume that the genetic variance (i.e. $\sigma^2_G$) is different in each environment. These model are also known as a diagonal model
+
+##### Normal G BLUP
+
+```{r gblup2.diag}
+
+# Extract data on only the environments to test
+pheno_to_use <- pheno %>%
+  filter(environment %in% c(env_pred, env_train)) %>%
+  droplevels()
+
+# Iterate over all traits
+gblup2_diag_results <- expand.grid(environment = env_pred, trait = traits, stringsAsFactors = FALSE) %>%
+  group_by(environment, trait) %>%
+  do(pred_out = {
+    
+    env <- .$environment
+    
+    # Training and prediction phenotypes
+    pheno_train <- filter(pheno, environment != env, trait == .$trait) %>%
+      droplevels() %>%
+      filter(line_name %in% tp)
+    pheno_pred <- filter(pheno, line_name %in% vp, environment == env, trait == .$trait)
+    
+    solve_out <- mmer2(fixed = value ~ 1 + environment, random = ~ at(environment):g(line_name), 
+                       rcov = ~at(environment):units, data = pheno_train, G = list(line_name = G))
+    
+    # Extract random effects
+    ranefs <- randef(solve_out) })
+    
+    # Convert to data.frames
+    u_hat_df <- ranefs %>% 
+      reduce(., cbind) %>% 
+      as.data.frame() %>% 
+      structure(names = names(ranefs)) %>% 
+      rownames_to_column("ind") %>%
+      rename_at(vars(-ind), str_extract, "[A-Z]{3}[0-9]{2}") %>%
+      select(-vars(env_pred)) %>%
+      map(as.matrix) %>%
+      map(~data.frame(id = row.names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE)) %>% 
+      map(~separate(data = ., col = id, into = c("environment", "line_name"), sep = ":", 
+                    fill = ifelse(str_detect(.$id[1], "[A-Z]{3}[0-9]{2}"), "right", "left"))) %>%
+      map(~mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = ""))
+    
+    
+    u_hat_df <- solve_out$u %>% 
+      data.frame(id = names(.), u_hat = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+      separate(data = ., col = id, into = c("line_name", "environment"), sep = ":", 
+               fill = ifelse(str_detect(.$id[1], "environment"), "left", "right")) %>%
+      mutate_if(., .predicate = is.character, .funs = str_replace, pattern = "line_name|environment", replacement = "") %>%
+      filter(line_name %in% vp) 
+    
+    # Combine predictions with observations
+    pheno_pred %>% 
+      mutate_at(vars(environment, line_name), parse_character) %>% 
+      left_join(., dplyr::select(u_hat_df, -environment), by = "line_name") %>% 
+      rename(pred = u_hat)
+    
+    })
+
+# Save the results
+save_file <- file.path(pred_dir, "Results/gblup2_results.RData")
+save("gblup2_results", file = save_file)
+
+# Perform a bootstrap correlation and plot
+gblup2_analysis <- gblup2_results %>% 
+  ungroup() %>% 
+  unnest() %>% 
+  group_by(environment, trait) %>% 
+  do({pred_acc = boot_cor(x = .$value, y = .$pred, boot.reps = 1000)}) %>%
+  mutate(model = "GBLUP2") %>% 
+  dplyr::select(model, environment, trait, names(.))
+
+gblup2_analysis %>%
+  ggplot(aes(x = environment, y = r_hat)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.25) +
+  facet_grid(facets = trait ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  labs(
+    title = "G-BLUP2 Prediction Accuracy",
+    subtitle = "All Training Environments Except Validation Environment Used to Predict Each Validation Environment"
+  )
+
+
+```
+
+
+
+
 
 
 
