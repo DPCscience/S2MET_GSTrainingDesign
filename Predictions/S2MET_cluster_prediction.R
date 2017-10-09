@@ -79,6 +79,7 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   filter(line_name %in% c(tp_geno, vp_geno)) %>%
   mutate_if(is.character, as.factor) %>%
+  select(environment, line_name:std_error) %>%
   droplevels()
 
 # Detect cores
@@ -145,6 +146,8 @@ train_env <- S2_MET_BLUEs_use %>%
 dist_env_df1 <- left_join(pred_env, train_env, by = "trait") %>% 
   select(trait, pred_env = environment.x, train_env = environment.y) %>% 
   filter(pred_env != train_env) %>%
+  ungroup() %>%
+  mutate_at(vars(contains("env")), as.character) %>%
   left_join(., dist_env_df, by = c("trait", "pred_env" = "environment", "train_env" = "environment2")) %>%
   group_by(pred_env) %>%
   arrange(trait, method, pred_env, distance) %>%
@@ -158,7 +161,6 @@ add_one_env_pred <- dist_env_df1 %>%
   # Apply by core
   mclapply(function(core_df) {
     core_df %>% 
-      #slice(1:2) %>% # REMEMBER TO REMOVE THIS
       group_by(trait, method, pred_env) %>%
       do(pred_results = {
         
@@ -170,29 +172,34 @@ add_one_env_pred <- dist_env_df1 %>%
           mutate(cum_mean_dist = cummean(distance))
         
         # Add the prediction data
-        i_tomodel <- i_cummean %>%
-          rowwise() %>%
-          mutate(
-            pred_data = list({
-              S2_MET_BLUEs_use %>%
-                filter(trait == trait[[1]], environment == pred_env[[1]], line_name %in% vp_geno) %>%
-                mutate(line_name = as.character(line_name)) %>%
-                subset(select = c(line_name, value)) }),
-            # Add training data
-            train_data = list({
-              S2_MET_BLUEs_use %>%
-                filter(trait == unique(i_cummean$trait), environment == train_env[[1]]) %>%
-                filter(line_name %in% tp_geno) })
-          ) %>%
+        i_cummean_pred <- i_cummean %>%
+          left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% vp_geno), 
+                    by = c("trait", "pred_env" = "environment")) %>%
+          group_by_at(vars(trait:cum_mean_dist)) %>% 
+          nest(line_name:std_error, .key = "pred_data") %>%
+          ungroup()
+        
+        # Add the training data
+        i_cummean_train <- i_cummean %>%
+          left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% tp_geno), 
+                    by = c("trait", "train_env" = "environment")) %>%
+          mutate(environment = train_env) %>%
+          group_by_at(vars(trait:cum_mean_dist)) %>% 
+          nest(environment, line_name:std_error, .key = "train_data") %>%
           ungroup() %>%
           # Accumulate the training data
           mutate(train_data = accumulate(train_data, bind_rows))
         
+        # Combine
+        i_tomodel <- full_join(i_cummean_pred, i_cummean_train,
+                               by = c("trait", "method", "pred_env", "train_env", "distance", "cum_mean_dist"))
+          
+        
         # Vector of prediction accuracies
-        pred_acc_vec <- vector("list", length = nrow(i_cummean))
+        pred_acc_vec <- vector("list", length = nrow(i_tomodel))
         
         # Iterate over the list of environments
-        for (r in seq(nrow(i_tomodel))) {
+        for (r in seq_along(pred_acc_vec)) {
           
           # Model frame
           mf <- model.frame(value ~ line_name + environment + std_error, data = i_tomodel$train_data[[r]])
@@ -217,9 +224,13 @@ add_one_env_pred <- dist_env_df1 %>%
             rownames_to_column("line_name") %>% 
             rename(pgv = T1)
           
+          # Extract the validation data
+          pred_data <- pull(i_tomodel, pred_data)[[r]] %>%
+            mutate(line_name = as.character(line_name))
+          
           ## Measure accuracy
-          pred_acc_vec[[r]]  <- left_join(i_tomodel$pred_data[[r]], pgv, by = "line_name") %>%
-            do({pred_acc = boot_cor(x = .$pgv, y = .$value, boot.reps = 1000)})
+          pred_acc_vec[[r]]  <- left_join(pred_data, pgv, by = "line_name") %>%
+            do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
           
         }
           

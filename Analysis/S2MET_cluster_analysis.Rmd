@@ -21,54 +21,10 @@ library(pbr)
 library(cluster)
 library(purrrlyr)
 
-
 # The head directory
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 
-fig_dir <- file.path(proj_dir, "Figures/")
-pred_dir <- file.path(proj_dir, "Predictions")
-entry_dir <- file.path(proj_dir, "Plant_Materials")
-analysis_dir <- file.path(proj_dir, "Analysis")
-result_dir <- file.path(proj_dir, "Results")
-
-# Other directories
-geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
-env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
-pheno_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/Phenotype_Data/"
-# Directory where entry data is located
-entry_dir <- file.path(proj_dir, "Plant_Materials")
-
-
-## Load Data
-# Load the genotypic data
-load(file.path(geno_dir, "S2_genos_mat.RData"))
-
-# Load the phenotypic data
-load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
-
-# Load environmental data
-load(file.path(env_var_dir, "environmental_data_compiled.RData"))
-
-## Load the entry data
-entry_list <- file.path(entry_dir, "S2MET_project_entries.xlsx") %>%
-  read_excel()
-
-# Separate into entries and checks
-entries <- entry_list %>% 
-  filter(Class %in% c("S2TP", "S2C1R"))
-
-## Separate the TP and VP
-tp <- entries %>%
-  filter(Class == "S2TP") %>%
-  pull(Line)
-
-vp <- entries %>%
-  filter(Class == "S2C1R") %>%
-  pull(Line)
-
-checks <- entry_list %>% 
-    filter(Class == "Check") %>%
-    pull(Line)
+source(file.path(proj_dir, "source.R"))
 
 ```
 
@@ -162,11 +118,12 @@ mds_method <- clust_method_df %>%
   scale_color_discrete(guide = guide_legend(title = "Year")) +
   theme_bw() +
   theme(
-    axis.text = element_text(size = 5)
+    axis.text = element_blank(),
   ) +
   labs(
     title = "Spatial Relationship of Environments",
-    subtitle = "Environmental relationships defined by 5 different distance methods."
+    subtitle = "Environmental relationships defined by 5 different distance methods.",
+    caption = "Note: scales are different for each distance method and trait. The 'EC' methods are identical across traits."
   ))
 
 save_file <- file.path(fig_dir, "env_spatial_rel.jpg")
@@ -257,7 +214,8 @@ cluster_herit_all1 <- cluster_herit_all_use %>%
       title = "Broad-Sense Heritability of Clustering Methods",
       subtitle = "'across' defines the heritability of selection across all mega-environments, and\n'within' defines the heritability of selection within mega-environments",
       caption ="D: clustering using Ouyang (1995) distance measure;\nFA: clustering using a factor analysis and 2 environmental loadings;\nPCA: clustering using the first 2 PCs of the GEI BLUPs;\nEC_one: clustering using the first 2 PCs of one-year environmental covariables;\nEC_multi: clustering using the first 2 PCs of the ten-year average of environmental covariables"
-    ))
+    ) +
+  theme_bw())
   
 # Save it
 save_file <- file.path(fig_dir, "cluster_heritability.jpg")
@@ -296,7 +254,7 @@ cluster_varcomp <- cluster_herit_all_use %>%
   select(trait:grp, vcov)
 
 # What is the range in cluster k?
-k_range <- 
+# k_range <- 
 
 
 # Plot G and GxS sd over methods and k
@@ -335,7 +293,7 @@ ggsave(filename = save_file, plot = g_cluster_varcomp, width = 8, height = 6)
 
 ### Predictions
 
-#### Add More Distance Enviroments
+#### Add More Distant Enviroments
 
 Using the distance metrics above, start with each prediction environment and add increasingly more distant environments. Fit the model (assuming homogeneity of genetic variance) and assess prediction accuracy.
 
@@ -347,26 +305,37 @@ load(file.path(result_dir, "S2MET_pred_by_env_dist.RData"))
 
 # Remove missing
 add_one_env_pred1 <- add_one_env_pred %>%
-  .[!map_lgl(., inherits, "try-error")] %>% 
+  # .[!map_lgl(., inherits, "try-error")] %>% 
   bind_rows() %>%
   unnest() %>% 
-  select(-trait1:-environment1)
+  select(-trait1:-core)
+
+## Remove observations in which the number of environments is greater than the
+## minimum for any trait, method, pred_env combination
 
 # Standardize the cumulative distance
 add_one_env_pred_stand <- add_one_env_pred1 %>% 
   # group_by(method) %>% 
   # mutate(distance = scale(distance)) %>%
-  group_by(trait, method, environment) %>% 
+  group_by(trait, method, pred_env) %>% 
   # mutate(cum_mean_dist = cummean(distance)) %>%
-  mutate(cum_mean_scale = scale(cum_mean_dist),
-         n = 1, n_env = cumsum(n)) %>%
+  mutate(n = 1, n_env = cumsum(n)) %>%
+  ## Remove observations in which the number of environments is greater than the
+  ## minimum for any trait, method, pred_env combination
+  group_by(trait, method, n_env) %>% 
+  filter(n() > n_env) %>%
+  group_by(trait, method, pred_env) %>%
+  mutate(cum_mean_scale = scale(cum_mean_dist)) %>%
   ungroup() %>%
-  mutate(cum_mean_scale = cum_mean_scale - min(cum_mean_scale))
+  mutate(cum_mean_scale = cum_mean_scale - min(cum_mean_scale),
+         env_add = as.factor(n_env),
+         method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
 
 # Summarize across all environments for a method
 add_one_env_pred_summ <- add_one_env_pred_stand %>% 
-  group_by(trait, method, n_env) %>% 
-  summarize(mean_cor = mean(cor), sd_cor = sd(cor), avg_dist = mean(distance)) %>%
+  group_by(trait, method, env_add) %>% 
+  summarize(mean_cor = mean(cor), se_cor = sd(cor, na.rm = T) / sqrt(n()), 
+            avg_dist = mean(distance)) %>%
   mutate(cum_mean_dist = cummean(avg_dist),
          cum_mean_scale = scale(cum_mean_dist)) %>%
   ungroup() %>%
@@ -375,17 +344,31 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
 
 
 # add_one_env_pred_stand %>%
-add_one_env_pred_summ %>%
-  # filter(environment == "CRM16") %>%
+(g_add_one_env <- add_one_env_pred_summ %>%
+  # filter(pred_env == "STP16") %>%
   ggplot(aes(x = cum_mean_scale, y = mean_cor, col = method, shape = method)) +
   geom_point() +
   geom_line() +
-  # geom_errorbar(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor)) +
-  facet_wrap( ~ trait, ncol = 2) +
+  # geom_ribbon(aes(ymin = mean_cor - se_cor, ymax = mean_cor + se_cor), alpha = 0.05) +
+  facet_grid(trait ~ ., scales = "free_y") +
   ylab("Prediction Accuracy") +
-  xlab("Cumulative Environmental Distance")
+  xlab("Mean Distance to Validation Environment") +
+  labs(
+    title = "Prediction Accuracy Upon Adding More Distant Environments",
+    subtitle = "For each method, use data from increasingly distance environments to predict a\nsingle environment."
+  ) +
+  theme_bw())
   
-
+# Save
+save_file <- file.path(fig_dir, "add_one_env_acc.jpg")
+ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6)
+ 
+# Try plotting the distribution of prediction accuracies per method, trait, and
+# mean cumulative distancea
+add_one_env_pred_stand %>%
+  ggplot(aes(x = as.factor(n_env), y = cor, fill = method)) +
+  geom_boxplot() +
+  facet_grid(trait ~ .)
 
 
 ```
