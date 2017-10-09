@@ -297,14 +297,14 @@ cluster_herit_all <- clust_df_tomodel %>%
           exp_a = "line_name / (line_name + (gc / n_c) + (ge:cluster / n_e) + (Residual / (n_r * n_e)))",
           exp_w = "(line_name + gc) / (line_name + gc + (n_c * ((ge:cluster / n_e) + (Residual / (n_r * n_e)))))"
           ) %>%
-          map_df(function(x) herit(object = subset(fits, mod == "full")$fit[[1]], exp = x,
-                                   n_r = n_r, n_c = n_c, n_e = n_e))
+          map_df(function(x) herit_boot(object = subset(fits, mod == "full")$fit[[1]], exp = x,
+                                   n_r = n_r, n_c = n_c, n_e = n_e, boot.reps = 250))
     
         herit_summ <- herits %>%
           rename_all(str_replace_all, pattern = "exp", replacement = "herit")
         
         # Return data_frame
-        bind_cols(data_frame(fit_summ = list(fits_summs)), herit_summ)
+        bind_cols(data_frame(fit_summ = list(fits_summs)), data_frame(herit_summ = list(herit_summ)))
      
       })
     

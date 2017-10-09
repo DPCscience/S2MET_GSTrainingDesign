@@ -109,12 +109,20 @@ mds_method <- clust_method_df %>%
   mutate(method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist"))) %>%
   unnest() %>%
   # Assign years to environments
-  mutate(year = str_c("20", str_extract(environment, "[0-9]{2}$")))
+  mutate(year = str_c("20", str_extract(environment, "[0-9]{2}$"))) %>%
+  # Find outlier environments
+  group_by(trait, method) %>%
+  mutate(meanPCo1 = mean(PCo1), meanPCo2 = mean(PCo2),
+         sdPCo1 = sd(PCo1), sdPCo2 = sd(PCo2),
+         outlierPCo1 = PCo1 > meanPCo1 + (2 * sdPCo1) | PCo1 < meanPCo1 - (2 * sdPCo1),
+         outlierPCo2 = PCo2 > meanPCo2 + (2 * sdPCo1) | PCo2 < meanPCo2 - (2 * sdPCo1),
+         outlier = ifelse(outlierPCo1 | outlierPCo2, environment, ""))
 
 # Normal plot with facet_wrap
 (g_clust_spat <- mds_method %>%
   ggplot(aes(x = PCo1, y = PCo2, col = year)) +
-  geom_point() +
+  geom_point() + 
+  geom_text(aes(label = outlier), size = 2, hjust = "inward", vjust = "inward") +
   facet_wrap(trait ~ method, scales = "free", ncol = 5) +
   scale_color_discrete(guide = guide_legend(title = "Year")) +
   theme_bw() +
@@ -130,55 +138,6 @@ mds_method <- clust_method_df %>%
 save_file <- file.path(fig_dir, "env_spatial_rel.jpg")
 ggsave(filename = save_file, plot = g_clust_spat, width = 8, height = 6)
 
-
-
-# 
-# # Plot per trait
-# traits <- as.character(unique(mds_method$trait))
-# 
-# # List to store ggpots
-# gg_list <- list()
-# 
-# for (i in seq_along(traits)) {
-#   
-#   tr <- traits[i]
-#   
-#    g <- mds_method %>%
-#     filter(trait == tr) %>%
-#     ggplot(aes(x = PCo1, y = PCo2, col = year)) +
-#     geom_point() +
-#     facet_wrap(trait ~ method, scales = "free", ncol = 5, ) +
-#     theme(
-#       axis.text = element_text(size = 5),
-#       plot.margin = unit(x = c(0, 0.1, 0, 0.1), units = "cm")
-#     )
-#   
-#   if (i == 1) {
-#     g <- g + 
-#       ylab("") + 
-#       xlab("") +
-#       scale_color_discrete(guide = FALSE)
-#     
-#   } else if (i == 2) {
-#     g <- g + 
-#       theme(strip.background = element_blank(),
-#             strip.text = element_blank())  +
-#       xlab("")
-# 
-#   } else if (i == 3) {
-#     g <- g + 
-#       theme(strip.background = element_blank(),
-#             strip.text = element_blank())  +
-#       ylab("") +
-#       scale_color_discrete(guide = FALSE)
-#   }
-#    
-#   gg_list[[tr]] <- g
-#   
-# }
-# 
-# (g_merge <- cowplot::plot_grid(plotlist = gg_list, ncol = 1, align = "v", 
-#                               axis = "tblr"))
 
 ```
 
