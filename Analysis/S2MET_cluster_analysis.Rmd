@@ -18,8 +18,9 @@ library(neyhart)
 library(rrBLUP)
 library(gws)
 library(pbr)
-library(cluster)
 library(purrrlyr)
+library(ggridges)
+library(ggforce)
 
 # The head directory
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
@@ -363,14 +364,16 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
 save_file <- file.path(fig_dir, "add_one_env_acc.jpg")
 ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6)
  
-# Try plotting the distribution of prediction accuracies per method, trait, and
-# mean cumulative distancea
-add_one_env_pred_stand %>%
-  ggplot(aes(x = as.factor(n_env), y = cor, fill = method)) +
-  geom_boxplot() +
-  facet_grid(trait ~ .)
-
-
+# Plot the trend lines for all environments for a single trait
+add_one_env_pred_stand %>% 
+  filter(trait == "GrainYield") %>% 
+  group_by(method, pred_env) %>% 
+  # Scale the cumulative mean distance by each method and prediction environment
+  mutate(cum_mean_dist = scale(cum_mean_dist)) %>%
+  ggplot(aes(x = cum_mean_dist, y = cor, col = pred_env)) + 
+  geom_point() + 
+  geom_line() + 
+  facet_wrap(~ method, ncol = 2)
 ```
 
 

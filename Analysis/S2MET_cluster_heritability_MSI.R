@@ -20,7 +20,7 @@ proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 proj_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/" 
 
 # Geno, pheno, and enviro data
-geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/"
 pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
 env_var_dir <- file.path(proj_dir, "Environmental_Variables")
 
@@ -85,53 +85,6 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   mutate(data = map(data, droplevels))
 
 
-
-
-## For each dataset, fit the base model (i.e. no clusters) and pull out G blups
-# The model will allow separate genetic variance per environment
-# This follows from Burgueno et al 2008
-S2_MET_BLUPs <- S2_MET_BLUEs_use %>%
-  group_by(trait) %>%
-  do({
-    
-    # Create an object for the data.frame
-    ## Center and scale the data
-    df <- unnest(.) %>%
-      mutate(value = scale(value))
-    
-    # Extract the standard errors
-    wts <- df$std_error^2
-    
-    # lmer control
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
-                                calc.derivs = FALSE)
-    
-    # Fit the model
-    form <- value ~ (environment|line_name) + environment + (1|line_name:environment)
-    fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
-    
-    # Extract the model.frame
-    mf <- model.frame(fit)
-    
-    # Extract the BLUPs of each genotype in each environment
-    blups <- ranef(fit)$line_name %>%
-      rename_all(funs(str_replace_all), pattern = "\\(Intercept\\)", 
-                 replacement = levels(mf$environment)[1]) %>%
-      rename_all(funs(str_replace_all), pattern = "environment", replacement = "")
-    
-    # Extract the variance components
-    var_comp <- as.data.frame(VarCorr(fit)) %>% 
-      filter(is.na(var2))
-    
-    # Return a data.frame
-    data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
-
-
-# # Save these results
-save_file <- file.path(result_dir, "S2_MET_BLUPs.RData")
-save("S2_MET_BLUPs", file = save_file)
-
-
 # Fit a new model with compound symmetry and get the GxE BLUPs
 S2_MET_BLUPs_ge <- S2_MET_BLUEs_use %>%
   group_by(trait) %>%
@@ -183,9 +136,21 @@ ge_mean_D <- S2_MET_BLUEs_use %>%
 
 
 
-# Factor analysis
-ge_mean_FA <- S2_MET_BLUPs %>%
-  do(fa_out = fa(r = .$BLUP[[1]], nfactors = 2, rotate = "varimax")) %>%
+# Factor analysis using BLUEs
+ge_mean_FA <- S2_MET_BLUEs_use %>% 
+  group_by(trait) %>%
+  mutate(BLUEs = list({
+    data[[1]] %>% 
+      select(line_name, environment, value) %>% 
+      complete(line_name, environment) %>% 
+      group_by(environment) %>% 
+      mutate(value = ifelse(is.na(value), mean(value, na.rm = TRUE), value)) %>% 
+      spread(environment, value) %>% 
+      as.data.frame() %>% 
+      remove_rownames() %>% 
+      column_to_rownames("line_name") %>% 
+      as.matrix() })) %>%
+  do(fa_out = fa(r = .$BLUEs[[1]], nfactors = 2, rotate = "varimax")) %>%
   # Grab the loadings
   mutate(delta = list(structure(fa_out$loadings, class = "matrix"))) %>%
   # Distance matrix
