@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#PBS -l walltime=24:00:00,mem=16gb,nodes=1:ppn=1
+#PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
 #PBS -N S2_MET_cluster_predictions
 #PBS -M neyha001@umn.edu
 #PBS -m abe
@@ -18,4 +18,4 @@ module load R/3.4.0
 #Rscript Predictions/MSI/iGEBLUP_predictions.R
 
 # Clustering and prediction
-Rscript Predictions/MSI/S2_MET_cluster_prediction.R
+Rscript Predictions/S2MET_cluster_prediction.R

@@ -157,8 +157,9 @@ add_one_env_pred <- dist_env_df1 %>%
   split(.$core) %>%
   # Apply by core
   mclapply(function(core_df) {
-    core_df %>%
-      group_by(trait, method, environment) %>% head(5) %>%
+    core_df %>% 
+      #slice(1:2) %>% # REMEMBER TO REMOVE THIS
+      group_by(trait, method, pred_env) %>%
       do(pred_results = {
         
         # Convert the row to something useable

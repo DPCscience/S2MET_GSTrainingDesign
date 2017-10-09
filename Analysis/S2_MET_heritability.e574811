@@ -1,0 +1,54 @@
+
+Attaching package: 'dplyr'
+
+The following objects are masked from 'package:stats':
+
+    filter, lag
+
+The following objects are masked from 'package:base':
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: 'psych'
+
+The following object is masked from 'package:modelr':
+
+    heights
+
+Loading pbr: lme4
+Loading pbr: agridat
+Warning messages:
+1: In commonArgs(par, fn, control, environment()) :
+  maxfun < 10 * length(par)^2 is not recommended.
+2: In optwrap(optimizer, devfun, getStart(start, rho$lower, rho$pp),  :
+  convergence code 1 from bobyqa: bobyqa -- maximum number of function evaluations exceeded
+3: In commonArgs(par, fn, control, environment()) :
+  maxfun < 10 * length(par)^2 is not recommended.
+4: In optwrap(optimizer, devfun, getStart(start, rho$lower, rho$pp),  :
+  convergence code 1 from bobyqa: bobyqa -- maximum number of function evaluations exceeded
+5: In commonArgs(par, fn, control, environment()) :
+  maxfun < 10 * length(par)^2 is not recommended.
+6: In optwrap(optimizer, devfun, getStart(start, rho$lower, rho$pp),  :
+  convergence code 1 from bobyqa: bobyqa -- maximum number of function evaluations exceeded
+In smc, the correlation matrix was not invertible, smc's returned as 1s
+In smc, the correlation matrix was not invertible, smc's returned as 1s
+In smc, the correlation matrix was not invertible, smc's returned as 1s
+In factor.stats, the correlation matrix is singular, an approximation is used
+In factor.stats: The factor scoring weights matrix is probably singular -- Factor score estimate results are likely incorrect.
+ Try a different factor extraction method
+
+In factor.scores, the correlation matrix is singular, an approximation is used
+I was unable to calculate the factor score weights, factor loadings used instead
+The estimated weights for the factor scores are probably incorrect.  Try a different factor extraction method.
+The estimated weights for the factor scores are probably incorrect.  Try a different factor extraction method.
+Warning messages:
+1: In log(det(m.inv.r)) : NaNs produced
+2: In log(det(r)) : NaNs produced
+3: In fa.stats(r = r, f = f, phi = phi, n.obs = n.obs, np.obs = np.obs,  :
+  In factor.stats, the correlation matrix is singular, and we could not calculate the beta weights for factor score estimates
+Joining, by = "trait"
+Joining, by = "trait"
+Joining, by = "trait"
+Warning message:
+Grouping rowwise data frame strips rowwise nature 

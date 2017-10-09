@@ -1,0 +1,16 @@
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+Loading pbr: lme4
+Loading pbr: agridat
+Warning messages:
+1: Column `pred_env`/`environment` joining factor and character vector, coercing into character vector 
+2: Column `train_env`/`environment2` joining factor and character vector, coercing into character vector 
