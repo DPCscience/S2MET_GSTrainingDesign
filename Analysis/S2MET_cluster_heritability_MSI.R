@@ -247,9 +247,7 @@ cluster_herit_all <- clust_df_tomodel %>%
     
         # Assign clusters to the dataset
         S2_MET_BLUEs_clusters <- left_join(S2_MET_BLUEs, clusters, "environment") %>%
-          mutate(cluster = as.factor(cluster),
-                 ge = interaction(line_name, environment),
-                 gc = interaction(line_name, cluster)) %>%
+          mutate(cluster = as.factor(cluster)) %>%
           filter(trait == i$trait) %>%
           droplevels()
         
@@ -273,8 +271,10 @@ cluster_herit_all <- clust_df_tomodel %>%
     
         # List of models
         forms <- formulas(~ value,
-                          no_gc = ~ (1 | line_name) + environment + (1|ge) + (1|cluster/ge),
-                          full = ~ (1 | line_name) + environment + (1|ge) + (1|gc) + (1|cluster/ge) )
+                          no_gc = ~ (1 | line_name) + environment + (1|line_name:environment) + 
+                            (1|line_name:environment:cluster),
+                          full = ~ (1 | line_name) + environment + (1|line_name:environment) + 
+                            (1|line_name:environment:cluster) + (1|line_name:cluster) )
         
         # lmer control
         lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
@@ -291,20 +291,28 @@ cluster_herit_all <- clust_df_tomodel %>%
           summarize(var_comp = map(fit, VarCorr) %>% map(as.data.frame),
                     llik = map(fit, logLik))
         
-        # Calculate heritability
-        ## Define some expressions
-        herits <- list(
-          exp_a = "line_name / (line_name + (gc / n_c) + (ge:cluster / n_e) + (Residual / (n_r * n_e)))",
-          exp_w = "(line_name + gc) / (line_name + gc + (n_c * ((ge:cluster / n_e) + (Residual / (n_r * n_e)))))"
-          ) %>%
-          map_df(function(x) herit_boot(object = subset(fits, mod == "full")$fit[[1]], exp = x,
-                                   n_r = n_r, n_c = n_c, n_e = n_e, boot.reps = 250))
-    
-        herit_summ <- herits %>%
-          rename_all(str_replace_all, pattern = "exp", replacement = "herit")
+        # A function to apply to both expressions
+        herit_use <- function(x, exp) herit(object = x, exp = exp, n_r = n_r,
+                                                 n_c = n_c, n_e = n_e, boot.reps = 3)
         
-        # Return data_frame
-        bind_cols(data_frame(fit_summ = list(fits_summs)), data_frame(herit_summ = list(herit_summ)))
+        # Calculate heritability
+        herit_a <- herit_use(x = pull(subset(fits, mod == "full"), fit)[[1]], 
+                             exp = "line_name / (line_name + (line_name:cluster / n_c) + 
+                             (line_name:environment:cluster / n_e) + 
+                             (Residual / (n_r * n_e)))")
+        
+        herit_w <- herit_use(x = pull(subset(fits, mod == "full"), fit)[[1]], 
+                             exp = "(line_name + line_name:cluster) / (line_name + 
+                             line_name:cluster + (n_c * ((line_name:environment:cluster / n_e) +
+                             (Residual / (n_r * n_e)))))")
+        
+        data_frame(type = c("herit_a", "herit_w"), estimate = c(herit_a, herit_w))
+        
+        # herit_summ <- herits %>%
+        #   rename_all(str_replace_all, pattern = "exp", replacement = "herit")
+        # 
+        # # Return data_frame
+        # bind_cols(data_frame(fit_summ = list(fits_summs)), data_frame(herit_summ = list(herit_summ)))
      
       })
     

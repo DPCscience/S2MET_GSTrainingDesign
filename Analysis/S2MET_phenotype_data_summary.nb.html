@@ -354,8 +354,9 @@ LR = -2[\log(L_{Red}) - \log(L_{Full})]
 <p>The <span class="math inline">\(LR\)</span> is <span class="math inline">\(\chi^2\)</span> distributed with 1 degree of freedom (since we dropped one variance component to get the reduced model). The hypothesis test is <span class="math inline">\(H_0: \sigma^2_i = 0\)</span> and <span class="math inline">\(H_A: \sigma^2_i &gt; 0\)</span></p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuKHN0YWdlX3R3b19scnQgPC0gc3RhZ2VfdHdvX2ZpdHMgJT4lIFxuICBtdXRhdGUobGxpayA9IG1hcChmaXRzLCB+bWFwX2RmKC4sIGxvZ0xpaykpKSAlPiUgXG4gIHVubmVzdChsbGlrKSAlPiVcbiAgc2VsZWN0KC1maXRzOi1uX3IsIC1mdWxsZXIpICU+JVxuICBtdXRhdGUobHIgPSAtMiAqIChiYXNlIC0gZnVsbCksXG4gICAgICAgICBwX3ZhbHVlID0gcGNoaXNxKHEgPSBsciwgZGYgPSAxLCBsb3dlci50YWlsID0gRkFMU0UpIC8gMikpXG5cbmBgYCJ9 -->
-<pre class="r"><code>(stage_two_lrt &lt;- stage_two_fits %&gt;% 
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG4oc3RhZ2VfdHdvX2xydCA8LSBzdGFnZV90d29fZml0cyAlPiUgXG4gIG11dGF0ZShsbGlrID0gbWFwKGZpdHMsIH5tYXBfZGYoLiwgbG9nTGlrKSkpICU+JSBcbiAgdW5uZXN0KGxsaWspICU+JVxuICBzZWxlY3QoLWZpdHM6LW5fciwgLWZ1bGxlcikgJT4lXG4gIG11dGF0ZShsciA9IC0yICogKGJhc2UgLSBmdWxsKSxcbiAgICAgICAgIHBfdmFsdWUgPSBwY2hpc3EocSA9IGxyLCBkZiA9IDEsIGxvd2VyLnRhaWwgPSBGQUxTRSkgLyAyKSlcblxuXG5gYGAifQ== -->
+<pre class="r"><code>
+(stage_two_lrt &lt;- stage_two_fits %&gt;% 
   mutate(llik = map(fits, ~map_df(., logLik))) %&gt;% 
   unnest(llik) %&gt;%
   select(-fits:-n_r, -fuller) %&gt;%
@@ -363,16 +364,6 @@ LR = -2[\log(L_{Red}) - \log(L_{Full})]
          p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2))
 </code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzVmVjdG9yaXppbmcgJ2xvZ0xpaycgZWxlbWVudHMgbWF5IG5vdCBwcmVzZXJ2ZSB0aGVpciBhdHRyaWJ1dGVzXG4ifQ== -->
-<pre><code>Vectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributesVectorizing 'logLik' elements may not preserve their attributes</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbImdyb3VwZWRfZGYiLCJ0YmxfZGYiLCJ0YmwiLCJkYXRhLmZyYW1lIl0sIm5jb2wiOjUsIm5yb3ciOjN9LCJyZGYiOiJINHNJQUFBQUFBQUFCZ3R5aVREaWl1QmlZR0JnWW1CbVlXUmdZZ1l5V1ppQUJDTURDd01uaUs1Z1lHQVdCakpZZ1RRdmtHWUdTNEkwZ05rb2l0bHlVc3RTYzRxQkxBR3dMRVNVeTcwb01UTXZNak0xSndVcXd1MlJtcGlTbVpmdWtsaVNDaE1LeUVuTUsvRkl6VXpQS0VFemxUVTVKN0VZWmlqY3FyVEU1Skw4SWlEckh4RHpnYXc3TU8rbUdGT0s3SWNEYTdTeU9Cd1laeDVZWkNsK1pkc0hMN2g4dzVvSE40S3JHUTRzK24vbTJwSjNDdzVNMWRtVGR2RHBBWmk4dzdLbXBkT3NFZ29jRm9WYUpadXBmbktZMS9Xc05menJDcGc4QTA0QWNpN3pmelFYY3FVa2xpVHFwUlVsNXFhaWV5Z1BLQWJ6RUN0TXNBUVlTaVZRRGt0U1lqRXNaRmpTU25OeW9HeW1uQ0lvaTcwZ3Zpd3hweFRkYU02aS9ISTltUEdnNkdKcUFCTC8vLy8vQ3drcEZNWHMrUVVsbWZsNVFLVk0wQmhHOFFCakVab0FjMDVSQ2NoajBCVEFBTFdDRVJvNE1EWXJ4Qm9XV0lEQWZNaVdtcGVlbVFmekZtdE9ZbElxekY5OFFHZURYYTFYVUpTWkJ3c0ZMcUJvc1Y1SmZra2lUQjFYY240T1RBUVM4LzhBaGtaaThNTUNBQUE9In0= -->
-<div data-pagedtable="false">
-<script data-pagedtable-source type="application/json">
-{"columns":[{"label":["trait"],"name":[1],"type":["fctr"],"align":["left"]},{"label":["base"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["full"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["lr"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["p_value"],"name":[5],"type":["dbl"],"align":["right"]}],"data":[{"1":"GrainYield","2":"-1974.271","3":"-533.6098","4":"2881.323","5":"0"},{"1":"HeadingDate","2":"-3605.207","3":"-2431.9001","4":"2346.614","5":"0"},{"1":"PlantHeight","2":"-2332.547","3":"-1355.1840","4":"1954.725","5":"0"}],"options":{"columns":{"min":{},"max":[10],"total":[5]},"rows":{"min":[10],"max":[10],"total":[3]},"pages":{}}}
-  </script>
-</div>
-<!-- rnb-frame-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <p>The broad-sense heritability is calculated on a entry-mean basis according to the formula</p>

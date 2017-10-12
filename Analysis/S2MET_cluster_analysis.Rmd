@@ -310,6 +310,7 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
   geom_point() +
   geom_line() +
   # geom_ribbon(aes(ymin = mean_cor - se_cor, ymax = mean_cor + se_cor), alpha = 0.05) +
+  # geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
   facet_grid(trait ~ ., scales = "free_y") +
   ylab("Prediction Accuracy") +
   xlab("Mean Distance to Validation Environment") +
@@ -323,6 +324,13 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
 save_file <- file.path(fig_dir, "add_one_env_acc.jpg")
 ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6)
  
+```
+
+
+Plot for a single trait all environments
+
+```{r all.env}
+
 # Plot the trend lines for all environments for a single trait
 add_one_env_pred_stand %>% 
   filter(trait == "GrainYield") %>% 
@@ -332,7 +340,10 @@ add_one_env_pred_stand %>%
   ggplot(aes(x = cum_mean_dist, y = cor, col = pred_env)) + 
   geom_point() + 
   geom_line() + 
-  facet_wrap(~ method, ncol = 2)
+  facet_wrap(~ method, ncol = 2) +
+  theme_bw()
+
+
 ```
 
 
