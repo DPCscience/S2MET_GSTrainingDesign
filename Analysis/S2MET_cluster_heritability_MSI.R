@@ -307,13 +307,9 @@ cluster_herit_all <- clust_df_tomodel %>%
                              line_name:cluster + (n_c * ((line_name:environment:cluster / n_e) +
                              (Residual / (n_r * n_e)))))")
         
-        data_frame(type = c("herit_a", "herit_w"), estimate = c(herit_a, herit_w))
-        
-        # herit_summ <- herits %>%
-        #   rename_all(str_replace_all, pattern = "exp", replacement = "herit")
-        # 
-        # # Return data_frame
-        # bind_cols(data_frame(fit_summ = list(fits_summs)), data_frame(herit_summ = list(herit_summ)))
+        # Return data_frame
+        data_frame(fit_summ = list(fits_summs),
+                   herit_summ = list(data_frame(type = c("herit_a", "herit_w"), estimate = c(herit_a, herit_w))))
      
       })
     

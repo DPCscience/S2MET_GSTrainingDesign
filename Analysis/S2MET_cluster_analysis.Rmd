@@ -157,16 +157,11 @@ cluster_herit_all_use <- cluster_herit_all %>%
   mutate(k = as.factor(k),
          method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
 
-#Extract heritability results and plot
-cluster_herit_all1 <- cluster_herit_all_use %>% 
-  ungroup() %>% 
-  select(-fit_summ) %>% 
-  gather(herit_type, value, -trait:-k) %>%
-  mutate(k = parse_number(k))
 
 # Plot
-(g_herit_clust <- cluster_herit_all1 %>% 
-    ggplot(aes(x = k, y = value, col = method, shape = herit_type)) + 
+(g_herit_clust <- cluster_herit_all_use %>% 
+    mutate(k = parse_number(k)) %>%
+    ggplot(aes(x = k, y = estimate, col = method, shape = type)) + 
     geom_point() + 
     geom_line() + 
     facet_grid(. ~ trait) +
