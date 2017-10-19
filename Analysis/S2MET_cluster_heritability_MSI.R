@@ -89,46 +89,46 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 # S2_MET_BLUPs_ge <- S2_MET_BLUEs_use %>%
 #   group_by(trait) %>%
 #   do({
-#     
+# 
 #     # Create an object for the data.frame
 #     ## Center and scale the data
 #     df <- unnest(.) %>%
 #       mutate(value = scale(value))
-#     
+# 
 #     # Extract the standard errors
 #     wts <- df$std_error^2
-#     
+# 
 #     # lmer control
 #     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
 #                                 calc.derivs = FALSE)
-#     
+# 
 #     # Fit the model
 #     form <- value ~ (1|line_name) + environment + (1|line_name:environment)
 #     fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
-#     
+# 
 #     # Extract the model.frame
 #     mf <- model.frame(fit)
-#     
+# 
 #     # Extract the BLUPs of each genotype in each environment
 #     blups <- ranef(fit)$`line_name:environment` %>%
 #       rownames_to_column("term") %>%
 #       separate(term, c("line_name", "environment"), sep = ":") %>%
 #       rename(value = "(Intercept)")
-#     
+# 
 #     # Extract the variance components
 #     var_comp <- as.data.frame(VarCorr(fit))
-#     
+# 
 #     # Return a data.frame
 #     data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
 # 
 # 
 # 
 # # Perform the distance calculation on the line means in each environment
-# ge_mean_D <- S2_MET_BLUEs_use %>% 
+# ge_mean_D <- S2_MET_BLUEs_use %>%
 #   unnest() %>%
 #   group_by(trait) %>%
 #   do(D = {
-#     dist1 <- dist_env(x = ., gen.col = "line_name", 
+#     dist1 <- dist_env(x = ., gen.col = "line_name",
 #                       env.col = "environment", pheno.col = "value")
 #     # Replace missing with the mean
 #     dist1[is.na(dist1)] <- mean(dist1, na.rm = T)
@@ -137,18 +137,18 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 # 
 # 
 # # Factor analysis using BLUEs
-# ge_mean_FA <- S2_MET_BLUEs_use %>% 
+# ge_mean_FA <- S2_MET_BLUEs_use %>%
 #   group_by(trait) %>%
 #   mutate(BLUEs = list({
-#     data[[1]] %>% 
-#       select(line_name, environment, value) %>% 
-#       complete(line_name, environment) %>% 
-#       group_by(environment) %>% 
-#       mutate(value = ifelse(is.na(value), mean(value, na.rm = TRUE), value)) %>% 
-#       spread(environment, value) %>% 
-#       as.data.frame() %>% 
-#       remove_rownames() %>% 
-#       column_to_rownames("line_name") %>% 
+#     data[[1]] %>%
+#       select(line_name, environment, value) %>%
+#       complete(line_name, environment) %>%
+#       group_by(environment) %>%
+#       mutate(value = ifelse(is.na(value), mean(value, na.rm = TRUE), value)) %>%
+#       spread(environment, value) %>%
+#       as.data.frame() %>%
+#       remove_rownames() %>%
+#       column_to_rownames("line_name") %>%
 #       as.matrix() })) %>%
 #   do(fa_out = fa(r = .$BLUEs[[1]], nfactors = 2, rotate = "varimax")) %>%
 #   # Grab the loadings
@@ -161,17 +161,17 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 # n_PC <- 2
 # 
 # # Extract the GxE BLUPs and run PCA
-# ge_blup_PCA <- S2_MET_BLUPs_ge %>% 
+# ge_blup_PCA <- S2_MET_BLUPs_ge %>%
 #   do(mat = {
 #     .$BLUP[[1]] %>%
-#       spread(environment, value) %>% 
+#       spread(environment, value) %>%
 #       as.data.frame() %>%
-#       remove_rownames() %>% 
+#       remove_rownames() %>%
 #       column_to_rownames("line_name") %>%
 #       as.matrix() }) %>%
 #   mutate(prcomp = list({
-#     mat %>% 
-#       apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>% 
+#     mat %>%
+#       apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
 #       prcomp() })) %>%
 #   mutate(PCs = list(prcomp$rotation)) %>%
 #   mutate(PCs_use = list(PCs[,1:n_PC])) %>%
@@ -181,8 +181,8 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 # ## Use the PCs of the environmental covariates to form clusters
 # EC_PCA <- as_data_frame(expand.grid(
 #   trait = unique(S2_MET_BLUEs$trait),
-#   EC_one_PCA = list(prcomp(t(one_year_mat))),
-#   EC_multi_PCA = list(prcomp(t(multi_year_mat)))
+#   EC_one_PCA = list(prcomp(t(one_year_env_mat))),
+#   EC_multi_PCA = list(prcomp(t(multi_year_env_mat)))
 # )) %>%
 #   rowwise() %>%
 #   mutate(EC_one_dist = list(dist(EC_one_PCA$rotation[,1:n_PC])),
@@ -196,7 +196,7 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 #   ge_mean_FA,
 #   EC_PCA) %>%
 #   reduce(full_join)
-
+# 
 # # Save this
 # save_file <- file.path(result_dir, "S2_MET_cluster_df.RData")
 # save("clust_method_df", file = save_file)

@@ -33,6 +33,9 @@ load(file.path(env_var_dir, "environmental_data_compiled.RData"))
 # Load an entry file
 entry_list <- read_excel(file.path(entry_dir, "S2MET_project_entries.xlsx"))
 
+# Load the trial metadata
+trial_info <- read_csv(file.path(pheno_dir, "trial_metadata.csv"))
+
 
 # Grab the entry names that are not checks
 tp <- entry_list %>% 

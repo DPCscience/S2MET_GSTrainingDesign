@@ -154,6 +154,7 @@ load(file.path(result_dir, "S2_MET_cluster_heritability.RData"))
 cluster_herit_all_use <- cluster_herit_all %>% 
   bind_rows() %>%
   ungroup() %>%
+  unnest() %>%
   mutate(k = as.factor(k),
          method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
 
@@ -186,38 +187,52 @@ How does clutering impact the contribution of $sigma^2_g$ and $sigma^2_gc$ to to
 
 # Convert LR to numeric and conduct the LRT
 cluster_lrt <- cluster_herit_all_use %>% 
-  unnest(fit_summ) %>% 
-  select(-var_comp) %>%
+  mutate(k = parse_number(k)) %>%
+  select(trait:mod, llik) %>%
   mutate(llik = map_dbl(llik, as.numeric)) %>%
-  group_by(trait, method, k) %>%
-  mutate(lr = (-2 * (llik - llik[1])),
-         lr = ifelse(mod == "full", NA, lr),
-         p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2)
+  spread(mod, llik) %>%
+  mutate(lr = (-2 * (no_gc - full)),
+         p_value = pchisq(q = lr, df = 1, lower.tail = FALSE) / 2,
+         adj_p_value = p.adjust(p_value, method = "fdr"),
+         neg_log_adj_p = -log10(adj_p_value),
+         neg_log_fdr001 = -log10(0.001))
 
-# Get the significance results for gc
-gc_lrt <- cluster_lrt %>% 
-  filter(mod == "no_gc") %>% 
-  mutate(mod = "line_name:cluster") %>% 
-  select(trait:k, grp = mod, p_value)
+# Plot the neg-log p value by cluster, trait, and method
+(g_cluster_lrt <- cluster_lrt %>%
+  ggplot(aes(x = k, y = neg_log_adj_p, col = method)) +
+  geom_point() +
+  # geom_hline(aes(yintercept = neg_log_fdr001)) +
+  facet_grid(trait ~ .) +
+  ylab("-log10(p)") +
+  xlab("K") +
+  labs(
+    title = "Significance of Genotype-Cluster Interaction Variance",
+    subtitle = "Significance measured by a likelihood ratio test"
+  ))
+
+# Save it
+save_file <- file.path(fig_dir, "geno_cluster_lrt.jpg")
+ggsave(filename = save_file, plot = g_cluster_lrt, width = 8, height = 6)
+
+
+
+```
+
+
+```{r varcomp}
   
 # Extract variance components
 cluster_varcomp <- cluster_herit_all_use %>% 
-  unnest(fit_summ) %>% 
   unnest(var_comp) %>% 
   filter(mod == "full", 
          grp != "Residual") %>% 
   select(trait:grp, vcov)
 
-# What is the range in cluster k?
-# k_range <- 
-
 
 # Plot G and GxS sd over methods and k
-(g_cluster_varcomp <- full_join(cluster_varcomp, gc_lrt, by = c("trait", "method", "k", "grp")) %>% 
-  filter(grp %in% c("line_name", "gc")) %>%
-  mutate(grp = parse_factor(grp, levels = c("line_name", "gc")),
-         sig = ifelse(p_value < 0.001, "***", 
-                      ifelse(p_value < 0.01, "**", ifelse(p_value < 0.05, "*", "")))) %>% 
+(g_cluster_varcomp <- cluster_varcomp %>% 
+  filter(grp %in% c("line_name", "line_name:cluster")) %>%
+  mutate(grp = parse_factor(grp, levels = c("line_name", "line_name:cluster"))) %>%
   # Find the proportion of the usable genetic variance explained by g or gc
   group_by(trait, method, k) %>% 
   mutate(prop_var = vcov / sum(vcov, na.rm = TRUE)) %>%
@@ -225,7 +240,6 @@ cluster_varcomp <- cluster_herit_all_use %>%
   mutate(k = parse_number(k)) %>%
   ggplot(aes(x = k, y = prop_var, fill = method, alpha = grp, group = method)) +
   geom_col(position = "stack", col = "black") + 
-  # geom_label(aes(y = 0.5, label = sig, angle = 90)) +
   facet_grid(trait ~ method) +
   scale_alpha_manual(values = c(1, 0.3), guide = guide_legend(title = "Variance Component")) +
   scale_fill_discrete(guide = guide_legend(title = "Method")) +
