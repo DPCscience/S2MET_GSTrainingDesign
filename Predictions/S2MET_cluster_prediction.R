@@ -313,26 +313,20 @@ random_env_pred_out <- random_env_df1 %>%
               X <- model.matrix(~ 1 + train_env, droplevels(mf))
             }
             
-            # Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
-            #                             sparse = TRUE)
-            
-            Z <- sparse.model.matrix(~ line_name, mf)
-            
+            Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
+                                        sparse = TRUE)
+          
             # R matrix of standard errors
-            # R <- solve(Diagonal(x = mf$std_error^2))
+            R <- solve(Diagonal(x = mf$std_error^2))
             
-            # fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, silent = TRUE)
-            fit2 <- mixed.solve(y = y, Z = Z, K = A, X = X)
-            
-            # Extract PGV
-            # pgv <- fit1$u.hat[[1]] %>% 
-            #   as.data.frame() %>% 
-            #   rownames_to_column("line_name") %>% 
-            #   rename(pgv = T1)
-            
-            pgv <- fit2$u %>% 
-              data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE)
+            fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, silent = TRUE)
 
+            # Extract PGV
+            pgv <- fit1$u.hat[[1]] %>%
+              as.data.frame() %>%
+              rownames_to_column("line_name") %>%
+              rename(pgv = T1)
+            
             left_join(pred_data, pgv, by = "line_name") %>%
               do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
             
