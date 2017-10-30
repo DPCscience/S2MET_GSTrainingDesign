@@ -80,11 +80,14 @@ n_cores <- detectCores()
 
 # Create a new data.frame to hold the different datasets
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+  # Filter the S2 MET BLUEs for non-irrigated trials
+  filter(!grepl(pattern = "BZI|HTM", x = environment)) %>%
   group_by(trait) %>% 
   nest() %>%
   mutate(data = map(data, droplevels))
 
 
+# ### The code below (up until save point) is run on the local machine
 # # Fit a new model with compound symmetry and get the GxE BLUPs
 # S2_MET_BLUPs_ge <- S2_MET_BLUEs_use %>%
 #   group_by(trait) %>%
