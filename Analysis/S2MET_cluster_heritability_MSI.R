@@ -78,15 +78,15 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 n_cores <- detectCores()
 
 
-# Create a new data.frame to hold the different datasets
-S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
-  # Filter the S2 MET BLUEs for non-irrigated trials
-  filter(!grepl(pattern = "BZI|HTM", x = environment)) %>%
-  group_by(trait) %>% 
-  nest() %>%
-  mutate(data = map(data, droplevels))
-
-
+# # Create a new data.frame to hold the different datasets
+# S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+#   # Filter the S2 MET BLUEs for non-irrigated trials
+#   filter(!grepl(pattern = "BZI|HTM", x = environment)) %>%
+#   group_by(trait) %>% 
+#   nest() %>%
+#   mutate(data = map(data, droplevels))
+# 
+# 
 # ### The code below (up until save point) is run on the local machine
 # # Fit a new model with compound symmetry and get the GxE BLUPs
 # S2_MET_BLUPs_ge <- S2_MET_BLUEs_use %>%
@@ -175,8 +175,9 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 #   mutate(prcomp = list({
 #     mat %>%
 #       apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
-#       prcomp() })) %>%
-#   mutate(PCs = list(prcomp$rotation)) %>%
+#       t() %>%
+#       prcomp(center = TRUE, scale. = TRUE) })) %>%
+#   mutate(PCs = list(prcomp$x)) %>%
 #   mutate(PCs_use = list(PCs[,1:n_PC])) %>%
 #   mutate(PCA = list(dist(PCs_use)))
 # 
@@ -184,12 +185,11 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 # ## Use the PCs of the environmental covariates to form clusters
 # EC_PCA <- as_data_frame(expand.grid(
 #   trait = unique(S2_MET_BLUEs$trait),
-#   EC_one_PCA = list(prcomp(t(one_year_env_mat))),
-#   EC_multi_PCA = list(prcomp(t(multi_year_env_mat)))
-# )) %>%
+#   EC_one_PCA = list(prcomp(x = one_year_env_mat, center = TRUE, scale. = TRUE)),
+#   EC_multi_PCA = list(prcomp(x = multi_year_env_mat, center = TRUE, scale. = TRUE)))) %>%
 #   rowwise() %>%
-#   mutate(EC_one_dist = list(dist(EC_one_PCA$rotation[,1:n_PC])),
-#          EC_multi_dist = list(dist(EC_multi_PCA$rotation[,1:n_PC])))
+#   mutate(EC_one_dist = list(dist(EC_one_PCA$x[,1:n_PC])),
+#          EC_multi_dist = list(dist(EC_multi_PCA$x[,1:n_PC])))
 # 
 # 
 # # Combine all matrices, including PCAs and distance matrices

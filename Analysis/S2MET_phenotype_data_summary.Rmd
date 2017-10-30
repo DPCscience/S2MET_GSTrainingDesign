@@ -165,9 +165,11 @@ This will be run on MSI?
 # Group by trait and fit the multi-environment model
 stage_two_fits <- S2_MET_BLUEs %>%
   group_by(trait) %>%
-  do({
+  nest() %>%
+  by_row(function(i) {
     
-    to_model <- droplevels(.) %>%
+    to_model <- unnest(i) %>%
+      droplevels() %>%
       mutate(value = scale(value))
     
     # Table of lines by environments (i.e. plots)
@@ -200,7 +202,7 @@ stage_two_fits <- S2_MET_BLUEs %>%
     fits <- fit_with(data = to_model, lmer, forms, weights = wts, control = lmer_control)
     
     # Return data_frame
-    data_frame(fits = list(fits), n_e = n_e, n_r = n_r) })
+    data_frame(fits = list(fits), n_e = n_e, n_r = n_r) }, .to = "out")
 
 
 
@@ -220,6 +222,7 @@ The $LR$ is $\chi^2$ distributed with 1 degree of freedom (since we dropped one 
 ```{r lrt}
 
 (stage_two_lrt <- stage_two_fits %>% 
+   unnest(out) %>%
   mutate(llik = map(fits, ~map_df(., logLik))) %>% 
   unnest(llik) %>%
   select(-fits:-n_r, -fuller) %>%
@@ -261,6 +264,7 @@ Now calculate heritability across all environments
 
 # Extract the full model and calculate heritability
 stage_two_herit <- stage_two_fits %>% 
+  unnest(out) %>%
   ungroup() %>% 
   mutate(full_fit = lapply(.$fits, "[[", "full")) %>%
   group_by(trait) %>%
