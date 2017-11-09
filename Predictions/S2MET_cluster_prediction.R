@@ -111,13 +111,13 @@ dist_df <- clust_method_df %>%
 ## environment. We will use an across-environment model.
 ## 
 
-# Define a function to convert the distance matrix into a data.frame with 
+# Define a function to convert the distance matrix into a data.frame with
 # a column for the environment
 dist_to_df <- function(d) d %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("environment")
-  
+
 
 # Convert each distance object into a data.frame, then gather and unnest()
-dist_env_df <- dist_df %>% 
+dist_env_df <- dist_df %>%
   mutate_at(vars(-trait), funs(map), dist_to_df) %>%
   gather(method, data, -trait) %>%
   unnest() %>%
@@ -132,223 +132,225 @@ dist_env_df <- dist_df %>%
 # Find the prediction environments
 # That is, the environments in which the vp is present
 pred_env <- S2_MET_BLUEs_use %>%
-  group_by(trait, environment) %>% 
-  filter(sum(line_name %in% vp_geno) > 1) %>% 
+  group_by(trait, environment) %>%
+  filter(sum(line_name %in% vp_geno) > 1) %>%
   distinct(environment, trait)
 
 # Find the training environments
 # That is, the environments in which the tp is present
 train_env <- S2_MET_BLUEs_use %>%
-  group_by(trait, environment) %>% 
+  group_by(trait, environment) %>%
   filter(sum(line_name %in% tp_geno) > 1) %>%
   distinct(environment, trait)
 
-# Combine the possible prediction environments with the possible training environments
-# for a single trait
-dist_env_df1 <- left_join(pred_env, train_env, by = "trait") %>%
-  select(trait, pred_env = environment.x, train_env = environment.y) %>%
-  filter(pred_env != train_env) %>%
-  ungroup() %>%
-  mutate_at(vars(contains("env")), as.character) %>%
-  left_join(., dist_env_df, by = c("trait", "pred_env" = "environment", "train_env" = "environment2")) %>%
-  group_by(pred_env) %>%
-  arrange(trait, method, pred_env, distance) %>%
-  group_by(trait, method, pred_env) %>%
-  nest(.key = "env_dist")
-
-# Group by rows and run the predictions
-add_one_env_pred <- dist_env_df1 %>%
-  mutate(core = sort(rep(seq(n_cores), length.out = nrow(.)))) %>%
-  split(.$core) %>%
-  # Apply by core
-  mclapply(function(core_df) {
-    core_df %>%
-      group_by(trait, method, pred_env) %>%
-      do(pred_results = {
-
-        # Convert the row to something useable
-        i <- unnest(.)
-
-        # Add the cumulative mean distance of adding environments
-        i_cummean <- i %>%
-          mutate(cum_mean_dist = cummean(distance))
-
-        # Add the prediction data
-        i_cummean_pred <- i_cummean %>%
-          left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% vp_geno),
-                    by = c("trait", "pred_env" = "environment")) %>%
-          group_by_at(vars(trait:cum_mean_dist)) %>%
-          nest(line_name:std_error, .key = "pred_data") %>%
-          ungroup()
-
-        # Add the training data
-        i_cummean_train <- i_cummean %>%
-          left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% tp_geno),
-                    by = c("trait", "train_env" = "environment")) %>%
-          mutate(environment = train_env) %>%
-          group_by_at(vars(trait:cum_mean_dist)) %>%
-          nest(environment, line_name:std_error, .key = "train_data") %>%
-          ungroup() %>%
-          # Accumulate the training data
-          mutate(train_data = accumulate(train_data, bind_rows))
-
-        # Combine
-        i_tomodel <- full_join(i_cummean_pred, i_cummean_train,
-                               by = c("trait", "method", "pred_env", "train_env", "distance", "cum_mean_dist"))
-
-
-        # Vector of prediction accuracies
-        pred_acc_vec <- vector("list", length = nrow(i_tomodel))
-
-        # Iterate over the list of environments
-        for (r in seq_along(pred_acc_vec)) {
-
-          # Model frame
-          mf <- model.frame(value ~ line_name + environment + std_error, data = i_tomodel$train_data[[r]])
-          y <- model.response(mf)
-          # Matrix of 1s if r = 1
-          if (n_distinct(mf$environment) == 1) {
-            X <-  model.matrix(~ 1, droplevels(mf))
-          } else {
-            X <- model.matrix(~ 1 + environment, droplevels(mf))
-          }
-          Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
-                                      sparse = TRUE)
-
-          # R matrix of standard errors
-          R <- solve(Diagonal(x = mf$std_error^2))
-
-          fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, R = list(units = R))
-
-          # Extract PGV
-          pgv <- fit1$u.hat[[1]] %>%
-            as.data.frame() %>%
-            rownames_to_column("line_name") %>%
-            rename(pgv = T1)
-
-          # Extract the validation data
-          pred_data <- pull(i_tomodel, pred_data)[[r]] %>%
-            mutate(line_name = as.character(line_name))
-
-          ## Measure accuracy
-          pred_acc_vec[[r]]  <- left_join(pred_data, pgv, by = "line_name") %>%
-            do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
-
-        }
-
-        # Return the cummean df with prediction accuracies
-        bind_cols(i_cummean, bind_rows(pred_acc_vec))
-
-        })
-   }, mc.cores = n_cores)
-
-# Save
-save_file <- file.path(result_dir, "S2MET_pred_by_env_dist.RData")
-save("add_one_env_pred", file = save_file)
-
-
-
-
-# ## Random control
-# ## For each environment to predict, randomly sample n environments to use in prediction
-# ## 
-# ## First set up the predictions
-# random_env_df <- left_join(pred_env, train_env, by = "trait") %>% 
-#   select(trait, pred_env = environment.x, train_env = environment.y) %>% 
+# # Combine the possible prediction environments with the possible training environments
+# # for a single trait
+# dist_env_df1 <- left_join(pred_env, train_env, by = "trait") %>%
+#   select(trait, pred_env = environment.x, train_env = environment.y) %>%
 #   filter(pred_env != train_env) %>%
 #   ungroup() %>%
 #   mutate_at(vars(contains("env")), as.character) %>%
-#   group_by(trait, pred_env) %>%
-#   nest(train_env, .key = "train_env")
+#   left_join(., dist_env_df, by = c("trait", "pred_env" = "environment", "train_env" = "environment2")) %>%
+#   group_by(pred_env) %>%
+#   arrange(trait, method, pred_env, distance) %>%
+#   group_by(trait, method, pred_env) %>%
+#   nest(.key = "env_dist")
 # 
-# # For each trait, find the number of possible training environments (n_train)
-# # Randomly sample n = 1, 2, ..., n_train - 1 environments with replacement 100 times
-# # Use those environments to predict the validation environment
-# random_env_df1 <- random_env_df %>%
-#   group_by(trait) %>% 
-#   mutate(n_train = list(seq(min(map_dbl(train_env, nrow))))) %>% 
-#   unnest(n_train) %>% 
-#   left_join(., random_env_df) %>%
-#   ungroup()
-# 
-# ### Maximum number of training environments
-# max_train <- max(random_env_df1$n_train)
-# max_train <- 8
-# 
-# n_iter <- 25
-# 
-# # Add cores and run the predictions
-# random_env_pred_out <- random_env_df1 %>%
+# # Group by rows and run the predictions
+# add_one_env_pred <- dist_env_df1 %>%
 #   mutate(core = sort(rep(seq(n_cores), length.out = nrow(.)))) %>%
 #   split(.$core) %>%
 #   # Apply by core
 #   mclapply(function(core_df) {
 #     core_df %>%
-#       by_row(function(i) {
-#         
-#         # Number of training environments to sample
-#         n_train_sample <- i$n_train
-#         
-#         # Grab the validation data
-#         pred_data <- left_join(i, S2_MET_BLUEs_use, by = c("trait", "pred_env" = "environment")) %>% 
-#           filter(line_name %in% vp_geno) %>%
-#           select(line_name:std_error) %>%
-#           mutate(line_name = as.character(line_name))
-#         
-#         # Draw iterations of sampling
-#         train_data <- rerun(.n = n_iter, {
-#           
-#           unnest(i) %>% 
-#             sample_n(size = n_train_sample, replace = TRUE) %>% 
-#             left_join(., S2_MET_BLUEs_use, by = c("trait", "train_env" = "environment")) %>% 
-#             filter(line_name %in% tp_geno)
-#           
-#         })
-#         
-#         # Run predictions across the iterations
-#         predictions <- train_data %>%
-#           map_df(function(td) {
-#             
-#             # Model frame
-#             mf <- model.frame(value ~ line_name + train_env + std_error, data = td)
-#             y <- model.response(mf)
-#             # Matrix of 1s if r = 1
-#             if (n_distinct(mf$train_env) == 1) {
-#               X <-  model.matrix(~ 1, droplevels(mf))
-#             } else {
-#               X <- model.matrix(~ 1 + train_env, droplevels(mf))
-#             }
-#             
-#             Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
-#                                         sparse = TRUE)
-#           
-#             # R matrix of standard errors
-#             R <- solve(Diagonal(x = mf$std_error^2))
-#             
-#             fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, silent = TRUE)
+#       group_by(trait, method, pred_env) %>%
+#       do(pred_results = {
 # 
-#             # Extract PGV
-#             pgv <- fit1$u.hat[[1]] %>%
-#               as.data.frame() %>%
-#               rownames_to_column("line_name") %>%
-#               rename(pgv = T1)
-#             
-#             left_join(pred_data, pgv, by = "line_name") %>%
-#               do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
-#             
-#           })
-#         
-#         # Return the prediction accuracies
-#         return(predictions)
-#         
-#       }, .to = "pred_out")
-#     
-#   }, mc.cores = n_cores)
+#         # Convert the row to something useable
+#         i <- unnest(.)
+# 
+#         # Add the cumulative mean distance of adding environments
+#         i_cummean <- i %>%
+#           mutate(cum_mean_dist = cummean(distance))
+# 
+#         # Add the prediction data
+#         i_cummean_pred <- i_cummean %>%
+#           left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% vp_geno),
+#                     by = c("trait", "pred_env" = "environment")) %>%
+#           group_by_at(vars(trait:cum_mean_dist)) %>%
+#           nest(line_name:std_error, .key = "pred_data") %>%
+#           ungroup()
+# 
+#         # Add the training data
+#         i_cummean_train <- i_cummean %>%
+#           left_join(x = ., y = filter(S2_MET_BLUEs_use, line_name %in% tp_geno),
+#                     by = c("trait", "train_env" = "environment")) %>%
+#           mutate(environment = train_env) %>%
+#           group_by_at(vars(trait:cum_mean_dist)) %>%
+#           nest(environment, line_name:std_error, .key = "train_data") %>%
+#           ungroup() %>%
+#           # Accumulate the training data
+#           mutate(train_data = accumulate(train_data, bind_rows))
+# 
+#         # Combine
+#         i_tomodel <- full_join(i_cummean_pred, i_cummean_train,
+#                                by = c("trait", "method", "pred_env", "train_env", "distance", "cum_mean_dist"))
+# 
+# 
+#         # Vector of prediction accuracies
+#         pred_acc_vec <- vector("list", length = nrow(i_tomodel))
+# 
+#         # Iterate over the list of environments
+#         for (r in seq_along(pred_acc_vec)) {
+# 
+#           # Model frame
+#           mf <- model.frame(value ~ line_name + environment + std_error, data = i_tomodel$train_data[[r]])
+#           y <- model.response(mf)
+#           # Matrix of 1s if r = 1
+#           if (n_distinct(mf$environment) == 1) {
+#             X <-  model.matrix(~ 1, droplevels(mf))
+#           } else {
+#             X <- model.matrix(~ 1 + environment, droplevels(mf))
+#           }
+#           Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
+#                                       sparse = TRUE)
+# 
+#           # R matrix of standard errors
+#           R <- solve(Diagonal(x = mf$std_error^2))
+# 
+#           fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, R = list(units = R))
+# 
+#           # Extract PGV
+#           pgv <- fit1$u.hat[[1]] %>%
+#             as.data.frame() %>%
+#             rownames_to_column("line_name") %>%
+#             rename(pgv = T1)
+# 
+#           # Extract the validation data
+#           pred_data <- pull(i_tomodel, pred_data)[[r]] %>%
+#             mutate(line_name = as.character(line_name))
+# 
+#           ## Measure accuracy
+#           pred_acc_vec[[r]]  <- left_join(pred_data, pgv, by = "line_name") %>%
+#             do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
+# 
+#         }
+# 
+#         # Return the cummean df with prediction accuracies
+#         bind_cols(i_cummean, bind_rows(pred_acc_vec))
+# 
+#         })
+#    }, mc.cores = n_cores)
 # 
 # # Save
-# save_file <- file.path(result_dir, "S2MET_pred_by_random_env.RData")
-# save("random_env_pred_out", file = save_file)
+# save_file <- file.path(result_dir, "S2MET_pred_by_env_dist.RData")
+# save("add_one_env_pred", file = save_file)
 # 
+
+
+
+## Random control
+## For each environment to predict, randomly sample n environments to use in prediction
+##
+## First set up the predictions
+random_env_df <- left_join(pred_env, train_env, by = "trait") %>%
+  select(trait, pred_env = environment.x, train_env = environment.y) %>%
+  filter(pred_env != train_env) %>%
+  ungroup() %>%
+  mutate_at(vars(contains("env")), as.character) %>%
+  group_by(trait, pred_env) %>%
+  nest(train_env, .key = "train_env")
+
+# For each trait, find the number of possible training environments (n_train)
+# Randomly sample n = 1, 2, ..., n_train - 1 environments with replacement 100 times
+# Use those environments to predict the validation environment
+random_env_df1 <- random_env_df %>%
+  group_by(trait) %>%
+  mutate(n_train = list(seq(min(map_dbl(train_env, nrow))))) %>%
+  unnest(n_train) %>%
+  left_join(., random_env_df) %>%
+  ungroup()
+
+### Maximum number of training environments
+max_train <- max(random_env_df1$n_train)
+max_train <- 8
+
+n_iter <- 25
+
+# Add cores and run the predictions
+random_env_pred_out <- random_env_df1 %>%
+  # Filter n_train to be less than max_train
+  filter(n_train <= max_train) %>%
+  mutate(core = sort(rep(seq(n_cores), length.out = nrow(.)))) %>%
+  split(.$core) %>%
+  # Apply by core
+  mclapply(function(core_df) {
+    core_df %>%
+      by_row(function(i) {
+
+        # Number of training environments to sample
+        n_train_sample <- i$n_train
+
+        # Grab the validation data
+        pred_data <- left_join(i, S2_MET_BLUEs_use, by = c("trait", "pred_env" = "environment")) %>%
+          filter(line_name %in% vp_geno) %>%
+          select(line_name:std_error) %>%
+          mutate(line_name = as.character(line_name))
+
+        # Draw iterations of sampling
+        train_data <- rerun(.n = n_iter, {
+
+          unnest(i) %>%
+            sample_n(size = n_train_sample, replace = TRUE) %>%
+            left_join(., S2_MET_BLUEs_use, by = c("trait", "train_env" = "environment")) %>%
+            filter(line_name %in% tp_geno)
+
+        })
+
+        # Run predictions across the iterations
+        predictions <- train_data %>%
+          map_df(function(td) {
+
+            # Model frame
+            mf <- model.frame(value ~ line_name + train_env + std_error, data = td)
+            y <- model.response(mf)
+            # Matrix of 1s if r = 1
+            if (n_distinct(mf$train_env) == 1) {
+              X <-  model.matrix(~ 1, droplevels(mf))
+            } else {
+              X <- model.matrix(~ 1 + train_env, droplevels(mf))
+            }
+
+            Zlist <- ranef_model_matrix(random = ~ g(line_name), data = mf, vcov = list(line_name = A),
+                                        sparse = TRUE)
+
+            # R matrix of standard errors
+            R <- solve(Diagonal(x = mf$std_error^2))
+
+            fit1 <- sommer::mmer(Y = y, X = X, Z = Zlist, silent = TRUE)
+
+            # Extract PGV
+            pgv <- fit1$u.hat[[1]] %>%
+              as.data.frame() %>%
+              rownames_to_column("line_name") %>%
+              rename(pgv = T1)
+
+            left_join(pred_data, pgv, by = "line_name") %>%
+              do(boot_cor(x = .$pgv, y = .$value, boot.reps = 1000))
+
+          })
+
+        # Return the prediction accuracies
+        return(predictions)
+
+      }, .to = "pred_out")
+
+  }, mc.cores = n_cores)
+
+# Save
+save_file <- file.path(result_dir, "S2MET_pred_by_random_env.RData")
+save("random_env_pred_out", file = save_file)
+
 
 
 

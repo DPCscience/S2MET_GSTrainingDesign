@@ -272,7 +272,7 @@ Using the distance metrics above, start with each prediction environment and add
 # Load the data
 load(file.path(result_dir, "S2MET_pred_by_env_dist.RData"))
 
-# Remove missing
+# Bind the list together
 add_one_env_pred1 <- add_one_env_pred %>%
   # .[!map_lgl(., inherits, "try-error")] %>% 
   bind_rows() %>%
@@ -318,7 +318,7 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
   ggplot(aes(x = cum_mean_scale, y = mean_cor, col = method, shape = method)) +
   geom_point() +
   geom_line() +
-  # geom_ribbon(aes(ymin = mean_cor - se_cor, ymax = mean_cor + se_cor), alpha = 0.05) +
+  geom_ribbon(aes(ymin = mean_cor - se_cor, ymax = mean_cor + se_cor), alpha = 0.01, lwd = 0.25) +
   # geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
   facet_grid(trait ~ ., scales = "free_y") +
   ylab("Prediction Accuracy") +
@@ -331,7 +331,7 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
   
 # Save
 save_file <- file.path(fig_dir, "add_one_env_acc.jpg")
-ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6)
+ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6, dpi = 500)
  
 ```
 
