@@ -271,6 +271,7 @@ Using the distance metrics above, start with each prediction environment and add
 
 # Load the data
 load(file.path(result_dir, "S2MET_pred_by_env_dist.RData"))
+load(file.path(result_dir, "S2MET_pred_by_random_env.RData"))
 
 # Bind the list together
 add_one_env_pred1 <- add_one_env_pred %>%
@@ -300,25 +301,40 @@ add_one_env_pred_stand <- add_one_env_pred1 %>%
          env_add = as.factor(n_env),
          method = parse_factor(method, levels = c("D", "FA", "PCA", "EC_one_dist", "EC_multi_dist")))
 
+## Manipulate the random environment experiment such that replications of a prediction 
+## environment are averaged
+random_add_env <- random_env_pred_out %>%
+  bind_rows() %>% 
+  unnest(pred_out) %>% 
+  group_by(trait, pred_env, n_train) %>% 
+  summarize(pred_acc = mean(cor, na.rm = T), sd_acc = sd(cor, na.rm = T))
+
+
 # Summarize across all environments for a method
-add_one_env_pred_summ <- add_one_env_pred_stand %>% 
+add_acc_summ <- add_one_env_pred_stand %>% 
   group_by(trait, method, env_add) %>% 
-  summarize(mean_cor = mean(cor), se_cor = sd(cor, na.rm = T) / sqrt(n()), 
+  summarize(pred_acc = mean(cor), sd_pred_acc = sd(cor, na.rm = T),
             avg_dist = mean(distance)) %>%
   mutate(cum_mean_dist = cummean(avg_dist),
          cum_mean_scale = scale(cum_mean_dist)) %>%
   ungroup() %>%
   mutate(cum_mean_scale = cum_mean_scale - min(cum_mean_scale))
 
+```
 
 
-# add_one_env_pred_stand %>%
-(g_add_one_env <- add_one_env_pred_summ %>%
+Plot using the summaries
+
+
+```{r plot.sum}
+## Plot the summary from adding more distant environments
+
+(g_add_one_env <- add_acc_summ %>%
   # filter(pred_env == "STP16") %>%
-  ggplot(aes(x = cum_mean_scale, y = mean_cor, col = method, shape = method)) +
-  geom_point() +
-  geom_line() +
-  geom_ribbon(aes(ymin = mean_cor - se_cor, ymax = mean_cor + se_cor), alpha = 0.01, lwd = 0.25) +
+  ggplot(aes(x = cum_mean_scale)) +
+  geom_point(aes(y = pred_acc, col = method, shape = method)) +
+  geom_line(aes(y = pred_acc, col = method, shape = method)) +
+  # geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.01, lwd = 0.25) +
   # geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
   facet_grid(trait ~ ., scales = "free_y") +
   ylab("Prediction Accuracy") +
@@ -332,6 +348,36 @@ add_one_env_pred_summ <- add_one_env_pred_stand %>%
 # Save
 save_file <- file.path(fig_dir, "add_one_env_acc.jpg")
 ggsave(filename = save_file, plot = g_add_one_env, width = 8, height = 6, dpi = 500)
+
+
+## Summarize the random predictions
+add_random_summ <- random_add_env %>% 
+  group_by(trait, n_train) %>% 
+  summarize(sd_pred_acc = sd(pred_acc, na.rm = T), 
+            pred_acc = mean(pred_acc)) %>% 
+  rename(env_add = n_train) %>% 
+  mutate(method = "Random", env_add = as.character(env_add)) %>%
+  bind_rows(., add_acc_summ) %>%
+  ungroup() %>%
+  mutate(env_add = parse_factor(env_add, levels = sort(unique(as.numeric(env_add)))))
+
+
+## Plot the random line
+(g_add_rand_env <- add_random_summ %>%
+  ggplot(aes(x = env_add, y = pred_acc, col = method, shape = method, group = method)) +
+  geom_point() +
+  geom_line() +
+  # geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.01, lwd = 0.25) +
+  # geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
+  facet_grid(trait ~ ., scales = "free_y") +
+  ylab("Prediction Accuracy") +
+  xlab("Number of Environments Used in Prediction") +
+  labs(
+    title = "Prediction Accuracy Upon Adding More Distant Environments"
+  ) +
+  theme_bw())
+
+
  
 ```
 

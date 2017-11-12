@@ -221,9 +221,9 @@ clust_df <- dist_df %>%
   summarize_all(funs(map_hclust))
 
 # Set a maximum for the number of clusters
-max_K <- 20
-
-
+max_K <- clust_df %>% 
+  summarize_at(vars(-trait), ~min(map_dbl(., ~length(.$order)))) %>% 
+  min()
 
 
 # For each trait and cluster strategy, determine the within and across cluster heritability
