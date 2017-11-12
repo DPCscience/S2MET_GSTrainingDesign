@@ -273,7 +273,7 @@ random_env_df1 <- random_env_df %>%
 
 ### Maximum number of training environments
 max_train <- max(random_env_df1$n_train)
-max_train <- 8
+max_train <- 10
 
 n_iter <- 25
 
