@@ -1,0 +1,217 @@
+---
+title: "S2MET Predictions Analysis"
+output: html_notebook
+bibliography: C:/Users/Jeff/Documents/Literature/library.bib
+---
+
+## Introduction
+
+This notebook will outline some procedures to predict genotypic values in the presence of GxE by using a number of different models. Each model will be introduced, its assumptions outlined, predictions made, and results interpreted.
+
+First we must define some directories and load packages
+
+```{r message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(stringr)
+library(rrBLUP)
+library(readxl)
+library(neyhart)
+library(sommer)
+library(gws)
+
+# The head directory
+proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
+
+# Geno, pheno, and enviro data
+geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Genotypic Data/GBS Genotype Data/"
+pheno_dir <- file.path(proj_dir, "Phenotype_Data/")
+env_var_dir <- file.path(proj_dir, "Environmental_Variables")
+
+
+# Other directories
+fig_dir <- file.path(proj_dir, "Figures/")
+pred_dir <- file.path(proj_dir, "Predictions")
+entry_dir <- file.path(proj_dir, "Plant_Materials")
+analysis_dir <- file.path(proj_dir, "Analysis")
+result_dir <- file.path(proj_dir, "Results")
+
+## Load Data
+# Load the phenotypic data
+load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+# Load environmental data
+load(file.path(env_var_dir, "environmental_data_compiled.RData"))
+
+# Load an entry file
+entry_list <- read_excel(file.path(entry_dir, "S2MET_project_entries.xlsx"))
+
+
+# Grab the entry names that are not checks
+tp <- entry_list %>% 
+  filter(Class == "S2TP") %>% 
+  pull(Line)
+
+vp <- entry_list %>% 
+  filter(Class == "S2C1R") %>% 
+  pull(Line)
+
+# Find the tp and vp that are genotypes
+tp_geno <- intersect(tp, row.names(s2_imputed_mat))
+vp_geno <- intersect(vp, row.names(s2_imputed_mat))
+
+# Define the checks
+checks <- entry_list %>% 
+  filter(Class == "Check") %>% 
+  pull(Line)
+
+entries <- entry_list %>% 
+  pull(Line)
+
+# Extract the tp and vp from the G matrix
+s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
+
+# Load heritability data
+load(file.path(result_dir, "S2_MET_stage_one_data.RData"))
+
+```
+
+
+## Methods
+
+### Simple Genomic Predictions
+
+This section will cover the simple intra and inter-environmental predictions. 
+
+
+#### Intra-Environmental Predictions 
+
+Predictionswere conducted using the model
+
+$$
+\mathbf{y = X \beta + Z u + e}
+$$
+
+where $\mathbf{u}$ was modelled such that $\mathbf{u} \sim N(0, \sigma^2_u \mathbf{A})$ and $\mathbf{e}$ was modelled such that $\mathbf{e} \sim N(0, \sigma^2_\epsilon \mathbf{R})$. The matrix $\mathbf{R}$ was a diagonal matrix with elements equal to the inverse squares of the standard errors of the BLUEs present in $\mathbf{y}$.
+
+For each environment in which the training population was evaluated along with the validation population, predict the vp phenotypes using the tp.
+
+Analysis
+
+```{r intra.env.pred}
+
+# Load the results
+load(file.path(result_dir, "S2MET_intra_env_pred.RData"))
+
+# Plot
+(g_intra_env_acc <- intra_env_pred_acc %>%
+  mutate(dummy = as.factor(1)) %>%
+  ggplot(aes(x = environment, y = cor, ymin = ci_lower, ymax = ci_upper)) +
+  geom_col(aes(fill = dummy), col = "black") +
+  geom_errorbar(width = 0.5) +
+  facet_grid(trait ~ .) +
+  scale_fill_brewer(guide = FALSE, palette = "Set2") +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  ylim(c(-0.5, 1)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Intra-Environment Prediction Accuracy"
+  ))
+
+save_file <- file.path(fig_dir, "intra_environment_predictions.jpg")
+ggsave(filename = save_file, plot = g_intra_env_acc, width = 8, height = 6)
+
+
+```
+
+Combine with heritability information and compare. For 2015 trials (where there was a separate tp and vp trial), only use the heritability information for the vp trials
+
+```{r compare.herit}
+
+# Extract relevant heritability information
+intra_env_herit <- S2_MET_stage_one %>% 
+  ungroup() %>%
+  dplyr::select(trial, environment, trait, heritability:H_corr) %>% 
+  group_by(environment, trait) %>% 
+  ungroup() %>%
+  filter(str_detect(trial, "S2C1|S2_MET")) %>% 
+  mutate(metric = "herit") %>% 
+  dplyr::select(environment, trait, metric, value = H_corr, se:ci_upper) %>%
+  left_join(dplyr::select(intra_env_pred_acc, environment, trait), .)
+  
+
+# Modify the prediction accuracy for merging
+intra_env_pred_acc1 <- intra_env_pred_acc %>% 
+  mutate(metric = "pred_acc") %>% 
+  dplyr::select(environment, trait, metric, value = cor, names(.))
+
+# Combine the heritability information with the prediction accuracy information
+intr_env_data <- bind_rows(intra_env_pred_acc1, intra_env_herit)
+
+# Plot
+(g_intr_env_comp <- intr_env_data %>%
+  ggplot(aes(x = environment, y = value, ymin = ci_lower, ymax = ci_upper, fill = metric)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(group = metric), position = position_dodge(0.9), width = 0.5) +
+  facet_grid(trait ~ .) +
+  ylab("Prediction Accuracy") +
+  xlab("Environment") +
+  scale_fill_manual(guide = guide_legend(title = ""), 
+                    values = RColorBrewer::brewer.pal(n = 3, name = "Set2"),
+                    labels = c("H", parse(text = "r[MG]"))) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Intra-Environment Heritability and Prediction Accuracy"
+  ))
+
+save_file <- file.path(fig_dir, "intra_environment_summary.jpg")
+ggsave(filename = save_file, plot = g_intr_env_comp, width = 8, height = 6)
+
+
+```
+
+
+What is the correlation between heritability and prediction accuracy?
+
+```{r herit.pred.cor}
+
+# Plot the relationship for each trait and calculate a correlation
+(g_herit_acc_corr <- intr_env_data %>% 
+  dplyr::select(environment:value) %>% 
+  spread(metric, value) %>% 
+  group_by(trait) %>% 
+  mutate(corr = cor(herit, pred_acc, use = "complete.obs"),
+         corr = str_c("r = ", round(corr, 3))) %>%
+  ggplot(aes(x = herit, y = pred_acc)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_text(aes(x = Inf, y = -Inf, label = corr, vjust = -1, hjust = 1.5)) +
+  facet_wrap( ~ trait, ncol = 2, scales = "free_x") +
+  ylab("Prediction Accuracy") +
+  xlab("Heritability") +
+  theme_bw() +
+  labs(
+    title = "Relationship Between Heritability and Prediction Accuracy\nin Each Environment"
+  ))
+
+save_file <- file.path(fig_dir, "intra_environment_comparison.jpg")
+ggsave(filename = save_file, plot = g_herit_acc_corr, width = 6, height = 6)
+
+
+```
+
+
+
+
+
+
+
+
