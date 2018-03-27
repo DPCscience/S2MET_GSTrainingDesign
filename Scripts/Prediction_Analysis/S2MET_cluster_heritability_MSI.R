@@ -1,3 +1,27 @@
+## Use environmental clusters to calculate heritability
+## 
+## Author: Jeff Neyhart
+## Last modified: March 27, 2018
+## 
+## This script will perform different clustering procedures on the S2MET data
+## and calculate the within and across-cluster heritabilities.
+## 
+
+# Load packages and the source script
+library(tidyverse)
+library(stringr)
+library(readxl)
+
+# The head directory
+repo_dir <- getwd()
+
+source(file.path(repo_dir, "source.R"))
+
+
+
+
+
+
 ## S2MET Cluster Heritability
 ## 
 ## This script will perform different clustering procedures on the S2MET data

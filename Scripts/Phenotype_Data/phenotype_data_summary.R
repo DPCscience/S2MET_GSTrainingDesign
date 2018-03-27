@@ -270,16 +270,26 @@ save("stage_two_fits", "stage_two_varProp", file = save_file)
 ## Environmental Correlations
 
 ## Estimate genetic correlations using the BLUEs from each environment
+## First estimate using only the TP
+tp_BLUEs <- S2_MET_BLUEs %>%
+  filter(line_name %in% tp_geno)
 
-# Use all data
-env_cor <- S2_MET_BLUEs %>% 
+env_cor_tp <- tp_BLUEs %>% 
   split(.$trait) %>% 
   map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
         as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
         cor(., use = "pairwise.complete.obs"))
 
+# Now use all data
+env_cor_all <- S2_MET_BLUEs %>% 
+  split(.$trait) %>% 
+  map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
+        as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
+        cor(., use = "pairwise.complete.obs"))
+
+
 # Convert to a data.frame for visualization 
-env_cor_df <- env_cor %>% 
+env_cor_df <- env_cor_all %>% 
   map(~as.data.frame(.) %>% rownames_to_column("environment1") %>% 
         gather(environment2, correlation, -environment1) %>% 
         filter(environment1 != environment2)) %>%
@@ -312,5 +322,5 @@ ggsave(filename = save_file, plot = g_env_cor, height = 8, width = 8)
 ## Save the correlation matrices for further use
 
 save_file <- file.path(result_dir, "environmental_genetic_correlations.RData")
-save("env_cor_df", "env_cor", file = save_file)
+save("env_cor_tp", "env_cor_all", file = save_file)
 

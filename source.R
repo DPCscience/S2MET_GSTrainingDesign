@@ -32,6 +32,9 @@ entry_list <- read_excel(file.path(data_dir, "project_entries.xlsx"))
 # Load the trial metadata
 trial_info <- read_csv(file.path(data_dir, "trial_metadata.csv"))
 
+# Vector of relevant traits
+traits <- c("GrainYield", "HeadingDate", "PlantHeight")
+
 
 # Grab the entry names that are not checks
 tp <- entry_list %>% 
@@ -61,14 +64,40 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 # Calculate the K matrix
 K <- A.mat(X = s2_imputed_mat_use, min.MAF = 0, max.missing = 1)
 
-# Filter the S2 MET BLUEs for non-irrigated trials
-S2_MET_BLUEs <- S2_MET_BLUEs %>% 
-  filter(!grepl(pattern = "BZI|HTM|AID", x = environment))
-
-
 # Create a replacement vector for each trait that adds a space between words and
 # also included the unit
 trait_replace <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield", "Heading Date", "Plant Height"), nm = .)
 trait_replace_unit <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield\n(kg ha^-1)", "Heading Date\n(days)", "Plant Height\n(cm)"), nm = .)
+
+# Pull out the trials with irrigation
+irrig_env <- subset(trial_info, irrigated == "yes", environment, drop = TRUE)
+# Filter the S2 MET BLUEs for non-irrigated trials
+S2_MET_BLUEs <- S2_MET_BLUEs %>% 
+  filter(!environment %in% irrig_env)
+
+
+
+# Find environments in which just data on both the TP and VP is available
+tp_vp_env <- S2_MET_BLUEs %>% 
+  group_by(environment) %>%
+  filter(sum(line_name %in% tp_geno) > 1, sum(line_name %in% vp_geno) > 1) %>% 
+  distinct(environment) %>% 
+  pull()
+
+# Find environments in which just data on the TP is available
+tp_only_env <- S2_MET_BLUEs %>% 
+  group_by(environment) %>%
+  filter(sum(line_name %in% tp_geno) > 1, sum(line_name %in% vp_geno) == 0) %>% 
+  distinct(environment) %>% 
+  pull()
+
+# Find environments in which just data on the VP is available
+vp_only_env <- S2_MET_BLUEs %>% 
+  group_by(environment) %>%
+  filter(sum(line_name %in% tp_geno) == 0, sum(line_name %in% vp_geno) > 1) %>% 
+  distinct(environment) %>% 
+  pull()
+
+
