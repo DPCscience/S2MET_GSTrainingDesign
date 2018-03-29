@@ -73,8 +73,17 @@ great_circle_dist_list <- rerun(length(traits), great_circle_dist) %>% set_names
 load(file.path(result_dir, "environmental_genetic_correlations.RData"))
 
 # Convert each correlation matrix to a distance matrix
-env_cor_all_dist_list <- env_cor_all %>% map(as.dist)
-env_cor_tp_dist_list <- env_cor_tp %>% map(as.dist)
+# Missing data gets a correlation of 0
+# 1 - cor is the distance
+env_cor_all_dist_list <- env_cor_all %>% 
+  map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
+  map(~1 - .) %>%
+  map(as.dist)
+
+env_cor_tp_dist_list <- env_cor_tp %>%
+  map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
+  map(~1 - .) %>%
+  map(as.dist)
 
 
 ## Environmental distance metric
@@ -204,7 +213,7 @@ n_PC <- 2
 
 # Extract the GxE BLUPs and run PCA
 ge_PCA_dist_all <- S2_MET_BLUPs_ge_all %>%
-  map(function(out) {
+  map_df(function(out) {
     blup_mat <- out$BLUP[[1]] %>%
       spread(environment, value) %>%
       as.data.frame() %>%
@@ -233,7 +242,7 @@ ge_PCA_dist_all <- S2_MET_BLUPs_ge_all %>%
     
 # Copy for the tp
 ge_PCA_dist_tp <- S2_MET_BLUPs_ge_tp %>%
-  map(function(out) {
+  map_df(function(out) {
     blup_mat <- out$BLUP[[1]] %>%
       spread(environment, value) %>%
       as.data.frame() %>%
@@ -281,7 +290,7 @@ dist_method_df_all <- data_frame(
   great_circle_dist = great_circle_dist_list, 
   env_cor_dist = env_cor_all_dist_list, 
   ge_mean_D = ge_mean_D_all, 
-  ge_PCA_dist = ge_PCA_dist_all,
+  ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
   ec_one_PCA_dist = EC_one_PCA_dist_list,
   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 
@@ -291,7 +300,7 @@ dist_method_df_tp <- data_frame(
   great_circle_dist = great_circle_dist_list, 
   env_cor_dist = env_cor_tp_dist_list, 
   ge_mean_D = ge_mean_D_tp, 
-  ge_PCA_dist = ge_PCA_dist_tp,
+  ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
   ec_one_PCA_dist = EC_one_PCA_dist_list,
   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 

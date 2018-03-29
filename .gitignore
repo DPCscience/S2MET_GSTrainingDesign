@@ -2,12 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
-Phenotype_Data/*
 Environmental_Variables/*
 Figures/*
-Misc/*
-project_timeline.csv
 Summaries/*
-Predictions/MSI/S2MET_MSI_prediction_material.RData
 Results/*
-packrat/lib*/
+Data/S2_MET_BLUEs.RData

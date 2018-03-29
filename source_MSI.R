@@ -1,16 +1,20 @@
-## S2MET source
+## S2MET source for MSI
 ## 
 ## A script that automatically loads the data relevant for the S2MET project
 
-library(tidyverse)
-library(readxl)
-library(rrBLUP)
+
+# Load packages
+packages <- c("dplyr", "tidyr", "stringr", "readxl", "readr", "parallel",
+              "rrBLUP")
+package_dir <- "/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-unknown-linux-gnu-library/3.2/"
+invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
+
 
 ## Directories
-proj_dir <- repo_dir
+proj_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
 
-# Geno, pheno, and enviro data
-geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/"
+geno_dir <-  "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Genos"
+pheno_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Phenos"
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")
@@ -20,11 +24,9 @@ result_dir <- file.path(proj_dir, "Results")
 
 
 # Load the phenotypic data
-load(file.path(data_dir, "S2_MET_BLUEs.RData"))
+load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
 # Load the genotypic data
 load(file.path(geno_dir, "S2_genos_mat.RData"))
-# Load environmental data
-load(file.path(data_dir, "environmental_data_compiled.RData"))
 
 # Load an entry file
 entry_list <- read_excel(file.path(data_dir, "project_entries.xlsx"))
@@ -67,12 +69,12 @@ K <- A.mat(X = s2_imputed_mat_use, min.MAF = 0, max.missing = 1)
 # Create a replacement vector for each trait that adds a space between words and
 # also included the unit
 trait_replace <- unique(S2_MET_BLUEs$trait) %>%
-  set_names(x = c("Grain Yield", "Heading Date", "Plant Height"), nm = .)
+  setNames(object = c("Grain Yield", "Heading Date", "Plant Height"), nm = .)
 trait_replace_unit <- unique(S2_MET_BLUEs$trait) %>%
-  set_names(x = c("Grain Yield\n(kg ha^-1)", "Heading Date\n(days)", "Plant Height\n(cm)"), nm = .)
+  setNames(object = c("Grain Yield\n(kg ha^-1)", "Heading Date\n(days)", "Plant Height\n(cm)"), nm = .)
 
 # Pull out the trials with irrigation
-irrig_env <- subset(trial_info, irrigated == "yes", environment, drop = TRUE)
+irrig_env <- subset(trial_info, irrigated == "yes", environment)$environment
 # Filter the S2 MET BLUEs for non-irrigated trials
 S2_MET_BLUEs <- S2_MET_BLUEs %>% 
   filter(!environment %in% irrig_env)
