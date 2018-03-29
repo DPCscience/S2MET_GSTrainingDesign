@@ -122,9 +122,6 @@ cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = fun
     
     df <- unnest(core_df[i,], env_cluster)
     
-    # Print message
-    print(paste(unique(df$trait), unique(df$dist_method), sep = ", "))
-
     # Combine the phenotypic data
     pheno_cluster <- left_join(df, S2_MET_BLUEs, by = c("trait", "environment"))
     
