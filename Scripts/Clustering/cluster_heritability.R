@@ -19,6 +19,9 @@ source(file.path(repo_dir, "source_MSI.R"))
 packages <- c("lme4")
 invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
 
+# Source some scripts from pbr
+source("/panfs/roc/groups/6/smithkp/neyha001/R/my_packages/pbr/R/convenience_functions.R")
+source("/panfs/roc/groups/6/smithkp/neyha001/R/my_packages/pbr/R/herit.R")
 
 ### Run for local machine
 
@@ -122,9 +125,6 @@ cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = fun
     
     df <- unnest(core_df[i,], env_cluster)
     
-    # Print message
-    print(paste(unique(df$trait), unique(df$dist_method), sep = ", "))
-
     # Combine the phenotypic data
     pheno_cluster <- left_join(df, S2_MET_BLUEs, by = c("trait", "environment"))
     
@@ -172,7 +172,7 @@ cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = fun
     mutate(out = results_list)
   
 }, mc.cores = n_core)
-    
+
 
 
 save_file <- file.path(result_dir, "cluster_heritability_results.RData")
