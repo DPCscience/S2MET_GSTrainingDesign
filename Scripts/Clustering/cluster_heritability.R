@@ -22,12 +22,12 @@ invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir
 
 ### Run for local machine
 
-# Run the source script
-repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
-
-# Load packages and the source script
-library(lme4)
+# # Run the source script
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# 
+# # Load packages and the source script
+# library(lme4)
 
 
 # Load the clustering results
