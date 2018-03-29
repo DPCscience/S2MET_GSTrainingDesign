@@ -116,7 +116,7 @@ clust_method_df_tomodel_core <- clust_method_df_tomodel %>%
 
 ## Parallelize over the core df
 cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = function(core_df) {
-  
+ 
   # Create a list to store the results
   results_list <- vector("list", nrow(core_df))
   
@@ -124,6 +124,9 @@ cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = fun
   for (i in seq_along(results_list)) {
     
     df <- unnest(core_df[i,], env_cluster)
+
+    #Print a message
+    print(paste(unique(df$trait), unique(df$dist_method), sep = ", "))
     
     # Combine the phenotypic data
     pheno_cluster <- left_join(df, S2_MET_BLUEs, by = c("trait", "environment"))
