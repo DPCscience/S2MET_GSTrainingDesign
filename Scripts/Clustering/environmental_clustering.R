@@ -305,9 +305,51 @@ dist_method_df_tp <- data_frame(
   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 
 
+# Tidy the the distance matrix data.frame, then combine the data.frames for
+# TP and TP + VP
+dist_method_df_all_tidy <- dist_method_df_all %>% 
+  mutate(population = "all") %>% 
+  gather(dist_method, dist, -trait, -population)
+
+# For each trait, identify the most common set of environments
+dist_method_df_common_env <- dist_method_df_all_tidy %>% 
+  group_by(trait) %>% 
+  summarize(common_env = list(map(dist, ~row.names(as.matrix(.))) %>% reduce(intersect)))
+
+# Combine with the distance metrics, convert to a matrix, subset the environments,
+# then convert back to a dist object
+# Then create cluster objects
+clust_method_df_all <- full_join(dist_method_df_all_tidy, dist_method_df_common_env, by = "trait") %>% 
+  mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
+         cluster = map(dist, hclust)) %>%
+  select(-common_env)
+
+
+# Just the TP
+dist_method_df_tp_tidy <- dist_method_df_tp %>% 
+  mutate(population = "tp") %>% 
+  gather(dist_method, dist, -trait, -population)
+
+# For each trait, identify the most common set of environments
+dist_method_df_common_env <- dist_method_df_tp_tidy %>% 
+  group_by(trait) %>% 
+  summarize(common_env = list(map(dist, ~row.names(as.matrix(.))) %>% reduce(intersect)))
+
+# Combine with the distance metrics, convert to a matrix, subset the environments,
+# then convert back to a dist object
+# Then create cluster objects
+clust_method_df_tp <- full_join(dist_method_df_tp_tidy, dist_method_df_common_env, by = "trait") %>% 
+  mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
+         cluster = map(dist, hclust)) %>%
+  select(-common_env)
+
+## Combine the data.frames
+## Replicate the clusters and add each cluster k from min_k to max_k
+clust_method_df <- bind_rows(clust_method_df_all, clust_method_df_tp)
+
 # Save this
 save_file <- file.path(result_dir, "distance_methods_results.RData")
-save("dist_method_df_all", "dist_method_df_tp", file = save_file)
+save("clust_method_df", file = save_file)
 
 
 

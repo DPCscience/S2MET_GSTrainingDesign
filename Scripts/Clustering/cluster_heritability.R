@@ -1,7 +1,7 @@
 ## Use environmental clusters to calculate heritability
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: March 29, 2018
 ## 
 ## This script will perform different clustering procedures on the S2MET data
 ## and calculate the within and across-cluster heritabilities.
@@ -41,62 +41,26 @@ load(file.path(result_dir, "distance_methods_results.RData"))
 n_core <- ifelse(Sys.info()["sysname"] == "Windows", 1, detectCores())
 
 
-# Tidy the the distance matrix data.frame, then combine the data.frames for
-# TP and TP + VP
-dist_method_df_all_tidy <- dist_method_df_all %>% 
-  mutate(population = "all") %>% 
-  gather(dist_method, dist, -trait, -population)
-
-# For each trait, identify the most common set of environments
-dist_method_df_common_env <- dist_method_df_all_tidy %>% 
-  group_by(trait) %>% 
-  summarize(common_env = list(map(dist, ~row.names(as.matrix(.))) %>% reduce(intersect)))
-
-# Combine with the distance metrics, convert to a matrix, subset the environments,
-# then convert back to a dist object
-# Then create cluster objects
-clust_method_df_all <- full_join(dist_method_df_all_tidy, dist_method_df_common_env, by = "trait") %>% 
-  mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
-         cluster = map(dist, hclust)) %>%
-  select(-common_env)
-
-
-# Just the TP
-dist_method_df_tp_tidy <- dist_method_df_tp %>% 
-  mutate(population = "tp") %>% 
-  gather(dist_method, dist, -trait, -population)
-
-# For each trait, identify the most common set of environments
-dist_method_df_common_env <- dist_method_df_tp_tidy %>% 
-  group_by(trait) %>% 
-  summarize(common_env = list(map(dist, ~row.names(as.matrix(.))) %>% reduce(intersect)))
-
-# Combine with the distance metrics, convert to a matrix, subset the environments,
-# then convert back to a dist object
-# Then create cluster objects
-clust_method_df_tp <- full_join(dist_method_df_tp_tidy, dist_method_df_common_env, by = "trait") %>% 
-  mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
-         cluster = map(dist, hclust)) %>%
-  select(-common_env)
-
-
+## Manipulate the cluster results and cut the trees
 # What should be the minimum and maximum number of clusters?
 min_k <- 2
-max_k <- 10
+max_k <- 20
 seq_k <- seq(min_k, max_k)
 
 
 ## Combine the data.frames
 ## Replicate the clusters and add each cluster k from min_k to max_k
-clust_method_df <- bind_rows(clust_method_df_all, clust_method_df_tp) %>%
+clust_method_df_use <- clust_method_df %>%
   rerun(.n = length(seq_k), .) %>%
   list(., seq_k) %>% 
   pmap_df(~mutate(.x, k = .y))
 
 
+
+
 ## Using the value of k, cut the cluster tree and create data.frames for the environment
 ## and the assigned cluster
-clust_method_df_tomodel <- clust_method_df %>% 
+clust_method_df_tomodel <- clust_method_df_use %>% 
   mutate(env_cluster = list(cluster, k) %>% 
            pmap(~cutree(tree = .x, k = .y) %>% 
                   data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE)) )
@@ -165,7 +129,7 @@ cluster_method_herit_out <- mclapply(X = clust_method_df_tomodel_core, FUN = fun
       select(source = grp, variance = vcov)
     
     # Return a list
-    results_list[[i]] <- list(herit = herit_df, var_comp = var_comp)
+    results_list[[i]] <- list(herit = herit_df, var_comp = var_comp, loglik = as.numeric(logLik(fit)))
     
   }
   
