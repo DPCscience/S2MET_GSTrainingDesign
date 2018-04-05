@@ -91,10 +91,8 @@ pred_env_dist_rank_split <- pred_env_dist_rank %>%
   split(.$core)
 
 # Run over multiple cores
-#env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
+env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
   
-core_df <- pred_env_dist_rank_split[[1]]
-
   ## Create an empty results list
   results_out <- vector("list", nrow(core_df))
   
