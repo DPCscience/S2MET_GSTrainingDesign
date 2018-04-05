@@ -6,6 +6,7 @@ library(tidyverse)
 library(readxl)
 library(rrBLUP)
 library(neyhart)
+library(boot)
 
 ## Directories
 proj_dir <- repo_dir
