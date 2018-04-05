@@ -31,7 +31,7 @@ proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 traits <- c("GrainYield", "HeadingDate", "PlantHeight")
 
 # Load the tidy S2 data
-load("C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomic Selection/Phenotypic Data/Final/Master Phenotypes/S2_MET_tidy.RData")
+load("C:/Users/Jeff/Google Drive/Barley Lab/Breeding//Phenotypic Data/Final/Master Phenotypes/S2_MET_tidy.RData")
 
 
 ## Create a data.frame of data to model
@@ -185,7 +185,7 @@ S2_MET_BLUEs <- S2_MET_BLUEs_all %>%
   droplevels()
 
 # Is the standard error of the BLUEs reflective of the heritability within an environment?
-g_herit_se <- S2_MET_stage_one %>% 
+g_herit_se <- stage_one_data %>% 
   select(trial, environment, trait, BLUE, heritability) %>% 
   unnest(BLUE) %>% 
   group_by(environment, trait) %>%

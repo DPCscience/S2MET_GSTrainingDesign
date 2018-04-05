@@ -1,10 +1,11 @@
 ## Test Predictions in the S2MET Prediction Project
 ## 
 ## Author: Jeff Neyhart
-## Last Updated: March 15, 2018
+## Last Updated: April 4, 2018
 ## 
-## This script will conduct some preliminary predictions using the S2MET data
-## and potentially some clustering strategy
+## This script will conduct some preliminary predictions using the S2MET data. 
+## This will mainly include intra-environment predictions and normalization 
+## based on heritability.
 ## 
 
 # Load packages and the source script
@@ -15,14 +16,12 @@ library(readxl)
 library(modelr)
 library(pbr)
 library(rrBLUP)
-library(ggridges)
+library(ggforce)
 
 # The head directory
 repo_dir <- getwd()
 
 source(file.path(repo_dir, "source.R"))
-
-
 
 
 
@@ -36,11 +35,8 @@ source(file.path(repo_dir, "source.R"))
 pheno_tomodel <- S2_MET_BLUEs %>% 
   # filter(trait == "GrainYield") %>%
   filter(trait == "HeadingDate") %>%
-  group_by(environment) %>%
-  filter(sum(line_name %in% tp_geno) > 1,
-         sum(line_name %in% vp_geno)) %>%
-  ungroup() %>%
-  filter(line_name %in% c(tp_geno, vp_geno)) %>%
+  filter(line_name %in% c(tp_geno, vp_geno),
+         environment %in% tp_vp_env) %>%
   mutate_at(vars(environment:line_name), as.factor)
 
 # Randomly sample 2 environments
@@ -135,11 +131,168 @@ sample_envs_results %>%
 
 
 
+### Question 2 - What is the intra-environmental prediction accuracy (i.e. what is
+### the accuracy of an environment to predict itself?)
+### We may also ask what the accuracy is of a random sample of environments to predict
+### that environment.
+
+# Subset the dataset for only environments in which both the TP and VP were phenotyped
+S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+  filter(line_name %in% c(tp_geno, vp_geno),
+         environment %in% tp_vp_env) %>%
+  mutate_at(vars(environment:line_name), as.factor)
+
+# Group by traits and environments and create training and test datasets
+S2_MET_BLUEs_tomodel <- S2_MET_BLUEs_use %>% 
+  mutate(pop = if_else(line_name %in% tp_geno, "train", "test"),
+         env = environment) %>% # Copy environment for nesting 
+  group_by(trait, environment, pop) %>%
+  nest(env, line_name, value, std_error) %>%
+  spread(pop, data)
+
+# Iterate over traits and environments
+intra_environment_predictions <- S2_MET_BLUEs_tomodel %>%
+  group_by(trait, environment) %>%
+  do({
+    df <- .
+    train <- df$train[[1]]
+    test <- df$test[[1]]
+    
+    # cat(.$trait, as.character(.$environment), "\n")
+    
+    # Run predictions
+    pred_out <- gblup(K = K, train = train, test = test, bootrep = 1000)
+    # Convert to data.frame and return
+    data_frame(accuracy = list(pred_out$boot), pgv = list(pred_out$pgv))
+    
+  })
+
+# Add the heritability information
+intra_environment_predictions1 <- stage_one_data %>% 
+  group_by(environment, trait) %>% 
+  distinct(environment, trait, heritability) %>% 
+  slice(1) %>% 
+  right_join(., intra_environment_predictions, by = c("environment", "trait")) %>%
+  ungroup()
+
+
+## Create scatterplots of predicted versus observed values
+# First create the base plot
+acc_plots_paginate <- intra_environment_predictions %>%
+  unnest(pgv) %>% 
+  ggplot(aes(x = value, y = pred_value)) + 
+  geom_point() + 
+  theme_bw(base_size = 8)
+
+acc_plots_paginate1 <- acc_plots_paginate + 
+  facet_wrap_paginate(trait ~ environment, nrow = 5, ncol = 5, scales = "free",
+                      labeller = labeller(.multi_line = FALSE), page = 1)
+
+acc_plots_paginate2 <- acc_plots_paginate + 
+  facet_wrap_paginate(trait ~ environment, nrow = 5, ncol = 5, scales = "free",
+                      labeller = labeller(.multi_line = FALSE), page = 2)
+
+acc_plots_paginate3 <- acc_plots_paginate + 
+  facet_wrap_paginate(trait ~ environment, nrow = 5, ncol = 5, scales = "free",
+                      labeller = labeller(.multi_line = FALSE), page = 3)
+
+acc_plots_paginate4 <- acc_plots_paginate + 
+  facet_wrap_paginate(trait ~ environment, nrow = 5, ncol = 5, scales = "free",
+                      labeller = labeller(.multi_line = FALSE), page = 4)
 
 
 
+# Plot using barplots
+intra_environment_predictions_toplot <- intra_environment_predictions1 %>%
+  unnest(accuracy) %>%
+  group_by(trait, environment) %>%
+  mutate(accuracy_adj = cor / sqrt(heritability),
+         significant = between(x = 0, left = ci_lower, right = ci_upper), 
+         significant_ann = if_else(significant, "*", ""))
+
+g_plot <- intra_environment_predictions_toplot %>% 
+  ggplot(aes(x = environment, y = cor)) +
+  geom_col(fill = umn_palette(2, 3)[3]) + 
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5) + 
+  ylim(c(-0.5), 1) +
+  ylab(expression(r[MG])) +
+  xlab("Environment") +
+  labs(title = "Intra-environment Predictions") +
+  facet_grid(trait ~ .) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save
+save_file <- file.path(fig_dir, "intra_environment_predictions.jpg")
+ggsave(filename = save_file, plot = g_plot, width = 10, height = 6, dpi = 1000)
 
 
+## Sort on grain yield accuracy
+environment_order <- intra_environment_predictions_toplot %>% 
+  filter(trait == "GrainYield") %>% 
+  arrange(cor) %>% 
+  pull(environment) %>%
+  c(., setdiff(tp_vp_env, .))
+
+intra_environment_predictions_toplot1 <- intra_environment_predictions_toplot %>% 
+  ungroup() %>% 
+  mutate(environment = factor(environment, levels = environment_order))
+
+g_plot <- intra_environment_predictions_toplot1 %>% 
+  ggplot(aes(x = environment, y = cor)) +
+  geom_col(fill = umn_palette(2, 3)[3]) + 
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5) + 
+  ylim(c(-0.5), 1) +
+  ylab(expression(r[MG])) +
+  xlab("Environment") +
+  labs(title = "Intra-environment Predictions") +
+  facet_grid(trait ~ .) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save
+save_file <- file.path(fig_dir, "intra_environment_predictions_sorted.jpg")
+ggsave(filename = save_file, plot = g_plot, width = 10, height = 6, dpi = 1000)
+
+
+### Question 3 - what is the relationship between the intra-environment prediction
+### accuracy and the environment heritability?
+# subset the heritability information
+env_heritability <- stage_one_data %>% 
+  group_by(environment, trait) %>% 
+  select(trait, environment, heritability:ci_upper) %>% 
+  slice(1) %>% 
+  ungroup() %>%
+  rename(estimate = heritability) %>%
+  rename_at(vars(estimate:ci_upper), ~str_c("heritability_", .))
+  
+env_accuracy <- intra_environment_predictions_toplot %>% 
+  select(environment, trait, estimate = cor, se:ci_upper) %>% 
+  ungroup() %>% 
+  rename_at(vars(estimate:ci_upper), ~str_c("accuracy_", .))
+
+# Combine
+env_measures <- left_join(env_accuracy, env_heritability, by = c("environment", "trait"))
+
+## Plot
+g_acc_herit <- env_measures %>% 
+  ggplot(aes(x = (heritability_estimate), y = accuracy_estimate)) + 
+  geom_segment(aes(x = heritability_ci_lower, xend = heritability_ci_upper, yend = accuracy_estimate),
+               color = umn_palette(3, 4)[3]) + 
+  geom_segment(aes(xend = heritability_estimate, y = accuracy_ci_lower, yend = accuracy_ci_upper),
+               color = umn_palette(3, 4)[4]) + 
+  geom_point() + 
+  # geom_smooth(method = "lm", se = FALSE) +
+  ylab("Prediction Accuracy") +
+  xlab("Heritability") +
+  facet_wrap(~trait, ncol = 2, scales = "free_x") +
+  theme_bw()
+
+# Save
+save_file <- file.path(fig_dir, "accuracy_and_heritability.jpg")
+ggsave(filename = save_file, plot = g_acc_herit, width = 6, height = 6, dpi = 1000)
 
 
 
