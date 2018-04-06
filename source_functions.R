@@ -73,7 +73,8 @@ subset_env <- function(dist, envs) {
 }
 
 ## Define a function to find the harmonic mean of a variable given an xtabs object
-harm_mean.xtabs <- function(x, variable) {
+## 'adjust' is used for reps
+harm_mean.xtabs <- function(x, variable, adjust = FALSE) {
   # Get the dimension names of the xtabs
   tab_names <- names(dimnames(x))
   # Position of the variable in the array
@@ -84,7 +85,7 @@ harm_mean.xtabs <- function(x, variable) {
   variable_sum_adj <- ifelse(variable_sum > 1, 1, variable_sum)
   
   # If all tab names are called, calculate the harmonic mean of the reps
-  if (length(variable_pos) == length(tab_names)) {
+  if (adjust) {
     return(harm_mean(variable_sum_adj))
     
   } else {
@@ -118,7 +119,7 @@ cluster_heritability <- function(object, breakup_env = TRUE) {
   variable_harm_mean <- setNames(variable_harm_mean, setdiff(varnames_random, "line_name"))
   
   # Now for reps
-  rep_harm_mean <- harm_mean.xtabs(x = plot_table, variable = names(variable_harm_mean))
+  rep_harm_mean <- harm_mean.xtabs(x = plot_table, variable = names(variable_harm_mean), adjust = T)
   
   ## Set the expressions to use in calculating across- and within-cluster heritability
   if (breakup_env) {
@@ -146,6 +147,42 @@ cluster_heritability <- function(object, breakup_env = TRUE) {
   
   # Return the heritability
   return(herit_list) 
+  
+}
+
+
+## Function for calculating heritability in a training set
+training_heritability <- function(object) {
+  # Extract the data from the model object
+  mf <- model.frame(object)
+  # Get the names of the mf and remove the reponse and weights
+  varnames_random <- setdiff(names(mf), attr(terms(mf), "varnames.fixed"))
+  
+  # Set the formula for the xtabs
+  xtabs_form <- as.formula(paste("~", paste(varnames_random, collapse = " + ")))
+  plot_table <- xtabs(formula = xtabs_form, data = mf)
+
+  # Calculate the harmonic mean of reps
+  rep_harm_mean <- harm_mean.xtabs(x = plot_table, variable = setdiff(varnames_random, "line_name"), adjust = TRUE)
+  
+  # Calculate the harmonic mean of environment, if present
+  if ("environment" %in% varnames_random) {
+    variable_harm_mean <- lapply(setdiff(varnames_random, "line_name"), FUN = harm_mean.xtabs, x = plot_table)
+    variable_harm_mean <- setNames(variable_harm_mean, setdiff(varnames_random, "line_name"))
+    
+    exp <- "line_name / (line_name + (line_name:environment / n_e) + (Residual / (n_e * n_r)))"
+    # Calculate heritability
+    heritability <- herit(object = object, exp = exp, n_e = variable_harm_mean$environment, n_r = rep_harm_mean)
+    
+  } else {
+    exp <- "line_name / (line_name + (Residual / (n_r)))"
+    # Calculate heritability
+    heritability <- herit(object = object, exp = exp, n_r = rep_harm_mean)
+
+  }
+  
+  # Return the heritability
+  return(heritability)
   
 }
 
