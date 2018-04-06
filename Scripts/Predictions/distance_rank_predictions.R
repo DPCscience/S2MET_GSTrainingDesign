@@ -91,10 +91,8 @@ pred_env_dist_rank_split <- pred_env_dist_rank %>%
   split(.$core)
 
 # Run over multiple cores
-#env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
+env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
   
-core_df <- pred_env_dist_rank_split[[1]]
-
   ## Create an empty results list
   results_out <- vector("list", nrow(core_df))
   
@@ -127,9 +125,14 @@ core_df <- pred_env_dist_rank_split[[1]]
       map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
   
     # Map over the data and predict
-    predictions_out <- train_envs_data %>%
+    test <- try(predictions_out <- train_envs_data %>%
       map(~rename(., env = environment)) %>%
-      map(~gblup(K = K, train = ., test = pred_env_data, bootreps = 100))
+      map(~gblup(K = K, train = ., test = pred_env_data, bootreps = 100)))
+    
+    ## Error-handling
+    if (inherits(test, "try-error")) {
+      cat(pred_env, tr, dist_met)
+    }
     
     # Return the bootstrap data.frame results
     predictions_boot <- predictions_out %>% 
@@ -154,6 +157,7 @@ core_df <- pred_env_dist_rank_split[[1]]
 # Save the results
 save_file <- file.path(result_dir, "environmental_distance_predictions.RData")
 save("env_dist_predictions_out", file = save_file)
+
 
 
 
