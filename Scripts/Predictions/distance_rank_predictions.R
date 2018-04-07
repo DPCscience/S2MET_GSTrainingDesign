@@ -164,9 +164,9 @@ env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = functio
 }, mc.cores = n_core)
 
 
-# # Save the results
-# save_file <- file.path(result_dir, "environmental_distance_predictions.RData")
-# save("env_dist_predictions_out", file = save_file)
+# Save the results
+save_file <- file.path(result_dir, "environmental_distance_predictions.RData")
+save("env_dist_predictions_out", file = save_file)
 
 
 
@@ -177,82 +177,82 @@ env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = functio
 ### 
 ### 
 
-# Run over multiple cores
-env_dist_heritability_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
-
-  ## Create an empty results list
-  results_out <- vector("list", nrow(core_df))
-
-  # Iterate over the rows in the core_df
-  for (i in seq_along(results_out)) {
-
-    ## Given an ordered list of environments sorted by distance to the prediction
-    ## environment, implement a function that calculates a cumulative mean distance
-    ## and then use the information from those environments to run predictions
-    pred_env <- core_df$environment[i]
-    tr <- core_df$trait[i]
-    dist_met <- core_df$dist_method[i]
-
-    # Remove the environments not in the training environments for that trait
-    sorted_train_envs <- core_df$env_rank[[i]] %>% unlist() %>% .[names(.) %in% tr_train_env]
-
-    ## Use the accumulate function in dplyr to create lists of training environments
-    ## and the cumulative mean distance from the prediction environment
-    train_envs_accumulate <- sorted_train_envs %>%
-      names() %>%
-      accumulate(~c(.x, .y)) %>%
-      map(~sorted_train_envs[.]) %>%
-      map(~list(train_envs = names(.), cummean_dist = mean(.)))
-
-    # Map over these environments and gather training data
-    train_envs_data <- train_envs_accumulate %>%
-      map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
-
-    # lmer control
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
-                                calc.derivs = FALSE)
-
-    # Map over the data and calculate heritability
-    heritability_out <- train_envs_data %>%
-      map_dbl(function(pheno_tomodel) {
-
-        # Extract the weights
-        wts <- pheno_tomodel$std_error^2
-
-        # Determine the formula based on the number of environments
-        if (n_distinct(pheno_tomodel$environment) == 1) {
-          form <- value ~ (1|line_name)
-        } else {
-          form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
-        }
-
-        # Fit the model
-        fit <- lmer(formula = form, data = pheno_tomodel, weights = wts, control = lmer_control)
-        # Calculate heritability and return
-        training_heritability(object = fit)
-
-      })
-
-    # Return a data_frame with the training environments, cumumative mean distance,
-    # and the prediction accuracy results
-    results_out[[i]] <- data_frame(
-      train_envs = map(train_envs_accumulate, "train_envs"),
-      distance = map_dbl(train_envs_accumulate, "cummean_dist"),
-      heritability_out)
-
-  }
-
-  # Combine the results with the original DF and return
-  core_df %>%
-    select(-env_rank, -core) %>%
-    mutate(results_out = results_out)
-
-}, mc.cores = n_core)
-
-
-# Save the results
-save_file <- file.path(result_dir, "environmental_distance_prediction_heritability.RData")
-save("env_dist_heritability_out", "env_dist_predictions_out", file = save_file)
+# # Run over multiple cores
+# env_dist_heritability_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
+# 
+#   ## Create an empty results list
+#   results_out <- vector("list", nrow(core_df))
+# 
+#   # Iterate over the rows in the core_df
+#   for (i in seq_along(results_out)) {
+# 
+#     ## Given an ordered list of environments sorted by distance to the prediction
+#     ## environment, implement a function that calculates a cumulative mean distance
+#     ## and then use the information from those environments to run predictions
+#     pred_env <- core_df$environment[i]
+#     tr <- core_df$trait[i]
+#     dist_met <- core_df$dist_method[i]
+# 
+#     # Remove the environments not in the training environments for that trait
+#     sorted_train_envs <- core_df$env_rank[[i]] %>% unlist() %>% .[names(.) %in% tr_train_env]
+# 
+#     ## Use the accumulate function in dplyr to create lists of training environments
+#     ## and the cumulative mean distance from the prediction environment
+#     train_envs_accumulate <- sorted_train_envs %>%
+#       names() %>%
+#       accumulate(~c(.x, .y)) %>%
+#       map(~sorted_train_envs[.]) %>%
+#       map(~list(train_envs = names(.), cummean_dist = mean(.)))
+# 
+#     # Map over these environments and gather training data
+#     train_envs_data <- train_envs_accumulate %>%
+#       map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
+# 
+#     # lmer control
+#     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+#                                 calc.derivs = FALSE)
+# 
+#     # Map over the data and calculate heritability
+#     heritability_out <- train_envs_data %>%
+#       map_dbl(function(pheno_tomodel) {
+# 
+#         # Extract the weights
+#         wts <- pheno_tomodel$std_error^2
+# 
+#         # Determine the formula based on the number of environments
+#         if (n_distinct(pheno_tomodel$environment) == 1) {
+#           form <- value ~ (1|line_name)
+#         } else {
+#           form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
+#         }
+# 
+#         # Fit the model
+#         fit <- lmer(formula = form, data = pheno_tomodel, weights = wts, control = lmer_control)
+#         # Calculate heritability and return
+#         training_heritability(object = fit)
+# 
+#       })
+# 
+#     # Return a data_frame with the training environments, cumumative mean distance,
+#     # and the prediction accuracy results
+#     results_out[[i]] <- data_frame(
+#       train_envs = map(train_envs_accumulate, "train_envs"),
+#       distance = map_dbl(train_envs_accumulate, "cummean_dist"),
+#       heritability_out)
+# 
+#   }
+# 
+#   # Combine the results with the original DF and return
+#   core_df %>%
+#     select(-env_rank, -core) %>%
+#     mutate(results_out = results_out)
+# 
+# }, mc.cores = n_core)
+# 
+# 
+# # Save the results
+# save_file <- file.path(result_dir, "environmental_distance_prediction_heritability.RData")
+# save("env_dist_heritability_out", "env_dist_predictions_out", file = save_file)
 
 
 
