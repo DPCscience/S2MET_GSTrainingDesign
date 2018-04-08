@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
+#PBS -l walltime=24:00:00,mem=24gb,nodes=1:ppn=16
 #PBS -N S2_MET_heritability_environmental_distance
 #PBS -M neyha001@umn.edu
 #PBS -m abe
