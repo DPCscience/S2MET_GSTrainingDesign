@@ -237,7 +237,7 @@ env_dist_window_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = 
     # and the prediction accuracy results
     results_out[[i]] <- bind_cols(
       data_frame(train_envs = map(train_envs_accumulate, "train_envs"),
-                 distance = map_dbl(train_envs_accumulate, "cummean_dist")),
+                 distance = map_dbl(train_envs_accumulate, "mean_dist")),
       predictions_boot)
     
   } # Close the for loop
