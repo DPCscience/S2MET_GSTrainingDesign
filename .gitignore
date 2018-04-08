@@ -7,3 +7,5 @@ Figures/*
 Summaries/*
 Results/*
 Data/S2_MET_BLUEs.RData
+*.e[0-9]*
+*.o[0-9]*

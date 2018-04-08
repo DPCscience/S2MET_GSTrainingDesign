@@ -14,6 +14,7 @@ source(file.path(repo_dir, "source.R"))
 
 # Load the results
 load(file.path(result_dir, "environmental_distance_predictions.RData"))
+load(file.path(result_dir, "environmental_distance_heritability.RData"))
 
 ################################################################################
 ######### Remove this when the new results come it
@@ -120,6 +121,31 @@ test_results_toplot %>%
   theme(panel.grid = element_blank())
 
 
+
+
+
+### Heritability across different ranks of environments
+
+# Bind rows and unnest
+env_dist_heritability <- env_dist_heritability_out %>%
+  bind_rows() %>% 
+  unnest()
+
+# Scale the distance measurements by environment and distance method
+# Then subtract the minimum to have the values start at 0
+env_dist_heritability1 <- env_dist_heritability %>%
+  group_by(environment, trait, dist_method) %>%
+  mutate(scaled_distance = scale(distance),
+         scaled_distance = scaled_distance - min(scaled_distance)) %>%
+  ungroup()
+
+# Plot 5 environments
+g_distance_herit <- env_dist_heritability1 %>% 
+  filter(environment %in% sample(unique(.$environment), 5), trait == "GrainYield") %>%
+  ggplot(aes(x = scaled_distance, y = heritability_out, color = dist_method)) + 
+  geom_point() +
+  geom_line() + 
+  facet_grid(environment + trait ~ .)
 
 
 

@@ -14,9 +14,9 @@
 repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
 source(file.path(repo_dir, "source_MSI.R"))
 
-# Load packages
-packages <- c("lme4")
-invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
+# # Load packages
+# packages <- c("lme4")
+# invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
 
 # Source some scripts from pbr
 source("/panfs/roc/groups/6/smithkp/neyha001/R/my_packages/pbr/R/convenience_functions.R")
