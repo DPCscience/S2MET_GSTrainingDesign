@@ -16,7 +16,7 @@ geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomics/Genotypic_
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")
-data_dir <- file.path(proj_dir, "Data")
+data_dir <- pheno_dir <- file.path(proj_dir, "Data")
 result_dir <- file.path(proj_dir, "Results")
 
 
@@ -30,7 +30,7 @@ source(file.path(proj_dir, "source_functions.R"))
 
 
 # Load the phenotypic data
-load(file.path(data_dir, "S2_MET_BLUEs.RData"))
+load(file.path(pheno_dir, "S2_MET_BLUEs.RData"))
 # Load the genotypic data
 load(file.path(geno_dir, "S2_genos_mat.RData"))
 
