@@ -22,13 +22,15 @@ source(file.path(repo_dir, "source.R"))
 ## We will test 6 different distance measurements:
 ## 
 ## 1. Great Circle Distance using lat/long
-## 2. Genetic correlation of the TP
-## 3. The environment distance metric (as described in Bernardo2010)
-## 4. Factor analytic or PCA of GxE term
-## 5. 1 year environmental covariables
-## 6. 10 year environmental covariables
+## 2. The environment distance metric (as described in Bernardo2010)
+## 3. Factor analytic or PCA of GxE term
+## 4. 1 year environmental covariables
+## 5. 10 year environmental covariables
 ## 
 
+
+## Load the environment covariable data
+load(file.path(data_dir, "environmental_data_compiled.RData"))
 
 # Create a new data.frame to hold the different datasets
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
@@ -68,22 +70,22 @@ great_circle_dist_list <- rerun(length(traits), great_circle_dist) %>% set_names
 
 
 
-## Genetic correlation of the TP or all lines
-# Load the environmental genetic correlation matrices
-load(file.path(result_dir, "environmental_genetic_correlations.RData"))
-
-# Convert each correlation matrix to a distance matrix
-# Missing data gets a correlation of 0
-# 1 - cor is the distance
-env_cor_all_dist_list <- env_cor_all %>% 
-  map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
-  map(~1 - .) %>%
-  map(as.dist)
-
-env_cor_tp_dist_list <- env_cor_tp %>%
-  map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
-  map(~1 - .) %>%
-  map(as.dist)
+# ## Genetic correlation of the TP or all lines
+# # Load the environmental genetic correlation matrices
+# load(file.path(result_dir, "environmental_genetic_correlations.RData"))
+# 
+# # Convert each correlation matrix to a distance matrix
+# # Missing data gets a correlation of 0
+# # 1 - cor is the distance
+# env_cor_all_dist_list <- env_cor_all %>% 
+#   map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
+#   map(~1 - .) %>%
+#   map(as.dist)
+# 
+# env_cor_tp_dist_list <- env_cor_tp %>%
+#   map(function(mat) {mat[is.na(mat)] <- 0; return(mat)}) %>%
+#   map(~1 - .) %>%
+#   map(as.dist)
 
 
 ## Environmental distance metric
@@ -288,7 +290,7 @@ EC_multi_PCA_dist_list <- rerun(length(traits), dist(EC_multi_PCA$x[,1:n_PC, dro
 dist_method_df_all <- data_frame(
   trait = traits, 
   great_circle_dist = great_circle_dist_list, 
-  env_cor_dist = env_cor_all_dist_list, 
+  # env_cor_dist = env_cor_all_dist_list, 
   ge_mean_D = ge_mean_D_all, 
   ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
   ec_one_PCA_dist = EC_one_PCA_dist_list,
@@ -298,7 +300,7 @@ dist_method_df_all <- data_frame(
 dist_method_df_tp <- data_frame(
   trait = traits, 
   great_circle_dist = great_circle_dist_list, 
-  env_cor_dist = env_cor_tp_dist_list, 
+  # env_cor_dist = env_cor_tp_dist_list, 
   ge_mean_D = ge_mean_D_tp, 
   ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
   ec_one_PCA_dist = EC_one_PCA_dist_list,
@@ -347,9 +349,94 @@ clust_method_df_tp <- full_join(dist_method_df_tp_tidy, dist_method_df_common_en
 ## Replicate the clusters and add each cluster k from min_k to max_k
 clust_method_df <- bind_rows(clust_method_df_all, clust_method_df_tp)
 
+
+
+
+
+
+### Rank environments according to a prediction environment
+### This will be used for prediction and heritability calculations
+### 
+
+# Modify the BLUEs for predictions
+S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+  filter(line_name %in% c(tp_geno, vp_geno)) %>%
+  mutate_at(vars(environment:line_name), as.factor)
+
+
+## For each prediction environment (the tp+vp envs and just the vp envs), rank the 
+## training environments by different distance metrics
+pred_envs <- c(tp_vp_env, vp_only_env)
+train_envs <- c(tp_vp_env, tp_only_env)
+
+# Summarize the traits available in those environments
+pred_envs_traits <- S2_MET_BLUEs_use %>%
+  filter(environment %in% pred_envs) %>% 
+  group_by(environment) %>% 
+  distinct(trait) %>%
+  ungroup() %>%
+  mutate(environment = as.character(environment))
+
+train_envs_traits <- S2_MET_BLUEs_use %>%
+  filter(environment %in% train_envs) %>% 
+  group_by(environment) %>% 
+  distinct(trait) %>%
+  ungroup()
+
+
+## Rank the environments relative to each other
+# D othis for both population groups
+dist_method_df <- clust_method_df %>%
+  split(.$population) %>%
+  map(~select(., -cluster) %>%
+        mutate(dist = map(dist, as.matrix)))
+
+# Linearize the distance objects and rank
+dist_method_df_rank <- dist_method_df %>% 
+  map(~mutate(., dist_rank = map(dist, ~as.data.frame(.) %>% 
+                           rownames_to_column("env") %>% 
+                           filter(env %in% pred_envs) %>%
+                           split(.$env) %>% 
+                           map(~.[,!names(.) %in% .$env] %>% .[,-1] %>% sort() %>% 
+                                 select(., which(names(.) %in% train_envs))) %>% 
+                           data_frame(environment = names(.), env_rank = .))) %>%
+  select(-dist) %>%
+  unnest() )
+
+
+# Combine this data with the the trait information for the prediction environments
+pred_env_dist_rank <- dist_method_df_rank %>%
+  map(~inner_join(pred_envs_traits, .,  by = c("environment", "trait")))
+
+
+## Randomly sample environments as a control
+# Number of random samples
+n_sample <- 100
+
+## For each prediction environment, take the environments in one of the distance
+## matrices and randomly sample it
+pred_env_rank_random <- pred_env_dist_rank %>%
+  map(~group_by(., environment, trait) %>%
+        do({
+          df <- .
+          smpls <- rerun(.n = n_sample, sample(df$env_rank[[1]]))
+          sample_df <- data_frame(environment = df$environment[1], trait = df$trait[1],
+                                  population = df$population[1], dist_method = str_c("sample", seq_along(smpls)), 
+                                  env_rank = smpls)
+          
+          # Combine
+          bind_rows(df, sample_df)
+          
+        }) %>%
+        ungroup() )
+
+
+
+
+
 # Save this
 save_file <- file.path(result_dir, "distance_methods_results.RData")
-save("clust_method_df", file = save_file)
+save("clust_method_df", "pred_env_rank_random", file = save_file)
 
 
 

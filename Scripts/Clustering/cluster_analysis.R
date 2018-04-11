@@ -31,17 +31,33 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   mutate(value = if_else(trait %in% higher_favorable_traits, value, value * -1))
 
 
+## Find the correlation between the different distance methods for pairs of environments
+dist_method_df <- clust_method_df %>% 
+  mutate(dist_df = map(dist, ~as.matrix(.) %>% as.data.frame() %>% rownames_to_column("environment1") %>% 
+                         gather(environment2, distance, -environment1) %>% filter(environment1 != environment2))) %>%
+  unnest(dist_df)
+
+# Calculate the correlation
+dist_method_cor <- dist_method_df %>% 
+  spread(dist_method, distance) %>% 
+  group_by(trait, population) %>% 
+  do(cor(select(., -trait:-environment2)) %>%
+       as.data.frame() %>%
+       rownames_to_column("dist_method1") %>%
+       gather(dist_method2, correlation, -dist_method1))
+
+## Plot
+dist_method_cor %>% 
+  ggplot(aes(x = dist_method1, y = dist_method2, fill = correlation)) + 
+  geom_tile() + 
+  facet_grid(trait ~ population)
+
+
 ## Manipulate the cluster results and cut the trees
 # What should be the minimum and maximum number of clusters?
 min_k <- 2
 max_k <- 20
 seq_k <- seq(min_k, max_k)
-
-# Create a name replacement vector for the distance methods
-dist_method_replace <- c(
-  "env_cor_dist" = "Environment Genetic\nCorrelation", "ge_mean_D" = "Phenotypic\nDistance",
-  "ge_PCA_dist" = "GxE BLUP PCA", "great_circle_dist" = "Great Circle\nDistance", 
-  "ec_one_PCA_dist" = "1 yr Environmental\nCovariates", "ec_multi_PCA_dist" = "10 yr Environmental\nCovariates")
 
 
 ## Combine the data.frames
@@ -134,6 +150,10 @@ plot_fun <- function(pop, label = TRUE) {
 g_clust_nenv_all <- plot_fun("all")
 
 g_clust_nenv_tp <- plot_fun("tp")
+
+
+
+
 
 
 
