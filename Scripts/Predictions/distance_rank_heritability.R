@@ -68,32 +68,6 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
   ungroup()
 
 
-## Rank the environments relative to each other
-# Extract the "all" cluster metrics
-dist_method_df_all <- clust_method_df %>%
-  filter(population == "all") %>%
-  select(-cluster) %>%
-  mutate(dist = map(dist, as.matrix))
-
-# Linearize the distance objects and rank
-dist_method_df_rank <- dist_method_df_all %>% 
-  mutate(dist_rank = map(dist, ~as.data.frame(.) %>% 
-                           rownames_to_column("env") %>% 
-                           filter(env %in% pred_envs) %>%
-                           split(.$env) %>% 
-                           map(~.[,!names(.) %in% .$env] %>% .[,-1] %>% sort() %>% 
-                                 select(., which(names(.) %in% train_envs))) %>% 
-                           data_frame(environment = names(.), env_rank = .))) %>%
-  select(-dist) %>%
-  unnest()
-
-
-# Combine this data with the the trait information for the prediction environments
-pred_env_dist_rank <- pred_envs_traits %>%
-  left_join(., dist_method_df_rank,  by = c("environment", "trait"))
-
-
-
 ## Split the 'pred_env_dist_rank' data.frame by core and then pipe to mclapply
 pred_env_dist_rank_split <- pred_env_dist_rank %>% 
   assign_cores(n_core = n_core) %>%

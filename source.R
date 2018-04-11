@@ -19,6 +19,12 @@ fig_dir <- file.path(proj_dir, "Figures")
 data_dir <- file.path(proj_dir, "Data")
 result_dir <- file.path(proj_dir, "Results")
 
+
+######
+# MSI Source starts here
+######
+
+
 # Source the project functions
 source(file.path(proj_dir, "source_functions.R"))
 
@@ -73,6 +79,23 @@ trait_replace <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield", "Heading Date", "Plant Height"), nm = .)
 trait_replace_unit <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield\n(kg ha^-1)", "Heading Date\n(days)", "Plant Height\n(cm)"), nm = .)
+
+# Create a name replacement vector for the distance methods
+dist_method_replace <- c(
+  "ge_mean_D" = "Phenotypic\nDistance", "ge_PCA_dist" = "GxE BLUP PCA", 
+  "great_circle_dist" = "Great Circle\nDistance", "ec_one_PCA_dist" = "1 yr Environmental\nCovariates", 
+  "ec_multi_PCA_dist" = "10 yr Environmental\nCovariates")
+
+
+## Rank the environments according to heritability
+env_herit_rank <- stage_one_data %>% 
+  ungroup() %>% 
+  filter(!str_detect(trial, "S2C1")) %>% 
+  select(trait, environment, heritability) %>% 
+  split(.$trait) %>%
+  map(~arrange(., desc(heritability)) %>% 
+        mutate(environment = factor(environment, levels = .$environment)))
+
 
 # Pull out the trials with irrigation
 irrig_env <- subset(trial_info, irrigated == "yes", environment, drop = TRUE)
