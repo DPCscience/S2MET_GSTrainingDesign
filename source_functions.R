@@ -13,6 +13,45 @@ assign_cores <- function(df, n_core) {
 }
 
 
+## Run a likelihood ratio test
+lr_test <- function(model1, model2) {
+  
+  stopifnot(class(model1) %in% c("lmerMod", "merModLmerTest"))
+  stopifnot(class(model2) %in% c("lmerMod", "merModLmerTest"))
+  
+  model_list <- list(model1 = model1, model2 = model2)
+  
+  # Degrees of freedom
+  df_list <- sapply(X = model_list, FUN = df.residual)
+  fuller_model <- names(which.min(df_list))
+  red_model <- names(which.max(df_list))
+  
+  ## Get the log-likelihoods and store as list
+  ll_list <- sapply(X = model_list, FUN = logLik)
+  
+  # Calculate the likelihood ratio
+  lr <- -2 * (ll_list[red_model] - ll_list[fuller_model])
+  # Calculate pvalue
+  df <- df_list[red_model] - df_list[fuller_model]
+  p_value <- pchisq(q = lr, df = df, lower.tail = FALSE)
+  
+  # Export a data.frame
+  data.frame(
+    fuller_model = fuller_model,
+    df = df,
+    statistic = lr,
+    p_value = p_value,
+    row.names = NULL,
+    stringsAsFactors = FALSE
+  )
+
+}
+
+
+
+
+
+
 ## Bootstrap a correlation coefficient
 boot_cor <- function(x, y, boot.reps = 1000, alpha = 0.05) {
   
@@ -255,10 +294,6 @@ gblup <- function(K, train, test, bootreps = NULL) {
   # Return a list
   list(accuracy = acc, pgv = comb, boot = as_data_frame(boot))
 }
-
-
-
-
 
 
 

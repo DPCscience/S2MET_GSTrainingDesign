@@ -12,13 +12,17 @@
 repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
-# Load some packages
+# # Load some packages
 library(ggforce)
+library(ggridges)
 
 # Load the results
 load(file.path(result_dir, "environmental_distance_predictions.RData"))
 load(file.path(result_dir, "environmental_distance_window_predictions.RData"))
 load(file.path(result_dir, "environmental_distance_heritability.RData"))
+
+## Create a color scheme for the distance methods
+colors <- c(setNames(umn_palette(3, 5), dist_method_replace), "Random" = "grey75")
 
 
 
@@ -28,18 +32,133 @@ cumulative_pred_results <- env_dist_predictions_out %>%
   bind_rows() %>% 
   unnest()
 
-
 # Re-scale the distance measurements to unit variance
-cumulative_pred_toplot <- cumulative_pred_results %>%
-  # Remove the environmental correlation method
-  filter(dist_method %in% names(dist_method_replace)) %>%
+cumulative_pred_adj <- cumulative_pred_results %>%
   group_by(environment, trait, dist_method) %>% 
   mutate(scaled_distance = scale(distance),
          scaled_distance = scaled_distance - min(scaled_distance)) %>%
   ungroup() %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         n_train_env = map_dbl(train_envs, length))
+  mutate(n_train_env = map_dbl(train_envs, length))
 
+### First, for each distance method, find the rank of each environment
+train_env_rank <- cumulative_pred_adj %>% 
+  select(environment, trait, dist_method, n_train_env, train_envs) %>%
+  group_by(environment, trait, dist_method) %>% 
+  filter(n_train_env == max(n_train_env)) %>%
+  unnest(train_envs) %>%
+  # Add the rank
+  mutate(train_env_rank = seq(n())) %>%
+  ungroup()
+
+
+## The distribution of the ranks should follow a uniform distribution under the
+## null hypothesis of idependence of rank and training environment. I will use a 
+## KS test to test the observed rank distribution versus a uniform distribution
+## 
+
+train_env_rank_test <- train_env_rank %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  group_by(trait, dist_method, train_envs) %>% 
+  do({data_frame(
+    mean_rank = mean(.$train_env_rank),
+    sd_rank = sd(.$train_env_rank),
+    # The less than alternative tests if the distribution is stochastically larger (higher rank)
+    # The greater than alternative tests if the distribution is stochastically less (lower rank)
+    ks_test_low = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "l")),
+    ks_test_high = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "g"))
+  )}) %>%
+  # Extract the p_value and adjust
+  group_by(trait, dist_method) %>% 
+  mutate(p_value_lt = map_dbl(ks_test_low, "p.value"), 
+         p_value_gt = map_dbl(ks_test_high, "p.value"),
+         n_test = n(),
+         p_adj_lt = p.adjust(p = p_value_lt, method = "bonf"),
+         p_adj_gt = p.adjust(p = p_value_gt, method = "bonf")) %>%
+  ungroup()
+
+## Examine the significance results
+# Get the training environments with the lowest and highest rank
+train_env_rank_test_sig <- train_env_rank_test %>% 
+  select(trait:sd_rank, contains("p_adj")) %>%
+  gather(test_type, p_adj, contains("p_adj")) %>%
+  filter(p_adj <= 0.05) %>% 
+  group_by(trait, dist_method, test_type) %>% 
+  filter(mean_rank == min(mean_rank) | mean_rank == max(mean_rank))
+
+## Count the number of times a training environment is significant
+train_env_rank_test_count <- train_env_rank_test %>% 
+  select(trait:sd_rank, contains("p_adj")) %>%
+  gather(test_type, p_adj, contains("p_adj"))  %>% 
+  group_by(trait, train_envs, test_type) %>% 
+  summarize(n_times_sig = sum(p_adj <= 0.05)) %>%
+  arrange(desc(n_times_sig))
+
+## Add heritability information for comparison
+train_env_rank_test %>% 
+  select(trait, dist_method, train_envs, mean_rank) %>% 
+  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
+  group_by(trait, dist_method) %>% 
+  summarize(rank_herit_cor = cor(mean_rank, heritability))
+
+## Heritability only seems to be correlated with the D phenotypic distance metric,
+## which makes sense.
+# Plot this - actually evidence is not strong enough to suggest a trend between
+# heritability and the rank
+train_env_rank_test %>% 
+  select(trait, dist_method, train_envs, mean_rank) %>% 
+  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
+  ggplot(aes(x = mean_rank, heritability)) +
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) + 
+  facet_grid(trait ~ dist_method, scales = "free_y")
+
+
+
+
+
+
+
+
+
+### Plots of prediction accuracy.
+
+
+
+## For each environment and trait, order the environments according to the 
+## prediction accuracy obtained after using all the data
+## 
+cumulative_env_pred_order <- cumulative_pred_adj %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>% 
+  group_by(environment, trait) %>% 
+  filter(n_train_env == max(n_train_env)) %>%
+  slice(1) %>% 
+  select(trait, environment, accuracy) %>% 
+  ungroup() %>% split(.$trait) %>% 
+  map(~mutate(., environment = factor(environment, levels = environment[order(accuracy, decreasing = TRUE)])))
+
+
+## Separate the original samples from the random samples
+## Then summarize the mean and quantiles of the prediction accuracies
+## for each additional training population environment
+cumulative_pred_random <- cumulative_pred_adj %>% 
+  filter(str_detect(dist_method, "sample")) %>%
+  group_by(environment, trait, n_train_env) %>% 
+  summarize_at(vars(accuracy), funs(mean = mean(.), lower = quantile(., probs = 0.025),
+                                    upper = quantile(., probs = 0.975))) %>%
+  ungroup() %>%
+  rename(accuracy = mean) %>%
+  mutate(dist_method = "Random")
+
+# Now grab the original runs
+cumulative_pred_orig <- cumulative_pred_adj %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  select(environment, trait, dist_method, scaled_distance, n_train_env, accuracy)
+
+## Combine
+cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
+         dist_method = factor(dist_method, levels = names(colors)),
+         n_train_env = as.integer(n_train_env))
 
 
 
@@ -55,7 +174,6 @@ cumulative_pred_toplot_maxima <- cumulative_pred_toplot %>%
          local_max_scaled_dist = scaled_distance[accuracy == local_max_accuracy],
          all_env_acccuracy = accuracy[n_train_env == max(n_train_env)]) %>%
   ungroup() %>%
-  select(-train_envs) %>%
   # Is the local maximum greater than the final accuracy?
   # What is the difference between the local maximum and the final
   mutate(local_adv = local_max_accuracy - all_env_acccuracy,
@@ -73,16 +191,33 @@ cumulative_pred_toplot_maxima_filter <- cumulative_pred_toplot_maxima %>%
 g_local_max <- cumulative_pred_toplot_maxima_filter %>% 
   ggplot(aes(x = n_train_env, fill = dist_method)) +
   # ggplot(aes(x = scaled_distance, fill = dist_method)) + 
-  geom_density(alpha = 0.25) + 
+  # geom_density(alpha = 0.25) + 
+  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+  scale_fill_manual(values = colors, guide = FALSE) +
+  xlab("Number of Training Environments to Reach Maximum") +
+  labs(title = "Training Environments to Reach Maximum Accuracy") +
   facet_wrap(~ trait, ncol = 2) +
-  theme_bw()
+  theme_bw() +
+  theme(legend.key.height = unit(2, "lines"))
+
+save_file <- file.path(fig_dir, "cumulative_pred_max_ntrain.jpg")
+ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
 
 ## Distribution of local advantage
 g_local_adv <- cumulative_pred_toplot_maxima_filter %>% 
+  # filter(dist_method != "Random") %>%
   ggplot(aes(x = local_adv, fill = dist_method)) + 
-  geom_density(alpha = 0.25) + 
+  # geom_density(alpha = 0.25) + 
+  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+  scale_fill_manual(values = colors, guide = FALSE) +
+  xlab("Prediction Accuracy Advantage") +
+  labs(title = "Advantage of Selected Environments Over All Environments") +
   facet_wrap(~ trait, ncol = 2) +
-  theme_bw()
+  theme_bw() +
+  theme(legend.key.height = unit(2, "lines"))
+
+save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
+ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
 
 
 ## Calculate the average environmental distance (scaled) where the local maxima is
@@ -93,21 +228,19 @@ cumulative_pred_maxima_summary <- cumulative_pred_toplot_maxima_filter %>%
 
 
 
-
   
-
-# ## Sample environments that have all traits
-# cumulative_pred_toplot_sample <- cumulative_pred_toplot %>% 
-#   group_by(environment) %>% filter(n_distinct(trait) == 3) %>% ungroup() %>%
-#   filter(environment %in% sample(unique(.$environment), 5))
 
 ## Common plot modifier
 g_mod <- list(
-  geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method, color = NULL), alpha = 0.25),
+  # geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
+  geom_point(aes(x = local_max_n_train, y = local_max_accuracy)),
   geom_line(lwd = 0.5),
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Prediction Accuracy"),
-  xlab("Cumulative Distance of Environments in Training Set"),
+  xlab("Number of Environments in Training Set"),
+  scale_color_manual(values = colors),
+  scale_fill_manual(values = colors),
   theme_bw(),
   theme(panel.grid = element_blank(),
         legend.key.height = unit(2, units = "line"),
@@ -121,14 +254,17 @@ g_cumulative_pred <- setNames(traits, traits) %>%
     # Subset the trait
     cumulative_pred_toplot_tr <- cumulative_pred_toplot_maxima %>%
       filter(trait == tr) %>%
-      mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+      # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+      mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
     
+      
     # Create one plot using facet_wrap
     g_total <- cumulative_pred_toplot_tr %>% 
-      ggplot(aes(x = scaled_distance, y = accuracy, color = dist_method)) +
+      # ggplot(aes(x = scaled_distance, y = accuracy, color = dist_method)) +
+      ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) +
       g_mod +
-      facet_wrap( ~ environment + trait) +
-      geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
+      facet_wrap( ~ environment + trait)
+      # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
     
     # Save
     save_file <- file.path(fig_dir, str_c("cumulative_env_dist_pred_", tr, ".jpg"))
@@ -148,7 +284,7 @@ g_cumulative_pred1 <- dist_method_replace %>%
     
     # Subset the distance method
     cumulative_pred_toplot_dm <- cumulative_pred_toplot_maxima %>%
-      filter(dist_method == dm)
+      filter(dist_method %in% c(dm, "Random"))
     
     # Iterate over the trait
     g_list <- setNames(traits, traits) %>%
@@ -156,18 +292,20 @@ g_cumulative_pred1 <- dist_method_replace %>%
         # Subset the trait data
         cumulative_pred_toplot_tr <- cumulative_pred_toplot_dm %>%
           filter(trait == tr) %>%
-          mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
-        
+          # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+          mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+          
         # Extract the ylim values from the single plots created above
         ylim_tr <- ggplot_build(g_cumulative_pred[[tr]])$layout$panel_ranges[[1]]$y.range
         
         # Create the plot and return
         cumulative_pred_toplot_tr %>% 
-          ggplot(aes(x = scaled_distance, y = accuracy)) +
+          # ggplot(aes(x = scaled_distance, y = accuracy)) +
+          ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) +
           g_mod + 
           ylim(ylim_tr) +
-          facet_wrap( ~ environment + trait + dist_method)  +
-          geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
+          facet_wrap( ~ environment + trait)
+          # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
         
       })
       
@@ -201,26 +339,49 @@ window_pred_results <- env_dist_window_predictions_out %>%
   bind_rows() %>% 
   unnest()
 
-
 # Re-scale the distance measurements to unit variance
-window_pred_toplot <- window_pred_results %>%
-  # Remove the environmental correlation method
-  filter(dist_method %in% names(dist_method_replace)) %>%
+window_pred_adj <- window_pred_results %>%
   group_by(environment, trait, dist_method) %>% 
   mutate(scaled_distance = scale(distance),
-         scaled_distance = scaled_distance - min(scaled_distance)) %>%
+         scaled_distance = scaled_distance - min(scaled_distance),
+         window_rank = seq(n())) %>% # Create a vector specifying the order of the windows
   ungroup() %>%
+  mutate(n_train_env = map_dbl(train_envs, length))
+
+
+## Separate the original samples from the random samples
+## Then summarize the mean and quantiles of the prediction accuracies
+## for each additional training population environment
+window_pred_random <- window_pred_adj %>% 
+  filter(str_detect(dist_method, "sample")) %>%
+  group_by(environment, trait, window_rank) %>% 
+  summarize_at(vars(accuracy, scaled_distance), 
+               funs(mean = mean(.), lower = quantile(., probs = 0.025), upper = quantile(., probs = 0.975))) %>%
+  ungroup() %>%
+  select(environment:window_rank, accuracy = accuracy_mean, scaled_distance = scaled_distance_mean,
+         lower = accuracy_lower, upper = accuracy_upper) %>%
+  mutate(dist_method = "Random")
+
+# Now grab the original runs
+window_pred_orig <- window_pred_adj %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  select(environment, trait, dist_method, scaled_distance, window_rank, accuracy)
+
+## Combine
+window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         n_train_env = map_dbl(train_envs, length))
+         dist_method = factor(dist_method, levels = names(colors)),
+         window_rank = as.integer(window_rank))
+
+
 
 
 ## Identify the largest prediction accuracy among the sliding windows
 window_pred_toplot_maxima <- window_pred_toplot %>%
   group_by(environment, trait, dist_method) %>% 
   mutate(local_max_accuracy = max(accuracy),
-         local_max_scaled_dist = scaled_distance[accuracy == local_max_accuracy]) %>%
-  ungroup() %>%
-  select(-train_envs)
+         local_max_window_rank = window_rank[accuracy == local_max_accuracy]) %>%
+  ungroup()
 
 ## Filter for the local accuracy maxima
 window_pred_toplot_maxima_filter <- window_pred_toplot_maxima %>% 
@@ -228,33 +389,64 @@ window_pred_toplot_maxima_filter <- window_pred_toplot_maxima %>%
   
 
 
+
 ## Distribution of the number of training environments or the scaled distance (cumulative) 
 ## of the local maximum
 g_local_max <- window_pred_toplot_maxima_filter %>% 
+  filter(dist_method != "Random") %>%
   ggplot(aes(x = scaled_distance, fill = dist_method)) +
-  geom_density(alpha = 0.25) + 
+  # ggplot(aes(x = window_rank, fill = dist_method)) +
+  # geom_density(alpha = 0.25) + 
+  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+  scale_fill_manual(values = colors, guide = FALSE) +
+  xlab("Scaled Average Environmental Distance at Maximum Accuracy") +
+  labs(title = "Average Environmental Distance at Maximum Accuracy") +
   facet_wrap(~ trait, ncol = 2) +
   theme_bw() +
   theme(legend.key.height = unit(2, "lines"))
 
+save_file <- file.path(fig_dir, "window_pred_max_dist.jpg")
+ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
+
+
+g_local_max <- window_pred_toplot_maxima_filter %>% 
+  filter(dist_method != "Random") %>%
+  # ggplot(aes(x = scaled_distance, fill = dist_method)) +
+  ggplot(aes(x = window_rank, fill = dist_method)) +
+  # geom_density(alpha = 0.25) + 
+  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+  scale_fill_manual(values = colors, guide = FALSE) +
+  xlab("Rank of Sliding Window at Maximum Accuracy") +
+  labs(title = "Rank of Sliding Window at Maximum Accuracy") +
+  facet_wrap(~ trait, ncol = 2) +
+  theme_bw() +
+  theme(legend.key.height = unit(2, "lines"))
+
+save_file <- file.path(fig_dir, "window_pred_max_rank.jpg")
+ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
+
 
 
 ## Calculate the average environmental distance (scaled) where the local maxima is
-## found
+## found and calculate the average rank of the window where the maximum is found
 window_pred_maxima_summary <- window_pred_toplot_maxima_filter %>% 
   group_by(trait, dist_method) %>% 
-  summarize_at(vars(scaled_distance), mean)
+  summarize_at(vars(window_rank, scaled_distance), mean)
 
 
 
 
 ## Common plot modifier
 g_mod <- list(
-  geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method, color = NULL), alpha = 0.25),
+  # geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
+  geom_point(aes(x = local_max_window_rank, y = local_max_accuracy)),
   geom_line(lwd = 0.5),
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
+  scale_color_manual(values = colors),
+  scale_fill_manual(values = colors),
   ylab("Prediction Accuracy"),
-  xlab("Mean Distance of Environments in the Training Set"),
+  xlab("Distance Rank of Sliding Window"),
   theme_bw(),
   theme(panel.grid = element_blank(),
         legend.key.height = unit(2, units = "line"),
@@ -270,14 +462,16 @@ g_window_pred <- setNames(traits, traits) %>%
     # Subset the trait
     window_pred_toplot_tr <- window_pred_toplot_maxima %>%
       filter(trait == tr) %>%
-      mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
-    
+      # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+      mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+      
     # Create one plot using facet_wrap
     g_total <- window_pred_toplot_tr %>% 
-      ggplot(aes(x = scaled_distance, y = accuracy, color = dist_method)) +
+      # ggplot(aes(x = scaled_distance, y = accuracy, color = dist_method)) +
+      ggplot(aes(x = window_rank, y = accuracy, color = dist_method)) +
       g_mod +
-      facet_wrap( ~ environment + trait) +
-      geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
+      facet_wrap( ~ environment + trait)
+      # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
     
     # Save
     save_file <- file.path(fig_dir, str_c("window_env_dist_pred_", tr, ".jpg"))
@@ -297,7 +491,7 @@ g_window_pred1 <- dist_method_replace %>%
     
     # Subset the distance method
     window_pred_toplot_dm <- window_pred_toplot_maxima %>%
-      filter(dist_method == dm)
+      filter(dist_method %in% c(dm, "Random"))
     
     # Iterate over the trait
     g_list <- setNames(traits, traits) %>%
@@ -305,18 +499,20 @@ g_window_pred1 <- dist_method_replace %>%
         # Subset the trait data
         window_pred_toplot_tr <- window_pred_toplot_dm %>%
           filter(trait == tr) %>%
-          mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
-        
+          # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+          mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+          
         # Extract the ylim values from the single plots created above
         ylim_tr <- ggplot_build(g_window_pred[[tr]])$layout$panel_ranges[[1]]$y.range
         
         # Create the plot and return
         window_pred_toplot_tr %>% 
-          ggplot(aes(x = scaled_distance, y = accuracy)) +
+          # ggplot(aes(x = scaled_distance, y = accuracy)) +
+          ggplot(aes(x = window_rank, y = accuracy, color = dist_method)) +
           g_mod + 
           ylim(ylim_tr) +
-          facet_wrap( ~ environment + trait + dist_method)  +
-          geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
+          facet_wrap( ~ environment + trait)
+          # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
         
       })
     
@@ -337,6 +533,12 @@ g_window_pred1 <- dist_method_replace %>%
 
 
 
+
+
+
+
+
+
 ### Heritability across different ranks of environments
 
 ## Cumulative
@@ -345,142 +547,323 @@ cumulative_heritability <- env_dist_heritability_out %>%
   bind_rows() %>% 
   unnest()
 
-# Scale the distance measurements by environment and distance method
-# Then subtract the minimum to have the values start at 0
-cumulative_heritability_toplot <- cumulative_heritability %>%
-  group_by(environment, trait, dist_method) %>%
+# Re-scale the distance measurements to unit variance
+cumulative_heritability_adj <- cumulative_heritability %>%
+  group_by(environment, trait, dist_method) %>% 
   mutate(scaled_distance = scale(distance),
          scaled_distance = scaled_distance - min(scaled_distance)) %>%
   ungroup() %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace))
+  mutate(n_train_env = map_dbl(train_envs, length))
 
 
-# ## Sample the same environments as those in the cumulative example above
-# cumulative_heritability_toplot_sample <- cumulative_heritability_toplot %>%
-#   filter(environment %in% unique(cumulative_pred_toplot_sample$environment))
+## Separate the original samples from the random samples
+## Then summarize the mean and quantiles of the prediction accuracies
+## for each additional training population environment
+cumulative_heritability_random <- cumulative_heritability_adj %>% 
+  filter(str_detect(dist_method, "sample")) %>%
+  group_by(environment, trait, n_train_env) %>% 
+  summarize_at(vars(heritability_out), funs(mean = mean(.), lower = quantile(., probs = 0.025),
+                                    upper = quantile(., probs = 0.975))) %>%
+  ungroup() %>%
+  rename(heritability_out = mean) %>%
+  mutate(dist_method = "Random")
+
+# Now grab the original runs
+cumulative_heritability_orig <- cumulative_heritability_adj %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  select(environment, trait, dist_method, scaled_distance, n_train_env, heritability_out)
+
+## Combine
+cumulative_heritability_toplot <- bind_rows(cumulative_heritability_orig, cumulative_heritability_random) %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
+         dist_method = factor(dist_method, levels = names(colors)),
+         n_train_env = as.integer(n_train_env))
 
 
-# Plot
+
+
+## For each prediction environment, trait, and distance method, find the heritability
+## after adding all environments (i.e. the last value) and the local
+## maximum heritability (if present)
+## 
+cumulative_heritability_toplot_maxima <- cumulative_heritability_toplot %>% 
+  group_by(environment, trait, dist_method) %>% 
+  mutate(local_max_heritability = max(heritability_out),
+         local_max_n_train = n_train_env[heritability_out == local_max_heritability],
+         local_max_scaled_dist = scaled_distance[heritability_out == local_max_heritability],
+         all_env_heritability = heritability_out[n_train_env == max(n_train_env)]) %>%
+  ungroup() %>%
+  # Is the local maximum greater than the final heritability_out?
+  # What is the difference between the local maximum and the final
+  mutate(local_adv = local_max_heritability - all_env_heritability,
+         local_better = (local_adv > 0))
+
+## Filter for the observations in which the accuracy is the local maximum
+cumulative_heritability_toplot_maxima_filter <- cumulative_heritability_toplot_maxima %>%
+  filter(heritability_out == local_max_heritability)
+
+
+## Common plot modifier
 g_mod <- list(
-  geom_point(),
-  geom_line(),
-  # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)), 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method, color = NULL), alpha = 0.25),
+  # geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
+  geom_point(aes(x = local_max_n_train, y = local_max_heritability)),
+  geom_line(lwd = 0.5),
+  # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Heritability"),
-  xlab("Mean Distance of Environments in the Training Set"),
-  ylim(c(0,1)),
+  xlab("Number of Environments in Training Set"),
+  scale_color_manual(values = colors),
+  scale_fill_manual(values = colors),
   theme_bw(),
   theme(panel.grid = element_blank(),
-        legend.key.height = unit(2, units = "line")),
+        legend.key.height = unit(2, units = "line"),
+        text = element_text(size = 8)),
   labs(title = "Cumulative Environmental Clusters")
 )
 
 
+
 # List over traits
-g_cumulative_herit <- traits %>%
+g_cumulative_herit <- setNames(traits, traits) %>%
   map(function(tr) {
     # Subset the trait
-    cumulative_heritability_toplot_tr <- cumulative_heritability_toplot %>%
-      filter(trait == tr)
+    cumulative_heritability_toplot_tr <- cumulative_heritability_toplot_maxima %>%
+      filter(trait == tr) %>%
+      # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+      mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
     
-    # Calculate the number of pages
-    ngrp <- n_distinct(cumulative_heritability_toplot_tr$environment)
-    npgs <- ngrp / nenv_pg
     
-    # Round up
-    npgs_round <- ifelse(sign(round(npgs) - npgs) == 1, round(npgs), round(npgs + 1))
+    # Create one plot using facet_wrap
+    g_total <- cumulative_heritability_toplot_tr %>% 
+      # ggplot(aes(x = scaled_distance, y = heritability_out, color = dist_method)) +
+      ggplot(aes(x = n_train_env, y = heritability_out, color = dist_method)) +
+      g_mod +
+      facet_wrap( ~ environment + trait)
+    # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
     
-    # Iterate over the number of pages
-    g_pages <- map(seq(npgs_round), function(pg) {
-      cumulative_heritability_toplot_tr %>% 
-        ggplot(aes(x = scaled_distance, y = heritability_out, color = dist_method)) +
-        g_mod +
-        facet_grid_paginate(environment + trait ~ ., scales = "free_y", ncol = 1, 
-                            nrow = nenv_pg, page = pg)
-    })
+    # Save
+    save_file <- file.path(fig_dir, str_c("cumulative_env_dist_herit_", tr, ".jpg"))
+    ggsave(filename = save_file, plot = g_total, height = 15, width = 12, dpi = 1000)
     
-    # Iterate over pages and save
-    for (i in seq_along(g_pages)) {
+    # Return the plot
+    # return(g_pages)
+    return(g_total)
+    
+  })
+
+
+### Plot a single distance method over many environments
+# List over traits
+g_cumulative_herit1 <- dist_method_replace %>%
+  map(function(dm) {
+    
+    # Subset the distance method
+    cumulative_heritability_toplot_dm <- cumulative_heritability_toplot_maxima %>%
+      filter(dist_method %in% c(dm, "Random"))
+    
+    # Iterate over the trait
+    g_list <- setNames(traits, traits) %>%
+      map(function(tr) {
+        # Subset the trait data
+        cumulative_heritability_toplot_tr <- cumulative_heritability_toplot_dm %>%
+          filter(trait == tr) %>%
+          # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+          mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+        
+        
+        # Extract the ylim values from the single plots created above
+        ylim_tr <- ggplot_build(g_cumulative_herit[[tr]])$layout$panel_ranges[[1]]$y.range
+        
+        # Create the plot and return
+        cumulative_heritability_toplot_tr %>% 
+          # ggplot(aes(x = scaled_distance, y = heritability_out)) +
+          ggplot(aes(x = n_train_env, y = heritability_out, color = dist_method)) +
+          g_mod + 
+          ylim(ylim_tr) +
+          facet_wrap( ~ environment + trait)
+        # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
+        
+      })
+    
+    # Iterate over the plots and save
+    for (i in seq_along(g_list)) {
       # Save
-      save_file <- file.path(fig_dir, str_c("cumulative_env_dist_herit_", tr, "_page", i, ".jpg"))
-      ggsave(filename = save_file, plot = g_pages[[i]], height = 10, width = 8, dpi = 1000)
+      save_file <- file.path(
+        fig_dir, str_c("cumulative_env_dist_herit_", names(dist_method_replace[dist_method_replace == dm]), 
+                       "_", names(g_list)[i], ".jpg"))
+      ggsave(filename = save_file, plot = g_list[[i]], height = 15, width = 12, dpi = 1000)
     }
     
     # Return the plot
-    return(g_pages)
+    return(g_list)
     
   })
 
 
 
 
-## Sliding Window
-# Bind rows and unnest
+
+
+
+
+
+## Prediction accuracy using a sliding window
+## Bind the list elements together and unnest
 window_heritability <- env_dist_window_heritability_out %>%
   bind_rows() %>% 
   unnest()
 
-# Scale the distance measurements by environment and distance method
-# Then subtract the minimum to have the values start at 0
-window_heritability_toplot <- window_heritability %>%
-  group_by(environment, trait, dist_method) %>%
+# Re-scale the distance measurements to unit variance
+window_heritability_adj <- window_heritability %>%
+  group_by(environment, trait, dist_method) %>% 
   mutate(scaled_distance = scale(distance),
-         scaled_distance = scaled_distance - min(scaled_distance)) %>%
+         scaled_distance = scaled_distance - min(scaled_distance),
+         window_rank = seq(n())) %>% # Create a vector specifying the order of the windows
   ungroup() %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace))
+  mutate(n_train_env = map_dbl(train_envs, length))
 
-# ## Sample the same environments as those in the cumulative example above
-# window_heritability_toplot_sample <- window_heritability_toplot %>%
-#   filter(environment %in% unique(cumulative_pred_toplot_sample$environment))
 
-# Plot
+## Separate the original samples from the random samples
+## Then summarize the mean and quantiles of the prediction accuracies
+## for each additional training population environment
+window_heritability_random <- window_heritability_adj %>% 
+  filter(str_detect(dist_method, "sample")) %>%
+  group_by(environment, trait, window_rank) %>% 
+  summarize_at(vars(heritability_out), funs(mean = mean(.), lower = quantile(., probs = 0.025),
+                                            upper = quantile(., probs = 0.975))) %>%
+  ungroup() %>%
+  rename(heritability_out = mean) %>%
+  mutate(dist_method = "Random")
+
+# Now grab the original runs
+window_heritability_orig <- window_heritability_adj %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  select(environment, trait, dist_method, scaled_distance, window_rank, heritability_out)
+
+
+## Combine
+window_heritability_toplot <- bind_rows(window_heritability_orig, window_heritability_random) %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
+         dist_method = factor(dist_method, levels = names(colors)),
+         window_rank = as.integer(window_rank))
+
+
+## For each prediction environment, trait, and distance method, find the heritability
+## after adding all environments (i.e. the last value) and the local
+## maximum heritability (if present)
+## 
+window_heritability_toplot_maxima <- window_heritability_toplot %>% 
+  group_by(environment, trait, dist_method) %>% 
+  mutate(local_max_heritability = max(heritability_out),
+         local_max_window_rank = window_rank[heritability_out == local_max_heritability],
+         local_max_scaled_dist = scaled_distance[heritability_out == local_max_heritability],
+         all_env_heritability = heritability_out[window_rank == max(window_rank)]) %>%
+  ungroup()
+
+## Filter for the observations in which the accuracy is the local maximum
+window_heritability_toplot_maxima_filter <- window_heritability_toplot_maxima %>%
+  filter(heritability_out == local_max_heritability)
+
+
+
+
+## Common plot modifier
 g_mod <- list(
-  geom_point(),
-  geom_line(),
-  # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)), 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method, color = NULL), alpha = 0.25),
+  # geom_point(aes(x = local_max_scaled_dist, y = local_max_heritability)),
+  geom_point(aes(x = local_max_window_rank, y = local_max_heritability)),
+  geom_line(lwd = 0.5),
+  # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
+  scale_color_manual(values = colors),
+  scale_fill_manual(values = colors),
   ylab("Heritability"),
-  xlab("Mean Distance of Environments in the Training Set"),
-  ylim(c(0,1)),
+  xlab("Distance Rank of Sliding Window"),
   theme_bw(),
   theme(panel.grid = element_blank(),
-        legend.key.height = unit(2, units = "line")),
-  labs(title = "Window Environmental Clusters")
+        legend.key.height = unit(2, units = "line"),
+        text = element_text(size = 8)),
+  labs(title = "Sliding Window Environmental Clusters")
 )
 
 
 # List over traits
-g_window_herit <- traits %>%
+g_window_herit <- setNames(traits, traits) %>%
   map(function(tr) {
     # Subset the trait
-    window_heritability_toplot_tr <- window_heritability_toplot %>%
-      filter(trait == tr)
+    window_heritability_toplot_tr <- window_heritability_toplot_maxima %>%
+      filter(trait == tr) %>%
+      # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+      mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
     
-    # Calculate the number of pages
-    ngrp <- n_distinct(window_heritability_toplot_tr$environment)
-    npgs <- ngrp / nenv_pg
     
-    # Round up
-    npgs_round <- ifelse(sign(round(npgs) - npgs) == 1, round(npgs), round(npgs + 1))
+    # Create one plot using facet_wrap
+    g_total <- window_heritability_toplot_tr %>% 
+      # ggplot(aes(x = scaled_distance, y = heritability_out, color = dist_method)) +
+      ggplot(aes(x = window_rank, y = heritability_out, color = dist_method)) +
+      g_mod +
+      facet_wrap( ~ environment + trait)
+    # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
     
-    # Iterate over the number of pages
-    g_pages <- map(seq(npgs_round), function(pg) {
-      window_heritability_toplot_tr %>% 
-        ggplot(aes(x = scaled_distance, y = heritability_out, color = dist_method)) +
-        g_mod +
-        facet_grid_paginate(environment + trait ~ ., scales = "free_y", ncol = 1, 
-                            nrow = nenv_pg, page = pg)
-    })
+    # Save
+    save_file <- file.path(fig_dir, str_c("window_env_dist_herit_", tr, ".jpg"))
+    ggsave(filename = save_file, plot = g_total, height = 15, width = 12, dpi = 1000)
     
-    # Iterate over pages and save
-    for (i in seq_along(g_pages)) {
+    # Return the plot
+    # return(g_pages)
+    return(g_total)
+    
+  })
+
+
+### Plot a single distance method over many environments
+# List over traits
+g_window_herit1 <- dist_method_replace %>%
+  map(function(dm) {
+    
+    # Subset the distance method
+    window_heritability_toplot_dm <- window_heritability_toplot_maxima %>%
+      filter(dist_method %in% c(dm, "Random"))
+    
+    # Iterate over the trait
+    g_list <- setNames(traits, traits) %>%
+      map(function(tr) {
+        # Subset the trait data
+        window_heritability_toplot_tr <- window_heritability_toplot_dm %>%
+          filter(trait == tr) %>%
+          # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
+          mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+        
+        
+        # Extract the ylim values from the single plots created above
+        ylim_tr <- ggplot_build(g_window_herit[[tr]])$layout$panel_ranges[[1]]$y.range
+        
+        # Create the plot and return
+        window_heritability_toplot_tr %>% 
+          # ggplot(aes(x = scaled_distance, y = heritability_out)) +
+          ggplot(aes(x = window_rank, y = heritability_out, color = dist_method)) +
+          g_mod + 
+          ylim(ylim_tr) +
+          facet_wrap( ~ environment + trait)
+        # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1)
+        
+      })
+    
+    # Iterate over the plots and save
+    for (i in seq_along(g_list)) {
       # Save
-      save_file <- file.path(fig_dir, str_c("window_env_dist_herit_", tr, "_page", i, ".jpg"))
-      ggsave(filename = save_file, plot = g_pages[[i]], height = 10, width = 8, dpi = 1000)
+      save_file <- file.path(
+        fig_dir, str_c("window_env_dist_herit_", names(dist_method_replace[dist_method_replace == dm]), 
+                       "_", names(g_list)[i], ".jpg"))
+      ggsave(filename = save_file, plot = g_list[[i]], height = 15, width = 12, dpi = 1000)
     }
     
     # Return the plot
-    return(g_pages)
+    return(g_list)
     
   })
+
+
+
 
 
 

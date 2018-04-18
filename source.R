@@ -82,8 +82,10 @@ trait_replace_unit <- unique(S2_MET_BLUEs$trait) %>%
 
 # Create a name replacement vector for the distance methods
 dist_method_replace <- c(
-  "ge_mean_D" = "Phenotypic\nDistance", "ge_PCA_dist" = "GxE BLUP PCA", 
-  "great_circle_dist" = "Great Circle\nDistance", "ec_one_PCA_dist" = "1 yr Environmental\nCovariates", 
+  "ge_mean_D" = "Phenotypic\nDistance", 
+  "ge_PCA_dist" = "GxE BLUP PCA", 
+  "great_circle_dist" = "Great Circle\nDistance", 
+  # "ec_one_PCA_dist" = "1 yr Environmental\nCovariates", 
   "ec_multi_PCA_dist" = "10 yr Environmental\nCovariates")
 
 
