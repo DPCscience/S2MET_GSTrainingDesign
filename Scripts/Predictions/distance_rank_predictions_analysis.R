@@ -13,6 +13,7 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 # # Load some packages
+library(lubridate)
 library(ggforce)
 library(ggridges)
 
@@ -113,7 +114,24 @@ train_env_rank_test %>%
   facet_grid(trait ~ dist_method, scales = "free_y")
 
 
+## For each prediction environment, take the mean rank of environments from the same
+## year and the mean rank of environments not from the same year
+train_env_rank_year <- train_env_rank %>%
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  mutate_at(vars(environment, train_envs), funs(year = str_extract(string = ., pattern = "[0-9]{2}") %>%
+                                                  parse_date_time(orders = "y") %>% year())) %>%
+  mutate(same_year = environment_year == train_envs_year) %>% 
+  group_by(trait, dist_method, same_year, environment) %>% 
+  summarize_at(vars(train_env_rank), funs(mean, sd)) %>% 
+  mutate(overall_mean = mean(mean)) %>%
+  ungroup()
 
+## Plot
+train_env_rank_year %>% 
+  ggplot(aes(x = dist_method, y = mean, fill = same_year)) + 
+  geom_boxplot(position = "dodge") + 
+  facet_grid(~trait) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
 
@@ -167,28 +185,42 @@ cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random
 ## accuracy after adding all environments (i.e. the last value) and the local
 ## maximum prediction accuracy (if present)
 ## 
-cumulative_pred_toplot_maxima <- cumulative_pred_toplot %>% 
+cumulative_pred_toplot_final <- cumulative_pred_toplot %>% 
   group_by(environment, trait, dist_method) %>% 
-  mutate(local_max_accuracy = max(accuracy),
-         local_max_n_train = n_train_env[accuracy == local_max_accuracy],
-         local_max_scaled_dist = scaled_distance[accuracy == local_max_accuracy],
-         all_env_acccuracy = accuracy[n_train_env == max(n_train_env)]) %>%
+  mutate(all_env_acccuracy = accuracy[n_train_env == max(n_train_env)]) %>%
+  ungroup() %>% 
+  mutate(accuracy_gt_final = accuracy > all_env_acccuracy)
+
+
+## Find the local maximum and create a data.frame
+cumulative_pred_toplot_maximum <- cumulative_pred_toplot_final %>%  
+  group_by(environment, trait, dist_method) %>% 
+  filter(accuracy == max(accuracy)) %>%
   ungroup() %>%
-  # Is the local maximum greater than the final accuracy?
-  # What is the difference between the local maximum and the final
-  mutate(local_adv = local_max_accuracy - all_env_acccuracy,
-         local_better = (local_adv > 0))
+  mutate(annotation = "local_maximum")
 
-## Filter for the observations in which the accuracy is the local maximum
-cumulative_pred_toplot_maxima_filter <- cumulative_pred_toplot_maxima %>%
-  filter(accuracy == local_max_accuracy)
-  
+## Find the accuray at n = 5 training environments
+cumulative_pred_toplot_5env <- cumulative_pred_toplot_final %>%  
+  filter(n_train_env == 5) %>%
+  mutate(annotation = "five_envs")
+
+## PLACEHOLDER FOR THE LRT RESULTS
+## 
+## 
+
+## Combine the data together
+cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
+                                             cumulative_pred_toplot_5env) %>%
+  # Calculate the difference between the annotated accuracy and the "final" accuracy
+  mutate(advantage = accuracy - all_env_acccuracy,
+         pos_advantage = advantage > 0)
 
 
-
+## Plot
 ## Distribution of the number of training environments or the scaled distance (cumulative) 
 ## of the local maximum
-g_local_max <- cumulative_pred_toplot_maxima_filter %>% 
+g_local_max <- cumulative_pred_toplot_annotate %>% 
+  filter(annotation %in% c("local_maximum")) %>%
   ggplot(aes(x = n_train_env, fill = dist_method)) +
   # ggplot(aes(x = scaled_distance, fill = dist_method)) + 
   # geom_density(alpha = 0.25) + 
@@ -203,16 +235,17 @@ g_local_max <- cumulative_pred_toplot_maxima_filter %>%
 save_file <- file.path(fig_dir, "cumulative_pred_max_ntrain.jpg")
 ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
 
+
+
 ## Distribution of local advantage
-g_local_adv <- cumulative_pred_toplot_maxima_filter %>% 
-  # filter(dist_method != "Random") %>%
-  ggplot(aes(x = local_adv, fill = dist_method)) + 
+g_local_adv <- cumulative_pred_toplot_annotate %>% 
+  ggplot(aes(x = advantage, fill = dist_method)) + 
   # geom_density(alpha = 0.25) + 
   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
   scale_fill_manual(values = colors, guide = FALSE) +
   xlab("Prediction Accuracy Advantage") +
   labs(title = "Advantage of Selected Environments Over All Environments") +
-  facet_wrap(~ trait, ncol = 2) +
+  facet_grid(annotation ~ trait) +
   theme_bw() +
   theme(legend.key.height = unit(2, "lines"))
 
@@ -220,11 +253,12 @@ save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
 ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
 
 
+
 ## Calculate the average environmental distance (scaled) where the local maxima is
 ## found
-cumulative_pred_maxima_summary <- cumulative_pred_toplot_maxima_filter %>% 
-  group_by(trait, dist_method) %>% 
-  summarize_at(vars(scaled_distance, n_train_env, local_adv, local_better), mean)
+cumulative_pred_maxima_summary <- cumulative_pred_toplot_annotate %>% 
+  group_by(trait, dist_method, annotation) %>% 
+  summarize_at(vars(scaled_distance, n_train_env, advantage, pos_advantage), mean)
 
 
 
@@ -234,7 +268,6 @@ cumulative_pred_maxima_summary <- cumulative_pred_toplot_maxima_filter %>%
 g_mod <- list(
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method, color = NULL), alpha = 0.25),
   # geom_point(aes(x = local_max_scaled_dist, y = local_max_accuracy)),
-  geom_point(aes(x = local_max_n_train, y = local_max_accuracy)),
   geom_line(lwd = 0.5),
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Prediction Accuracy"),
@@ -252,16 +285,20 @@ g_mod <- list(
 g_cumulative_pred <- setNames(traits, traits) %>%
   map(function(tr) {
     # Subset the trait
-    cumulative_pred_toplot_tr <- cumulative_pred_toplot_maxima %>%
+    cumulative_pred_toplot_tr <- cumulative_pred_toplot_final %>%
       filter(trait == tr) %>%
       # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
       mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
     
+    cumulative_pred_toplot_annotate_tr <- cumulative_pred_toplot_annotate %>%
+      filter(trait == tr) %>%
+      mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
       
     # Create one plot using facet_wrap
     g_total <- cumulative_pred_toplot_tr %>% 
       # ggplot(aes(x = scaled_distance, y = accuracy, color = dist_method)) +
       ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) +
+      geom_point(data = cumulative_pred_toplot_annotate_tr, aes(shape = annotation)) +
       g_mod +
       facet_wrap( ~ environment + trait)
       # geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = dist_method, color = NULL), alpha = 0.1)
@@ -286,6 +323,9 @@ g_cumulative_pred1 <- dist_method_replace %>%
     cumulative_pred_toplot_dm <- cumulative_pred_toplot_maxima %>%
       filter(dist_method %in% c(dm, "Random"))
     
+    cumulative_pred_toplot_annotate_dm <- cumulative_pred_toplot_annotate %>%
+      filter(dist_method %in% c(dm, "Random"))
+    
     # Iterate over the trait
     g_list <- setNames(traits, traits) %>%
       map(function(tr) {
@@ -294,6 +334,11 @@ g_cumulative_pred1 <- dist_method_replace %>%
           filter(trait == tr) %>%
           # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
           mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+        
+        cumulative_pred_toplot_annotate_tr <- cumulative_pred_toplot_annotate_dm %>%
+          filter(trait == tr) %>%
+          mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
+        
           
         # Extract the ylim values from the single plots created above
         ylim_tr <- ggplot_build(g_cumulative_pred[[tr]])$layout$panel_ranges[[1]]$y.range
@@ -302,6 +347,7 @@ g_cumulative_pred1 <- dist_method_replace %>%
         cumulative_pred_toplot_tr %>% 
           # ggplot(aes(x = scaled_distance, y = accuracy)) +
           ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) +
+          geom_point(data = cumulative_pred_toplot_annotate_tr, aes(shape = annotation)) +
           g_mod + 
           ylim(ylim_tr) +
           facet_wrap( ~ environment + trait)

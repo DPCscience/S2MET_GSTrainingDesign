@@ -296,7 +296,13 @@ gblup <- function(K, train, test, bootreps = NULL) {
 }
 
 
-
+## Define a function that calculates the locale maximum of a environmental
+## distance-formatted data.frame of prediction accuracy
+local_maximum <- function(df) {
+  
+  
+  
+}
 
 
 

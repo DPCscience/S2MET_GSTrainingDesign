@@ -88,6 +88,9 @@ env_dist_lrt_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = fun
     pred_env <- core_df$environment[i]
     tr <- core_df$trait[i]
     dist_met <- core_df$dist_method[i]
+    
+    # Print a message
+    print(paste(pred_env, tr, dist_met))
 
     # Subset the trainin environments for the trait
     tr_train_env <- train_envs_traits %>% filter(trait == tr) %>% pull(environment)
@@ -130,7 +133,7 @@ env_dist_lrt_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = fun
     # While lrt_sig or lrt_opt is false AND j <= length(sorted_train_envs)
     while (any(!lrt_sig, !lrt_opt) & j <= length(sorted_train_envs)) {
       # Get a vector of environments to be clustered
-      clust_env <- names(sorted_train_envs[1:i])
+      clust_env <- names(sorted_train_envs[1:j])
       
       # Assign the environment(s) to a cluster
       train_data_full_clust <- train_data_full %>% 
@@ -147,10 +150,8 @@ env_dist_lrt_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = fun
       lrt_sig <- lrt_out$p_value <= alpha
       
       # If j is one, continue
-      if (j == 1) {
-        next
-      } else {
-        # Is the ith pvalue >= than the j - 1th pvalue
+      if (j != 1) {
+        # Is the jth pvalue >= than the j - 1th pvalue
         lrt_opt <- lrt_out$p_value >= lrt_list[[j - 1]]$p_value
       }
       
@@ -163,8 +164,11 @@ env_dist_lrt_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = fun
     
   } # Close the for loop
   
+  # Add the results list to the core_df data.frame
+  core_df1 <- mutate(core_df, results = results_out)
+  
   # Return the results
-  return(results_out)
+  return(core_df1)
   
 }, mc.cores = n_core)
 
