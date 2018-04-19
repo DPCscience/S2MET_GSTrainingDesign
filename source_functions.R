@@ -12,6 +12,12 @@ assign_cores <- function(df, n_core) {
   return(df)
 }
 
+# A function to replace a character vector and convert it to a factor
+as_replaced_factor <- function(x, replacement) {
+  x_repl <- str_replace_all(string = x, pattern = replacement)
+  factor(x_repl, levels = replacement)
+}
+
 
 ## Run a likelihood ratio test
 lr_test <- function(model1, model2) {

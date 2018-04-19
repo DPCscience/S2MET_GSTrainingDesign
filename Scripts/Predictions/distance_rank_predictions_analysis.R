@@ -22,10 +22,41 @@ load(file.path(result_dir, "environmental_distance_predictions.RData"))
 load(file.path(result_dir, "environmental_distance_window_predictions.RData"))
 load(file.path(result_dir, "environmental_distance_heritability.RData"))
 
+# Load the results of the model-based clustering
+load(file.path(result_dir, "environmental_distance_lrt.RData"))
+
 ## Create a color scheme for the distance methods
-colors <- c(setNames(umn_palette(3, 5), dist_method_replace), "Random" = "grey75")
+dist_colors <- c(setNames(umn_palette(3, 5), dist_method_replace), "Random" = "grey75")
+## Significant level
+alpha <- 0.05
 
 
+## Bind the elements of the LRT results list
+env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
+  bind_rows() %>%
+  select(environment:dist_method, results) %>%
+  unnest() %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
+         dist_method = factor(dist_method, levels = names(dist_colors)))
+
+## Two different tests using the LRT results
+## Either select when it is first significant ("first"), or select when it is MOST significant ("most")
+## If no points are significant, take the last point.
+env_dist_lrt_results_first <- env_dist_lrt_results %>% 
+  group_by(environment, trait, dist_method) %>% 
+  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
+  filter(is_sig) %>%
+  mutate(which_sig = which(is_sig)) %>% 
+  filter(which_sig == min(which_sig)) %>%
+  ungroup()
+  
+
+env_dist_lrt_results_most <- env_dist_lrt_results %>% 
+  group_by(environment, trait, dist_method) %>% 
+  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
+  filter(is_sig) %>%
+  filter(p_value == min(p_value)) %>%
+  ungroup()
 
 
 ## Bind the list elements together and unnest
@@ -51,6 +82,8 @@ train_env_rank <- cumulative_pred_adj %>%
   mutate(train_env_rank = seq(n())) %>%
   ungroup()
 
+
+#########
 
 ## The distribution of the ranks should follow a uniform distribution under the
 ## null hypothesis of idependence of rank and training environment. I will use a 
@@ -134,6 +167,10 @@ train_env_rank_year %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
+##########
+
+
+
 
 
 
@@ -175,7 +212,7 @@ cumulative_pred_orig <- cumulative_pred_adj %>%
 ## Combine
 cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(colors)),
+         dist_method = factor(dist_method, levels = names(dist_colors)),
          n_train_env = as.integer(n_train_env))
 
 
@@ -204,16 +241,25 @@ cumulative_pred_toplot_5env <- cumulative_pred_toplot_final %>%
   filter(n_train_env == 5) %>%
   mutate(annotation = "five_envs")
 
-## PLACEHOLDER FOR THE LRT RESULTS
-## 
-## 
+## Use the LRT results to select the accuracy when the LRT is deemed significant.
+cumulative_pred_toplot_lrt <- cumulative_pred_toplot_final %>%
+  inner_join(., env_dist_lrt_results_first, by = c("environment", "trait", "dist_method", "n_train_env" = "n_env")) %>% 
+  select(environment:all_env_acccuracy) %>% 
+  mutate(annotation = "lrt")
+
+
+## A vector to replace the annotation names
+annotation_replace <- c("local_maximum" = "Maximum", "five_envs" = "5 Envs", "lrt" = "Likelihood Ratio Test")
+
 
 ## Combine the data together
 cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
-                                             cumulative_pred_toplot_5env) %>%
+                                             cumulative_pred_toplot_5env,
+                                             cumulative_pred_toplot_lrt) %>%
   # Calculate the difference between the annotated accuracy and the "final" accuracy
   mutate(advantage = accuracy - all_env_acccuracy,
-         pos_advantage = advantage > 0)
+         pos_advantage = advantage > 0,
+         annotation = as_replaced_factor(x = annotation, replacement = annotation_replace))
 
 
 ## Plot
@@ -225,7 +271,7 @@ g_local_max <- cumulative_pred_toplot_annotate %>%
   # ggplot(aes(x = scaled_distance, fill = dist_method)) + 
   # geom_density(alpha = 0.25) + 
   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-  scale_fill_manual(values = colors, guide = FALSE) +
+  scale_fill_manual(values = dist_colors, guide = FALSE) +
   xlab("Number of Training Environments to Reach Maximum") +
   labs(title = "Training Environments to Reach Maximum Accuracy") +
   facet_wrap(~ trait, ncol = 2) +
@@ -237,17 +283,29 @@ ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 10
 
 
 
+# ## Distribution of local advantage
+# g_local_adv <- cumulative_pred_toplot_annotate %>% 
+#   ggplot(aes(x = advantage, fill = dist_method)) + 
+#   # geom_density(alpha = 0.25) + 
+#   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+#   scale_fill_manual(values = dist_colors, guide = FALSE) +
+#   xlab("Prediction Accuracy Advantage") +
+#   labs(title = "Advantage of Selected Environments Over All Environments") +
+#   facet_grid(annotation ~ trait) +
+#   theme_bw() +
+#   theme(legend.key.height = unit(2, "lines"))
+
 ## Distribution of local advantage
 g_local_adv <- cumulative_pred_toplot_annotate %>% 
-  ggplot(aes(x = advantage, fill = dist_method)) + 
-  # geom_density(alpha = 0.25) + 
-  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-  scale_fill_manual(values = colors, guide = FALSE) +
+  ggplot(aes(x = dist_method, y = advantage, fill = annotation)) + 
+  geom_boxplot(alpha = 0.5) + 
+  # scale_fill_manual(values = dist_colors, guide = FALSE) +
   xlab("Prediction Accuracy Advantage") +
   labs(title = "Advantage of Selected Environments Over All Environments") +
-  facet_grid(annotation ~ trait) +
+  facet_grid( ~ trait) +
   theme_bw() +
-  theme(legend.key.height = unit(2, "lines"))
+  theme(legend.key.height = unit(2, "lines"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
 
 save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
 ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
@@ -272,8 +330,8 @@ g_mod <- list(
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Prediction Accuracy"),
   xlab("Number of Environments in Training Set"),
-  scale_color_manual(values = colors),
-  scale_fill_manual(values = colors),
+  scale_color_manual(values = dist_colors),
+  scale_fill_manual(values = dist_colors),
   theme_bw(),
   theme(panel.grid = element_blank(),
         legend.key.height = unit(2, units = "line"),
@@ -416,7 +474,7 @@ window_pred_orig <- window_pred_adj %>%
 ## Combine
 window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(colors)),
+         dist_method = factor(dist_method, levels = names(dist_colors)),
          window_rank = as.integer(window_rank))
 
 
@@ -444,7 +502,7 @@ g_local_max <- window_pred_toplot_maxima_filter %>%
   # ggplot(aes(x = window_rank, fill = dist_method)) +
   # geom_density(alpha = 0.25) + 
   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-  scale_fill_manual(values = colors, guide = FALSE) +
+  scale_fill_manual(values = dist_colors, guide = FALSE) +
   xlab("Scaled Average Environmental Distance at Maximum Accuracy") +
   labs(title = "Average Environmental Distance at Maximum Accuracy") +
   facet_wrap(~ trait, ncol = 2) +
@@ -461,7 +519,7 @@ g_local_max <- window_pred_toplot_maxima_filter %>%
   ggplot(aes(x = window_rank, fill = dist_method)) +
   # geom_density(alpha = 0.25) + 
   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-  scale_fill_manual(values = colors, guide = FALSE) +
+  scale_fill_manual(values = dist_colors, guide = FALSE) +
   xlab("Rank of Sliding Window at Maximum Accuracy") +
   labs(title = "Rank of Sliding Window at Maximum Accuracy") +
   facet_wrap(~ trait, ncol = 2) +
@@ -489,8 +547,8 @@ g_mod <- list(
   geom_point(aes(x = local_max_window_rank, y = local_max_accuracy)),
   geom_line(lwd = 0.5),
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
-  scale_color_manual(values = colors),
-  scale_fill_manual(values = colors),
+  scale_color_manual(values = dist_colors),
+  scale_fill_manual(values = dist_colors),
   ylab("Prediction Accuracy"),
   xlab("Distance Rank of Sliding Window"),
   theme_bw(),
@@ -622,7 +680,7 @@ cumulative_heritability_orig <- cumulative_heritability_adj %>%
 ## Combine
 cumulative_heritability_toplot <- bind_rows(cumulative_heritability_orig, cumulative_heritability_random) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(colors)),
+         dist_method = factor(dist_method, levels = names(dist_colors)),
          n_train_env = as.integer(n_train_env))
 
 
@@ -658,8 +716,8 @@ g_mod <- list(
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Heritability"),
   xlab("Number of Environments in Training Set"),
-  scale_color_manual(values = colors),
-  scale_fill_manual(values = colors),
+  scale_color_manual(values = dist_colors),
+  scale_fill_manual(values = dist_colors),
   theme_bw(),
   theme(panel.grid = element_blank(),
         legend.key.height = unit(2, units = "line"),
@@ -790,7 +848,7 @@ window_heritability_orig <- window_heritability_adj %>%
 ## Combine
 window_heritability_toplot <- bind_rows(window_heritability_orig, window_heritability_random) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(colors)),
+         dist_method = factor(dist_method, levels = names(dist_colors)),
          window_rank = as.integer(window_rank))
 
 
@@ -820,8 +878,8 @@ g_mod <- list(
   geom_point(aes(x = local_max_window_rank, y = local_max_heritability)),
   geom_line(lwd = 0.5),
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
-  scale_color_manual(values = colors),
-  scale_fill_manual(values = colors),
+  scale_color_manual(values = dist_colors),
+  scale_fill_manual(values = dist_colors),
   ylab("Heritability"),
   xlab("Distance Rank of Sliding Window"),
   theme_bw(),

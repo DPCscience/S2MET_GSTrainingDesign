@@ -63,7 +63,8 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
 
 ## Use the distances calculated using 'all' data
 pred_env_dist_rank <- pred_env_rank_random$all %>%
-  filter(dist_method %in% names(dist_method_replace))
+  # Use only the first 50 samples
+  filter(!dist_method %in% str_c("sample", 51:100))
 
 
 ## Split the 'pred_env_rank_random' data.frame by core and then pipe to mclapply
@@ -164,8 +165,9 @@ env_dist_lrt_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = fun
     
   } # Close the for loop
   
-  # Add the results list to the core_df data.frame
-  core_df1 <- mutate(core_df, results = results_out)
+  core_df1 <- core_df %>%
+    select(-env_rank, -core) %>%
+    mutate(results_out = results_out)
   
   # Return the results
   return(core_df1)
