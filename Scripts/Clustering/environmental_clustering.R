@@ -32,11 +32,11 @@ source(file.path(repo_dir, "source.R"))
 ## Load the environment covariable data
 load(file.path(data_dir, "environmental_data_compiled.RData"))
 
-# Create a new data.frame to hold the different datasets
-S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
-  group_by(trait) %>%
-  nest() %>%
-  mutate(data = map(data, droplevels))
+# # Create a new data.frame to hold the different datasets
+# S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
+#   group_by(trait) %>%
+#   nest() %>%
+#   mutate(data = map(data, droplevels))
 
 
 ## Great Circle Distance
@@ -103,7 +103,7 @@ ge_mean_D_all <- S2_MET_BLUEs %>%
 
 # Now calculate it based only on data from the TP
 ge_mean_D_tp <- S2_MET_BLUEs %>%
-  filter(line_name %in% tp_geno) %>%
+  filter(line_name %in% tp) %>%
   # Split by trait
   split(.$trait) %>%
   map(function(df){
@@ -409,6 +409,8 @@ pred_env_dist_rank <- dist_method_df_rank %>%
   map(~inner_join(pred_envs_traits, .,  by = c("environment", "trait")))
 
 
+
+
 ## Randomly sample environments as a control
 # Number of random samples
 n_sample <- 100
@@ -437,6 +439,16 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 # Save this
 save_file <- file.path(result_dir, "distance_methods_results.RData")
 save("clust_method_df", "pred_env_rank_random", file = save_file)
+
+
+
+
+
+
+
+
+
+
 
 
 

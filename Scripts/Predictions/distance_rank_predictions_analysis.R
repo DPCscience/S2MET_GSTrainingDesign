@@ -26,7 +26,7 @@ load(file.path(result_dir, "environmental_distance_heritability.RData"))
 load(file.path(result_dir, "environmental_distance_lrt.RData"))
 
 ## Create a color scheme for the distance methods
-dist_colors <- c(setNames(umn_palette(3, 5), dist_method_replace), "Random" = "grey75")
+dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_method_replace), "Random" = "grey75")
 ## Significant level
 alpha <- 0.05
 
@@ -34,10 +34,8 @@ alpha <- 0.05
 ## Bind the elements of the LRT results list
 env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
   bind_rows() %>%
-  select(environment:dist_method, results) %>%
-  unnest() %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(dist_colors)))
+  select(environment:dist_method, results_out) %>%
+  unnest()
 
 ## Two different tests using the LRT results
 ## Either select when it is first significant ("first"), or select when it is MOST significant ("most")
@@ -48,14 +46,6 @@ env_dist_lrt_results_first <- env_dist_lrt_results %>%
   filter(is_sig) %>%
   mutate(which_sig = which(is_sig)) %>% 
   filter(which_sig == min(which_sig)) %>%
-  ungroup()
-  
-
-env_dist_lrt_results_most <- env_dist_lrt_results %>% 
-  group_by(environment, trait, dist_method) %>% 
-  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
-  filter(is_sig) %>%
-  filter(p_value == min(p_value)) %>%
   ungroup()
 
 
@@ -211,9 +201,7 @@ cumulative_pred_orig <- cumulative_pred_adj %>%
 
 ## Combine
 cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(dist_colors)),
-         n_train_env = as.integer(n_train_env))
+  mutate(n_train_env = as.integer(n_train_env))
 
 
 
@@ -236,10 +224,12 @@ cumulative_pred_toplot_maximum <- cumulative_pred_toplot_final %>%
   ungroup() %>%
   mutate(annotation = "local_maximum")
 
-## Find the accuray at n = 5 training environments
-cumulative_pred_toplot_5env <- cumulative_pred_toplot_final %>%  
-  filter(n_train_env == 5) %>%
-  mutate(annotation = "five_envs")
+Ntrain_envs <- c(1, 5, 10)
+
+## Find the accuray at n = 1, 5, 10 training environments
+cumulative_pred_toplot_Nenv <- cumulative_pred_toplot_final %>%  
+  filter(n_train_env %in% Ntrain_envs) %>%
+  mutate(annotation = str_c(n_train_env, "envs"))
 
 ## Use the LRT results to select the accuracy when the LRT is deemed significant.
 cumulative_pred_toplot_lrt <- cumulative_pred_toplot_final %>%
@@ -249,12 +239,15 @@ cumulative_pred_toplot_lrt <- cumulative_pred_toplot_final %>%
 
 
 ## A vector to replace the annotation names
-annotation_replace <- c("local_maximum" = "Maximum", "five_envs" = "5 Envs", "lrt" = "Likelihood Ratio Test")
+annotation_replace <- c("local_maximum" = "Maximum", 
+                        setNames(str_replace(string = str_c(Ntrain_envs, "envs"), pattern = "e", replacement = " E"), 
+                                 str_c(Ntrain_envs, "envs")), 
+                        "lrt" = "Likelihood Ratio Test")
 
 
 ## Combine the data together
 cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
-                                             cumulative_pred_toplot_5env,
+                                             cumulative_pred_toplot_Nenv,
                                              cumulative_pred_toplot_lrt) %>%
   # Calculate the difference between the annotated accuracy and the "final" accuracy
   mutate(advantage = accuracy - all_env_acccuracy,
@@ -311,12 +304,40 @@ save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
 ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
 
 
+####### ANALYSIS ######
+### Fit a model to compare the effects of the different factors
+cumulative_pred_models <- cumulative_pred_toplot_annotate %>% 
+  mutate(environment = as.factor(environment)) %>% 
+  group_by(trait) %>%
+  do(fit = lm(advantage ~ environment + dist_method + annotation, data = .))
 
-## Calculate the average environmental distance (scaled) where the local maxima is
-## found
-cumulative_pred_maxima_summary <- cumulative_pred_toplot_annotate %>% 
-  group_by(trait, dist_method, annotation) %>% 
-  summarize_at(vars(scaled_distance, n_train_env, advantage, pos_advantage), mean)
+# dist_method:annotation is not signficant
+
+cumulative_pred_effects <- cumulative_pred_models %>% 
+  mutate(effects = list(effects::allEffects(fit)))
+
+cumulative_pred_effects1 <- bind_cols(
+  cumulative_pred_effects, 
+  cumulative_pred_effects$effects %>% map(~map(., as.data.frame)) %>% transpose() %>% as_data_frame())
+
+## Plot
+cumulative_pred_effects1 %>% 
+  unnest(dist_method) %>% 
+  ggplot(aes(x = dist_method, y = fit, ymin = lower, ymax = upper)) +
+  geom_point() + 
+  geom_errorbar() +
+  ylab("effect") + 
+  facet_wrap(~trait) + 
+  theme_bw()
+
+cumulative_pred_effects1 %>% 
+  unnest(annotation) %>% 
+  ggplot(aes(x = annotation, y = fit, ymin = lower, ymax = upper)) +
+  geom_point() + 
+  geom_errorbar() +
+  ylab("effect") + 
+  facet_wrap(~trait) + 
+  theme_bw()
 
 
 
@@ -378,7 +399,7 @@ g_cumulative_pred1 <- dist_method_replace %>%
   map(function(dm) {
     
     # Subset the distance method
-    cumulative_pred_toplot_dm <- cumulative_pred_toplot_maxima %>%
+    cumulative_pred_toplot_dm <- cumulative_pred_toplot_final %>%
       filter(dist_method %in% c(dm, "Random"))
     
     cumulative_pred_toplot_annotate_dm <- cumulative_pred_toplot_annotate %>%
@@ -473,8 +494,7 @@ window_pred_orig <- window_pred_adj %>%
 
 ## Combine
 window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random) %>%
-  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-         dist_method = factor(dist_method, levels = names(dist_colors)),
+  mutate(dist_method = as_replaced_factor(dist_method, c(dist_method_replace, "Random" = "Random")),
          window_rank = as.integer(window_rank))
 
 
@@ -497,7 +517,7 @@ window_pred_toplot_maxima_filter <- window_pred_toplot_maxima %>%
 ## Distribution of the number of training environments or the scaled distance (cumulative) 
 ## of the local maximum
 g_local_max <- window_pred_toplot_maxima_filter %>% 
-  filter(dist_method != "Random") %>%
+  # filter(dist_method != "Random") %>%
   ggplot(aes(x = scaled_distance, fill = dist_method)) +
   # ggplot(aes(x = window_rank, fill = dist_method)) +
   # geom_density(alpha = 0.25) + 
@@ -514,7 +534,7 @@ ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 10
 
 
 g_local_max <- window_pred_toplot_maxima_filter %>% 
-  filter(dist_method != "Random") %>%
+  # filter(dist_method != "Random") %>%
   # ggplot(aes(x = scaled_distance, fill = dist_method)) +
   ggplot(aes(x = window_rank, fill = dist_method)) +
   # geom_density(alpha = 0.25) + 
@@ -626,7 +646,9 @@ g_window_pred1 <- dist_method_replace %>%
       save_file <- file.path(
         fig_dir, str_c("window_env_dist_pred_", names(dist_method_replace[dist_method_replace == dm]), 
                        "_", names(g_list)[i], ".jpg"))
-      ggsave(filename = save_file, plot = g_list[[i]], height = 15, width = 12, dpi = 1000)
+      g_print <- g_list[[i]] + geom_smooth(method = "lm", se = FALSE)
+      
+      ggsave(filename = save_file, plot = , height = 15, width = 12, dpi = 1000)
     }
     
     # Return the plot

@@ -19,6 +19,77 @@ as_replaced_factor <- function(x, replacement) {
 }
 
 
+
+## Phenotypic distance method
+dist_env <- function(x, gen.col = "gen", env.col = "env", pheno.col = "yield") {
+  
+  # Verify that x is a data.frame
+  stopifnot(is.data.frame(x))
+  
+  # Convert to data.frame
+  x <- as.data.frame(x)
+  
+  # Verify columnnames exist
+  if (!all(c(gen.col, env.col, pheno.col) %in% colnames(x)))
+    stop("The values of gen.col or env.col or pheno.col are not columns in the x data.frame.")
+  
+  # Pull out environment names
+  env_names <- unique(as.character(x[[env.col]]))
+  # Number of environments
+  n_env <- length(env_names)
+  
+  ## Make a table of the observations in the dataset
+  x_table <- table(x[c(env.col, gen.col)])
+  # Are any greater than 1?
+  if (any(x_table > 1)) stop ("Only one observation of each genotype in each environment should be included in the dataset.")
+  
+  # Order on environment, then genotype
+  x1 <- x[order(x[[env.col]], x[[gen.col]]), , drop = FALSE]
+  
+  # Iterate over pairs
+  D_ij <- combn(x = env_names, m = 2, FUN = function(env_pairs) {
+    
+    ## Subset the data for this environment pair
+    env_index <- x1[[env.col]] %in% env_pairs
+    x_sub <- x1[env_index, , drop = FALSE]
+    
+    # Find the common genotypes
+    geno_count <- table(x_sub[[gen.col]])
+    x_geno <- names(geno_count[geno_count == 2])
+    
+    # If no genotypes are in common, return NA
+    if (length(x_geno) == 0) return(NA)
+    
+    # Subset the data again
+    x_sub1 <- x_sub[x_sub[[gen.col]] %in% x_geno, , drop = FALSE]
+    
+    # Scale the phenotypic values by the mean and sd
+    pheno_scale <- tapply(X = x_sub1[[pheno.col]], INDEX = x_sub1[[env.col]],
+                          function(x) as.numeric(scale(x)), simplify = FALSE)
+    
+    # Find the squared differences between genotypes
+    pheno_scale_diff <- tapply(X = unlist(pheno_scale, use.names = FALSE),
+                               INDEX = x_sub1[[gen.col]],
+                               function(x) diff(x)^2, simplify = FALSE)
+    
+    # Calculate the mean among these squared differences and return
+    mean(unlist(pheno_scale_diff))
+    
+  })
+  
+  # Empty matrix
+  D_mat <- matrix(0, nrow = n_env, ncol = n_env, dimnames = list(env_names, env_names))
+  
+  # Add data
+  D_mat[lower.tri(D_mat)] <- D_ij
+  
+  # Output as distance matrix
+  as.dist(D_mat)
+  
+} # Close the fuction
+
+
+
 ## Run a likelihood ratio test
 lr_test <- function(model1, model2) {
   
@@ -283,32 +354,112 @@ gblup <- function(K, train, test, bootreps = NULL) {
   fit <- mixed.solve(y = y, Z = Z, K = K, X = X)
   # Extract PGVs
   pgv <- fit$u %>% 
-    data.frame(line_name = names(.), pred_value = ., row.names = NULL)
+    data.frame(line_name = names(.), pred_value = ., row.names = NULL, stringsAsFactors = FALSE)
   
-  # Combine the PGVs with the phenotypic observations and calculate accuracy
-  comb <- left_join(test, pgv, by = "line_name")
-  acc <- cor(comb$value, comb$pred_value)
-  
-  # Bootstrap if replicates are provided
-  if (!is.null(bootreps)) {
-    boot <- boot_cor(x = comb$value, y = comb$pred_value, boot.reps = bootreps)
-  } else {
-    boot <- NA
-  }
+  # If test is missing, just return the predictions
+  if (missing(test)) {
     
+    comb <- pgv
+    acc <- boot <- NA
+    
+  } else {
+  
+    # Combine the PGVs with the phenotypic observations and calculate accuracy
+    comb <- left_join(test, pgv, by = "line_name")
+    acc <- cor(comb$value, comb$pred_value)
+    
+    # Bootstrap if replicates are provided
+    if (!is.null(bootreps)) {
+      boot <- boot_cor(x = comb$value, y = comb$pred_value, boot.reps = bootreps)
+    } else {
+      boot <- NA
+    }
+    
+  }
   
   # Return a list
   list(accuracy = acc, pgv = comb, boot = as_data_frame(boot))
 }
 
 
-## Define a function that calculates the locale maximum of a environmental
-## distance-formatted data.frame of prediction accuracy
-local_maximum <- function(df) {
+## Define a function that returns an "optimal" set of environments based on 
+## a specified criteria
+## environments is a sorted vector of possible training environments
+## data is a data.frame of training data
+## criterion is character specifying the criterion to select the training environment(s)
+## alpha is the significance level used for the LRT algorithm
+optim_env <- function(environments, data, criterion = c("lrt", "first1", "first5", "first10"),
+                      alpha = 0.05) {
   
+  criterion <- match.arg(criterion)
   
+  if (criterion != "lrt") {
+    # Get the number of environments
+    index <- parse_number(criterion)
+    # Return the environments
+    opt <- as.character(na.omit(environments[1:index]))
+
+  } else {
+    
+    # Model control
+    control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+    
+    ## Define the formula and fit the full model
+    ## Use the last element in the above list, because it has all the data
+    form_full <- value ~ 1 + env + (1|line_name) + (1|line_name:env)
+    fit_full <- lmer(formula = form_full, data = data, control = control)
+    
+    # First create an empty list to store the output of the lrt
+    lrt_list <- vector("list", length(environments))
+    
+    # Define the expanded model
+    form_exp <- value ~ 1 + env + (1|line_name) + (1|line_name:env) + (1|line_name:cluster) + (1|line_name:env:cluster)
+    
+    # Setup the while loop conditions
+    lrt_sig <- FALSE
+    j <- 1
+    
+    # Iterate using a while loop
+    # While lrt_sig or lrt_opt is false AND j <= length(environments)
+    # Stop the loop once the LRT is significant
+    while (!lrt_sig & j <= length(environments)) {
+      # Get a vector of environments to be clustered
+      clust_env <- environments[1:j]
+      
+      # Assign the environment(s) to a cluster
+      data_clust <- data %>% 
+        mutate(cluster = ifelse(env %in% clust_env, "train", "not_train"))
+      
+      ## Fit the model
+      fit_exp <- lmer(formula = form_exp, data = data_clust, control = control)
+      
+      ## Run the likelihood ratio test
+      lrt_out <- lr_test(model1 = fit_full, model2 = fit_exp)
+      lrt_list[[j]] <- cbind(n_env = j, lrt_out)
+      
+      # Is the LRT significant?
+      lrt_sig <- lrt_out$p_value <= alpha
+      
+      # Advance the counter
+      j <- j + 1
+    } # Close the while loop
+    
+    # Bind the rows of the lrt data
+    lrt_df <- bind_rows(lrt_list)
+    
+    # Determine the number of environments to take
+    n_opt_env <- max(lrt_df$n_env)
+    
+    # Return those optimal environments
+    opt <- head(environments, n_opt_env)
+    
+  }
+  
+  return(opt)
   
 }
+  
+  
 
 
 

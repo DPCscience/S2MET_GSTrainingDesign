@@ -53,6 +53,12 @@ dist_method_cor %>%
   facet_grid(trait ~ population)
 
 
+
+
+
+
+
+
 ## Manipulate the cluster results and cut the trees
 # What should be the minimum and maximum number of clusters?
 min_k <- 2
@@ -113,6 +119,58 @@ for (tr in traits) {
   save_file <- file.path(fig_dir, str_c("environment_distance_tp_", tr, ".jpg"))
   ggsave(filename = save_file, plot = g_dist_mds_tp[[tr]], width = 8, height = 6, dpi = 1000)
 }
+
+
+
+# 
+# ### Attempt to create plots with different number of clusters
+# test_dist <- subset(clust_method_df, trait == "GrainYield" & dist_method == "ge_mean_D" & population == "all", 
+#                     dist, drop = T)[[1]]
+# 
+# test_clust <- hclust(d = test_dist)
+# 
+# ## Calculate the silhouette across k = 1:20 clusters
+# ks <- seq(2, length(test_clust$labels) - 1)
+# 
+# ks_sil <- ks %>%
+#   map(~cutree(test_clust, k = .)) %>%
+#   map(~silhouette(x = ., dist = test_dist))
+# 
+# # Calculate the mean silhouette at each splitting
+# ks_ss <- ks_sil %>%
+#   map_dbl(~mean(.[,3]))
+# 
+# # Plot
+# plot(ks_ss)
+# 
+# 
+# 
+# ## A function that calculates the mean distances within a set of k clusters
+# within_dist <- function(d, method = "complete", k) {
+#   
+#   # Convert the distance object to a matrix
+#   d_mat <- as.matrix(d)
+#   
+#   # Cluster
+#   d_clust <- hclust(d = d, method = method)
+#   # Cut the tree
+#   tree_cut <- cutree(tree = d_clust, k = k)
+#   
+#   # Split the members and then iterate over the members to calculate the average distance within the group
+#   split(tree_cut, tree_cut) %>%
+#     map(~d_mat[names(.),names(.)]) %>%
+#     map_dbl(~ifelse(is.null(dim(.)), 0, mean(.[lower.tri(.)])))
+#   
+# }
+#   
+  
+
+
+
+
+
+
+
 
 
 
