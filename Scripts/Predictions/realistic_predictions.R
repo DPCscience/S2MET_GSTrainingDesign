@@ -134,7 +134,7 @@ breeding_dataset <- year_list %>%
         map(~{
           envs <- names(.)
           opt <- map(criteria, ~optim_env(environments = envs, data = train_data1, criterion = .))
-          data_frame(criteria, train_environment)
+          data_frame(criteria, train_environment = opt)
         })
       
       # Add the optimal environment list to the df

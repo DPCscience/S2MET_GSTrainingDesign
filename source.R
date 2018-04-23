@@ -100,7 +100,8 @@ env_herit_rank <- stage_one_data %>%
 
 
 # Pull out the trials with irrigation
-irrig_env <- subset(trial_info, irrigated == "yes", environment, drop = TRUE)
+irrig_env <- subset(trial_info, irrigated == "yes", environment)[[1]]
+
 # Filter the S2 MET BLUEs for non-irrigated trials
 S2_MET_BLUEs <- S2_MET_BLUEs %>% 
   filter(!environment %in% irrig_env) %>%
