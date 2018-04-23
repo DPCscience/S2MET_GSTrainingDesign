@@ -337,7 +337,7 @@ breeding_prediction_iterative_results_random <- breeding_dataset_random %>%
 
 ## Save
 save_file <- file.path(result_dir, "realistic_breeding_predictions.RData")
-save("breeding_dataset", "breeding_prediction_results", "breeding_dataset_random"
+save("breeding_dataset", "breeding_prediction_results", "breeding_dataset_random",
      "breeding_prediction_iterative_results_random", "breeding_prediction_iterative_results",
      file = save_file)
 
