@@ -130,19 +130,17 @@ breeding_dataset <- year_list %>%
       
       ## Feed this to the optim_env function
       ## Also add a row for using all of the environments
-      val_df2 <- val_df1 %>% 
-        group_by(dist_method) %>%
-        do({
-          df <- .
-          envs <- names(.$train_environment[[1]])
-          opt_env <- map(criteria, ~optim_env(environments = envs, data = train_data1, 
-                                              criterion = .))
-          # Return the modified DF
-          cbind(select(df, -train_environment), criteria) %>% 
-            as_data_frame() %>% 
-            mutate(train_environment = opt_env)
-        }) %>%
-        ungroup() %>%
+      opt_env <- val_df1$train_environment %>% 
+        map(~{
+          envs <- names(.)
+          opt <- map(criteria, ~optim_env(environments = envs, data = train_data1, criterion = .))
+          data_frame(criteria, train_environment)
+        })
+      
+      # Add the optimal environment list to the df
+      val_df2 <- val_df1 %>%
+        mutate(train_environment = opt_env) %>% 
+        unnest() %>%
         bind_rows(., mutate(val_df1[1,], dist_method = "all_env", 
                             train_environment = map(train_environment, names)))
       
