@@ -127,27 +127,63 @@ breeding_prediction_iterative_results_random2 <- breeding_prediction_iterative_r
 
 ## For the random predicitions accuracies, we first need to calculate the prediction
 ## accuracy by correlating the predicted values with the observed
+## 
+## Summarize the results of the random environmental additions by calculating 
+## the mean accuracy and 95% confidence interval
 breeding_prediction_iterative_results_random3 <- breeding_prediction_iterative_results_random2 %>%
   group_by(environment, trait, n_train_env, dist_method) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
-  summarize_at(vars(accuracy), funs(mean = mean(.), lower = quantile(., probs = 0.025),
-                                    upper = quantile(., probs = 0.975)))
+  summarize_at(vars(accuracy), funs(cor = mean(.), lower = quantile(., probs = 0.025),
+                                    upper = quantile(., probs = 0.975)), na.rm = T)
   
 
-# Summarize the results of the random environmental additions by calculating 
-# the mean accuracy and 95% confidence interval
+## Create a df to plot
+breeding_prediction_iterative_results_random_toplot <- breeding_prediction_iterative_results_random3 %>%
+  filter(!is.na(cor)) %>%
+  mutate(dist_method = "Random") %>%
+  rename(val_environment = environment) %>%
+  ungroup()
 
 
 
-
-## Plot
-breeding_prediction_iterative_results1 %>% 
-  filter(trait == "GrainYield") %>% 
-  ggplot(aes(x = n_train_env, y = cor)) + 
-  geom_line() + 
-  facet_wrap(~ val_environment + trait) + 
-  theme_bw()
-
+## Split the datasets and iterate in parallel
+g_breeding_iterative <- list(breeding_prediction_iterative_results1 %>% split(.$trait),
+                             breeding_prediction_iterative_results_random_toplot %>% split(.$trait)) %>%
+  pmap(~{
+    
+    # Sort environments by final prediction accuracy
+    sorted_envs <- .x %>% 
+      group_by(val_environment) %>% 
+      filter(n_train_env == max(n_train_env)) %>% 
+      ungroup() %>% 
+      select(val_environment, cor) %>% 
+      arrange(desc(cor)) %>% 
+      mutate(val_environment = factor(val_environment, levels = .$val_environment))
+    
+    ## Change the order of the environments
+    dfx <- mutate(.x, val_environment = factor(val_environment, levels = levels(sorted_envs$val_environment)))
+    dfy <- mutate(.y, val_environment = factor(val_environment, levels = levels(sorted_envs$val_environment)))
+    
+    # Plot
+    g <- dfx %>% 
+      mutate(val_environment = factor(val_environment, levels = levels(sorted_envs$val_environment))) %>%
+      ggplot(aes(x = n_train_env, y = cor, col = dist_method, fill = dist_method)) + 
+      geom_ribbon(data = dfy, aes(ymin = lower, ymax = upper), alpha = 0.25) +
+      geom_line(lwd = 1) + 
+      geom_line(data = dfy, lwd = 1) +
+      facet_wrap(~ val_environment + trait) + 
+      ylab("Prediction Accuracy") +
+      xlab("Number of Training Environments") +
+      theme_bw()
+    
+    ## Save
+    save_file <- file.path(fig_dir, str_c("realistic_cumulative_predictions_", unique(dfx$trait), ".jpg"))
+    ggsave(filename = save_file, plot = g, height = 12, width = 12, dpi = 1000)
+    
+    return(g)
+    
+  })
+    
 
 
 

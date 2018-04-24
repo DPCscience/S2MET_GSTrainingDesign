@@ -140,7 +140,7 @@ breeding_dataset <- year_list %>%
       val_df2 <- val_df1 %>%
         mutate(train_environment = opt_env) %>% 
         unnest() %>%
-        bind_rows(., mutate(val_df1[1,], dist_method = "all_env", 
+        bind_rows(., mutate(val_df1, criteria = "all_env", 
                             train_environment = map(train_environment, names)))
       
       val_df_list[[i]] <- left_join(select(val_df, -train_environment), val_df2, 
@@ -163,7 +163,7 @@ breeding_dataset_random <- breeding_dataset %>%
   map(~{
 
     # Pull out the list of all environments
-    train_envs <- filter(., dist_method == "all_env") %>% 
+    train_envs <- filter(., criteria == "all_env") %>% 
       distinct(trait, train_environment) %>% 
       group_by(trait) %>% 
       slice(1) 
