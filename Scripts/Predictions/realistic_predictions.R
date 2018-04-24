@@ -57,8 +57,7 @@ pred_env_rank_use <- pred_env_rank_random$all %>%
   filter(dist_method %in% dist_method_use,
          population == "all")
 
-# Print a message
-print("Creating the breeding dataset.")
+
 
 # Map over the years
 breeding_dataset <- year_list %>%
@@ -156,9 +155,6 @@ breeding_dataset <- year_list %>%
       
 
 
-# Print a message
-print("Creating the random breeding dataset.")
-
 ## For each validation environment, add a random order of environments
 # Number of random samples
 n_samples <- 50
@@ -193,9 +189,6 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   mutate_at(vars(environment, line_name), as.factor) %>%
   rename(env = environment)
   
-
-# Print a message
-print("Predicting using the optimal environments.")
 
 
 breeding_prediction_results <- breeding_dataset %>%
@@ -232,8 +225,6 @@ breeding_prediction_results <- breeding_dataset %>%
 ## to assess prediction accuracy
 ## 
 
-# Print a message
-print("Predicting using the list of all environments.")
 
 
 # First do this for the intentionally ordered training environments
@@ -283,8 +274,8 @@ breeding_prediction_iterative_results <- breeding_dataset_tomodel %>%
   }, mc.cores = n_core)
 
 
-# Print a message
-print("Predicting using the random environments.")
+
+
 
 
 ## Now do the same thing for the random environments

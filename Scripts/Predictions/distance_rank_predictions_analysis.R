@@ -1,7 +1,7 @@
 ## Analysis of predictions based on environmental distance
 ## 
 ## Author: Jeff Neyhart
-## Last Updated: April 11, 2018
+## Last Updated: April 23, 2018
 ## 
 ## This script will look at prediction accuracies from adding environments after
 ## ranking based on specific distance metrics
@@ -31,22 +31,6 @@ dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_meth
 alpha <- 0.05
 
 
-## Bind the elements of the LRT results list
-env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
-  bind_rows() %>%
-  select(environment:dist_method, results_out) %>%
-  unnest()
-
-## Two different tests using the LRT results
-## Either select when it is first significant ("first"), or select when it is MOST significant ("most")
-## If no points are significant, take the last point.
-env_dist_lrt_results_first <- env_dist_lrt_results %>% 
-  group_by(environment, trait, dist_method) %>% 
-  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
-  filter(is_sig) %>%
-  mutate(which_sig = which(is_sig)) %>% 
-  filter(which_sig == min(which_sig)) %>%
-  ungroup()
 
 
 ## Bind the list elements together and unnest
@@ -73,99 +57,25 @@ train_env_rank <- cumulative_pred_adj %>%
   ungroup()
 
 
-#########
 
-## The distribution of the ranks should follow a uniform distribution under the
-## null hypothesis of idependence of rank and training environment. I will use a 
-## KS test to test the observed rank distribution versus a uniform distribution
-## 
 
-train_env_rank_test <- train_env_rank %>% 
-  filter(dist_method %in% names(dist_method_replace)) %>%
-  group_by(trait, dist_method, train_envs) %>% 
-  do({data_frame(
-    mean_rank = mean(.$train_env_rank),
-    sd_rank = sd(.$train_env_rank),
-    # The less than alternative tests if the distribution is stochastically larger (higher rank)
-    # The greater than alternative tests if the distribution is stochastically less (lower rank)
-    ks_test_low = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "l")),
-    ks_test_high = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "g"))
-  )}) %>%
-  # Extract the p_value and adjust
-  group_by(trait, dist_method) %>% 
-  mutate(p_value_lt = map_dbl(ks_test_low, "p.value"), 
-         p_value_gt = map_dbl(ks_test_high, "p.value"),
-         n_test = n(),
-         p_adj_lt = p.adjust(p = p_value_lt, method = "bonf"),
-         p_adj_gt = p.adjust(p = p_value_gt, method = "bonf")) %>%
+## Bind the elements of the LRT results list
+env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
+  bind_rows() %>%
+  select(environment:dist_method, results_out) %>%
+  unnest()
+
+## Select when it is first significant ("first")
+env_dist_lrt_results_first <- env_dist_lrt_results %>% 
+  group_by(environment, trait, dist_method) %>% 
+  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
+  filter(is_sig) %>%
+  mutate(which_sig = which(is_sig)) %>% 
+  filter(which_sig == min(which_sig)) %>%
   ungroup()
 
-## Examine the significance results
-# Get the training environments with the lowest and highest rank
-train_env_rank_test_sig <- train_env_rank_test %>% 
-  select(trait:sd_rank, contains("p_adj")) %>%
-  gather(test_type, p_adj, contains("p_adj")) %>%
-  filter(p_adj <= 0.05) %>% 
-  group_by(trait, dist_method, test_type) %>% 
-  filter(mean_rank == min(mean_rank) | mean_rank == max(mean_rank))
-
-## Count the number of times a training environment is significant
-train_env_rank_test_count <- train_env_rank_test %>% 
-  select(trait:sd_rank, contains("p_adj")) %>%
-  gather(test_type, p_adj, contains("p_adj"))  %>% 
-  group_by(trait, train_envs, test_type) %>% 
-  summarize(n_times_sig = sum(p_adj <= 0.05)) %>%
-  arrange(desc(n_times_sig))
-
-## Add heritability information for comparison
-train_env_rank_test %>% 
-  select(trait, dist_method, train_envs, mean_rank) %>% 
-  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
-  group_by(trait, dist_method) %>% 
-  summarize(rank_herit_cor = cor(mean_rank, heritability))
-
-## Heritability only seems to be correlated with the D phenotypic distance metric,
-## which makes sense.
-# Plot this - actually evidence is not strong enough to suggest a trend between
-# heritability and the rank
-train_env_rank_test %>% 
-  select(trait, dist_method, train_envs, mean_rank) %>% 
-  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
-  ggplot(aes(x = mean_rank, heritability)) +
-  geom_point() + 
-  geom_smooth(method = "lm", se = F) + 
-  facet_grid(trait ~ dist_method, scales = "free_y")
 
 
-## For each prediction environment, take the mean rank of environments from the same
-## year and the mean rank of environments not from the same year
-train_env_rank_year <- train_env_rank %>%
-  filter(dist_method %in% names(dist_method_replace)) %>%
-  mutate_at(vars(environment, train_envs), funs(year = str_extract(string = ., pattern = "[0-9]{2}") %>%
-                                                  parse_date_time(orders = "y") %>% year())) %>%
-  mutate(same_year = environment_year == train_envs_year) %>% 
-  group_by(trait, dist_method, same_year, environment) %>% 
-  summarize_at(vars(train_env_rank), funs(mean, sd)) %>% 
-  mutate(overall_mean = mean(mean)) %>%
-  ungroup()
-
-## Plot
-train_env_rank_year %>% 
-  ggplot(aes(x = dist_method, y = mean, fill = same_year)) + 
-  geom_boxplot(position = "dodge") + 
-  facet_grid(~trait) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-##########
-
-
-
-
-
-
-
-### Plots of prediction accuracy.
 
 
 
@@ -180,6 +90,9 @@ cumulative_env_pred_order <- cumulative_pred_adj %>%
   select(trait, environment, accuracy) %>% 
   ungroup() %>% split(.$trait) %>% 
   map(~mutate(., environment = factor(environment, levels = environment[order(accuracy, decreasing = TRUE)])))
+
+
+
 
 
 ## Separate the original samples from the random samples
@@ -197,7 +110,8 @@ cumulative_pred_random <- cumulative_pred_adj %>%
 # Now grab the original runs
 cumulative_pred_orig <- cumulative_pred_adj %>% 
   filter(dist_method %in% names(dist_method_replace)) %>%
-  select(environment, trait, dist_method, scaled_distance, n_train_env, accuracy)
+  select(environment, trait, dist_method, scaled_distance, n_train_env, accuracy,
+         lower = ci_lower, upper = ci_upper)
 
 ## Combine
 cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
@@ -206,19 +120,11 @@ cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random
 
 
 
-## For each prediction environment, trait, and distance method, find the prediction
-## accuracy after adding all environments (i.e. the last value) and the local
-## maximum prediction accuracy (if present)
-## 
-cumulative_pred_toplot_final <- cumulative_pred_toplot %>% 
-  group_by(environment, trait, dist_method) %>% 
-  mutate(all_env_acccuracy = accuracy[n_train_env == max(n_train_env)]) %>%
-  ungroup() %>% 
-  mutate(accuracy_gt_final = accuracy > all_env_acccuracy)
+
 
 
 ## Find the local maximum and create a data.frame
-cumulative_pred_toplot_maximum <- cumulative_pred_toplot_final %>%  
+cumulative_pred_toplot_maximum <- cumulative_pred_toplot %>%  
   group_by(environment, trait, dist_method) %>% 
   filter(accuracy == max(accuracy)) %>%
   ungroup() %>%
@@ -227,22 +133,47 @@ cumulative_pred_toplot_maximum <- cumulative_pred_toplot_final %>%
 Ntrain_envs <- c(1, 5, 10)
 
 ## Find the accuray at n = 1, 5, 10 training environments
-cumulative_pred_toplot_Nenv <- cumulative_pred_toplot_final %>%  
+cumulative_pred_toplot_Nenv <- cumulative_pred_toplot %>%  
   filter(n_train_env %in% Ntrain_envs) %>%
   mutate(annotation = str_c(n_train_env, "envs"))
 
+
+
+
 ## Use the LRT results to select the accuracy when the LRT is deemed significant.
-cumulative_pred_toplot_lrt <- cumulative_pred_toplot_final %>%
-  inner_join(., env_dist_lrt_results_first, by = c("environment", "trait", "dist_method", "n_train_env" = "n_env")) %>% 
-  select(environment:all_env_acccuracy) %>% 
+## First use the random results to identify the points along the 'add-one-environment' line
+
+
+## Separate the original samples from the random samples
+cumulative_pred_toplot_lrt_random <- env_dist_lrt_results_first %>% 
+  filter(str_detect(dist_method, "sample")) %>%
+  # filter(dist_method %in% names(dist_method_replace)) %>%
+  left_join(., filter(cumulative_pred_toplot, dist_method == "Random"),
+            by = c("environment", "trait", "n_env" = "n_train_env")) %>%
+  group_by(environment, trait) %>% 
+  summarize_at(vars(n_env, scaled_distance, accuracy), mean) %>% 
+  mutate(dist_method = "Random", annotation = "lrt") %>%
+  rename(n_train_env = n_env)
+  
+# Original
+cumulative_pred_toplot_lrt_orig <- cumulative_pred_toplot %>%
+  inner_join(., env_dist_lrt_results_first, by = c("environment", "trait", "dist_method", "n_train_env" = "n_env")) %>%
+  select(environment:upper) %>% 
   mutate(annotation = "lrt")
+
+# Combine
+cumulative_pred_toplot_lrt <- bind_rows(cumulative_pred_toplot_lrt_orig, cumulative_pred_toplot_lrt_random)
+  
+
+
 
 
 ## A vector to replace the annotation names
-annotation_replace <- c("local_maximum" = "Maximum", 
-                        setNames(str_replace(string = str_c(Ntrain_envs, "envs"), pattern = "e", replacement = " E"), 
-                                 str_c(Ntrain_envs, "envs")), 
-                        "lrt" = "Likelihood Ratio Test")
+annotation_replace <- c(
+  "local_maximum" = "Maximum", 
+  setNames(str_replace(string = str_c(Ntrain_envs, "envs"), pattern = "e", replacement = " E"), 
+           str_c(Ntrain_envs, "envs")), 
+  "lrt" = "Likelihood Ratio Test")
 
 
 ## Combine the data together
@@ -250,98 +181,25 @@ cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum,
                                              cumulative_pred_toplot_Nenv,
                                              cumulative_pred_toplot_lrt) %>%
   # Calculate the difference between the annotated accuracy and the "final" accuracy
-  mutate(advantage = accuracy - all_env_acccuracy,
-         pos_advantage = advantage > 0,
-         annotation = as_replaced_factor(x = annotation, replacement = annotation_replace))
+  mutate(annotation = as_replaced_factor(x = annotation, replacement = annotation_replace),
+         dist_method = as_replaced_factor(x = dist_method, c(dist_method_replace, "Random" = "Random")))
 
 
-## Plot
-## Distribution of the number of training environments or the scaled distance (cumulative) 
-## of the local maximum
-g_local_max <- cumulative_pred_toplot_annotate %>% 
-  filter(annotation %in% c("local_maximum")) %>%
-  ggplot(aes(x = n_train_env, fill = dist_method)) +
-  # ggplot(aes(x = scaled_distance, fill = dist_method)) + 
-  # geom_density(alpha = 0.25) + 
-  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-  scale_fill_manual(values = dist_colors, guide = FALSE) +
-  xlab("Number of Training Environments to Reach Maximum") +
-  labs(title = "Training Environments to Reach Maximum Accuracy") +
-  facet_wrap(~ trait, ncol = 2) +
-  theme_bw() +
-  theme(legend.key.height = unit(2, "lines"))
-
-save_file <- file.path(fig_dir, "cumulative_pred_max_ntrain.jpg")
-ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
+# Change the distance methods to a factor
+cumulative_pred_toplot_final <- cumulative_pred_toplot %>%
+  mutate(dist_method = as_replaced_factor(x = dist_method, replacement = c(dist_method_replace, "Random" = "Random")),
+         # Remove the upper/lower for non random dist_methods
+         lower = if_else(dist_method == "Random", lower, as.numeric(NA)),
+         upper = if_else(dist_method == "Random", upper, as.numeric(NA)))
 
 
 
-# ## Distribution of local advantage
-# g_local_adv <- cumulative_pred_toplot_annotate %>% 
-#   ggplot(aes(x = advantage, fill = dist_method)) + 
-#   # geom_density(alpha = 0.25) + 
-#   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
-#   scale_fill_manual(values = dist_colors, guide = FALSE) +
-#   xlab("Prediction Accuracy Advantage") +
-#   labs(title = "Advantage of Selected Environments Over All Environments") +
-#   facet_grid(annotation ~ trait) +
-#   theme_bw() +
-#   theme(legend.key.height = unit(2, "lines"))
-
-## Distribution of local advantage
-g_local_adv <- cumulative_pred_toplot_annotate %>% 
-  ggplot(aes(x = dist_method, y = advantage, fill = annotation)) + 
-  geom_boxplot(alpha = 0.5) + 
-  # scale_fill_manual(values = dist_colors, guide = FALSE) +
-  xlab("Prediction Accuracy Advantage") +
-  labs(title = "Advantage of Selected Environments Over All Environments") +
-  facet_grid( ~ trait) +
-  theme_bw() +
-  theme(legend.key.height = unit(2, "lines"),
-        axis.text.x = element_text(angle = 45, hjust = 1))
-
-save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
-ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
-
-
-####### ANALYSIS ######
-### Fit a model to compare the effects of the different factors
-cumulative_pred_models <- cumulative_pred_toplot_annotate %>% 
-  mutate(environment = as.factor(environment)) %>% 
-  group_by(trait) %>%
-  do(fit = lm(advantage ~ environment + dist_method + annotation, data = .))
-
-# dist_method:annotation is not signficant
-
-cumulative_pred_effects <- cumulative_pred_models %>% 
-  mutate(effects = list(effects::allEffects(fit)))
-
-cumulative_pred_effects1 <- bind_cols(
-  cumulative_pred_effects, 
-  cumulative_pred_effects$effects %>% map(~map(., as.data.frame)) %>% transpose() %>% as_data_frame())
-
-## Plot
-cumulative_pred_effects1 %>% 
-  unnest(dist_method) %>% 
-  ggplot(aes(x = dist_method, y = fit, ymin = lower, ymax = upper)) +
-  geom_point() + 
-  geom_errorbar() +
-  ylab("effect") + 
-  facet_wrap(~trait) + 
-  theme_bw()
-
-cumulative_pred_effects1 %>% 
-  unnest(annotation) %>% 
-  ggplot(aes(x = annotation, y = fit, ymin = lower, ymax = upper)) +
-  geom_point() + 
-  geom_errorbar() +
-  ylab("effect") + 
-  facet_wrap(~trait) + 
-  theme_bw()
 
 
 
-  
+##### Plotting ######
+
+
 
 ## Common plot modifier
 g_mod <- list(
@@ -360,13 +218,13 @@ g_mod <- list(
   labs(title = "Cumulative Environmental Clusters")
 )
 
+
 # List over traits
 g_cumulative_pred <- setNames(traits, traits) %>%
   map(function(tr) {
     # Subset the trait
     cumulative_pred_toplot_tr <- cumulative_pred_toplot_final %>%
       filter(trait == tr) %>%
-      # mutate(environment = factor(environment, levels = levels(env_herit_rank[[tr]]$environment)))
       mutate(environment = factor(environment, levels = levels(cumulative_env_pred_order[[tr]]$environment)))
     
     cumulative_pred_toplot_annotate_tr <- cumulative_pred_toplot_annotate %>%
@@ -392,6 +250,8 @@ g_cumulative_pred <- setNames(traits, traits) %>%
     
   })
 
+
+cumumlative_blank <- list()
 
 ### Plot a single distance method over many environments
 # List over traits
@@ -452,12 +312,6 @@ g_cumulative_pred1 <- dist_method_replace %>%
 
 
 
-
-
-
-
-
-
 ## Prediction accuracy using a sliding window
 ## Bind the list elements together and unnest
 window_pred_results <- env_dist_window_predictions_out %>% 
@@ -493,9 +347,7 @@ window_pred_orig <- window_pred_adj %>%
   select(environment, trait, dist_method, scaled_distance, window_rank, accuracy)
 
 ## Combine
-window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random) %>%
-  mutate(dist_method = as_replaced_factor(dist_method, c(dist_method_replace, "Random" = "Random")),
-         window_rank = as.integer(window_rank))
+window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random)
 
 
 
@@ -505,13 +357,34 @@ window_pred_toplot_maxima <- window_pred_toplot %>%
   group_by(environment, trait, dist_method) %>% 
   mutate(local_max_accuracy = max(accuracy),
          local_max_window_rank = window_rank[accuracy == local_max_accuracy]) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(dist_method = as_replaced_factor(dist_method, c(dist_method_replace, "Random" = "Random")),
+         window_rank = as.integer(window_rank))
 
 ## Filter for the local accuracy maxima
 window_pred_toplot_maxima_filter <- window_pred_toplot_maxima %>% 
   filter(accuracy == local_max_accuracy)
   
 
+
+
+cumumlative_blank <- cumulative_pred_toplot %>% 
+  mutate(annotation = "cumulative") %>%
+  filter(dist_method != "Random") %>%
+  split(.$trait) %>%
+  map(~mutate(., environment = factor(environment, levels(cumulative_env_pred_order[[unique(.$trait)]]$environment)))) %>% 
+  map(~select(., annotation, trait, dist_method, environment) %>% 
+        distinct() %>% 
+        arrange(trait, dist_method, environment))
+
+window_blank <- window_pred_toplot %>%
+  mutate(annotation = "window") %>%
+  filter(dist_method != "Random") %>%
+  split(.$trait) %>%
+  map(~mutate(., environment = factor(environment, levels(cumulative_env_pred_order[[unique(.$trait)]]$environment)))) %>% 
+  map(~select(., annotation, trait, dist_method, environment) %>% 
+        distinct() %>% 
+        arrange(trait, dist_method, environment))
 
 
 ## Distribution of the number of training environments or the scaled distance (cumulative) 
@@ -665,7 +538,7 @@ g_window_pred1 <- dist_method_replace %>%
 
 
 
-### Heritability across different ranks of environments
+##### Heritability across different ranks of environments ###### 
 
 ## Cumulative
 # Bind rows and unnest
@@ -833,7 +706,11 @@ g_cumulative_herit1 <- dist_method_replace %>%
 
 
 
-## Prediction accuracy using a sliding window
+
+
+##### Heritability using a sliding window #####
+
+
 ## Bind the list elements together and unnest
 window_heritability <- env_dist_window_heritability_out %>%
   bind_rows() %>% 
@@ -994,6 +871,293 @@ g_window_herit1 <- dist_method_replace %>%
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####### Statistical Testing #########
+
+## For each prediction environment, trait, and distance method, find the prediction
+## accuracy after adding all environments (i.e. the last value) and the local
+## maximum prediction accuracy (if present)
+## 
+## This is to be used for analysis only
+## 
+
+cumulative_pred_analysis_terminal <- cumulative_pred_toplot %>% 
+  group_by(environment, trait) %>% 
+  filter(n_train_env == max(n_train_env)) %>% 
+  slice(1) %>%
+  ungroup() %>%
+  select(-dist_method)
+
+# Now subset the dataframe for use as a base
+cumulative_pred_analysis_final <- cumulative_pred_toplot %>% 
+  select(-scaled_distance, -lower:-upper) %>% 
+  left_join(., cumulative_pred_toplot_terminal, by = c("environment", "trait")) %>%
+  rename(n_train_env = n_train_env.x, accuracy = accuracy.x, max_train_env = n_train_env.y, 
+         terminal_accuracy = accuracy.y, terminal_lower = lower, terminal_upper = upper)
+
+
+
+
+
+## Combine the data together
+cumulative_pred_analysis_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
+                                             cumulative_pred_toplot_Nenv,
+                                             cumulative_pred_toplot_lrt) %>%
+  # Calculate the difference between the annotated accuracy and the "final" accuracy
+  mutate(advantage = accuracy - terminal_accuracy,
+         pos_advantage = advantage > 0,
+         annotation = as_replaced_factor(x = annotation, replacement = annotation_replace),
+         dist_method = as_replaced_factor(x = dist_method, c(dist_method_replace, "Random" = "Random")))
+
+
+
+
+## Plot
+## Distribution of the number of training environments or the scaled distance (cumulative) 
+## of the local maximum
+g_local_max <- cumulative_pred_toplot_annotate %>% 
+  filter(annotation %in% c("Maximum")) %>%
+  ggplot(aes(x = n_train_env, fill = dist_method)) +
+  # ggplot(aes(x = scaled_distance, fill = dist_method)) + 
+  # geom_density(alpha = 0.25) + 
+  geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+  scale_fill_manual(values = dist_colors, guide = FALSE) +
+  xlab("Number of Training Environments to Reach Maximum") +
+  labs(title = "Training Environments to Reach Maximum Accuracy") +
+  facet_wrap(~ trait, ncol = 2) +
+  theme_bw() +
+  theme(legend.key.height = unit(2, "lines"))
+
+save_file <- file.path(fig_dir, "cumulative_pred_max_ntrain.jpg")
+ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 1000)
+
+
+
+# ## Distribution of local advantage
+# g_local_adv <- cumulative_pred_toplot_annotate %>% 
+#   ggplot(aes(x = advantage, fill = dist_method)) + 
+#   # geom_density(alpha = 0.25) + 
+#   geom_density_ridges(aes(y = dist_method), alpha = 0.25) +
+#   scale_fill_manual(values = dist_colors, guide = FALSE) +
+#   xlab("Prediction Accuracy Advantage") +
+#   labs(title = "Advantage of Selected Environments Over All Environments") +
+#   facet_grid(annotation ~ trait) +
+#   theme_bw() +
+#   theme(legend.key.height = unit(2, "lines"))
+
+## Distribution of local advantage
+g_local_adv <- cumulative_pred_toplot_annotate %>% 
+  ggplot(aes(x = dist_method, y = advantage, fill = annotation)) + 
+  geom_boxplot(alpha = 0.5) + 
+  # scale_fill_manual(values = dist_colors, guide = FALSE) +
+  ylab("Accuracy Advantage Over Using All Data") +
+  labs(title = "Advantage of Selected Environments Over All Environments") +
+  facet_grid( ~ trait) +
+  theme_bw() +
+  theme(legend.key.height = unit(2, "lines"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+save_file <- file.path(fig_dir, "cumulative_pred_max_advantage.jpg")
+ggsave(filename = save_file, plot = g_local_adv, height = 6, width = 8, dpi = 1000)
+
+
+
+
+
+
+
+
+## Determine whether the local maximum, or the optimal accuracy based on subsets 
+## of environments is significantly different from the terminal accuracy
+cumulative_pred_significant <- cumulative_pred_toplot_annotate %>% 
+  mutate(sig_better = accuracy > terminal_upper,
+         sig_worse = accuracy < terminal_lower) %>%
+  group_by(trait, dist_method, annotation) %>% 
+  summarize_at(vars(starts_with("sig")), mean)
+
+
+# Calculate the proportion of significant accuracies across all observations
+cumulative_pred_toplot_final %>%   
+  mutate(sig_better = accuracy > terminal_upper,
+         sig_worse = accuracy < terminal_lower) %>% 
+  group_by(trait, dist_method) %>% 
+  summarize_at(vars(starts_with("sig")), mean)
+
+
+
+## For the prediction accuracy determined using the sliding window, fit a linear
+## model for each of the responses. Then determine the number of coefficients
+## that are significantly greater than or less than zero
+window_pred_toplot_fit <- window_pred_toplot_maxima %>% 
+  filter(dist_method != "Random") %>%
+  group_by(environment, trait, dist_method) %>% 
+  do(fit = lm(accuracy ~ scaled_distance, data = .)) %>%
+  ungroup() %>% 
+  mutate(coef = map(fit, ~broom::tidy(.)),
+         df = map_dbl(fit, df.residual))
+
+# Extract the coefficients and perform hypothesis tests
+window_pred_toplot_fit_coef <- window_pred_toplot_fit %>% 
+  unnest(coef) %>% 
+  filter(term != "(Intercept)") %>%
+  mutate(p_value_gt0 = pt(q = statistic, df = df, lower.tail = FALSE), 
+         p_value_lt0 = pt(q = statistic, df = df))
+
+## Determine the proportion of p_values that are less than 0, greater than 0
+window_pred_toplot_fit_sig <- window_pred_toplot_fit_coef %>% 
+  mutate_at(vars(starts_with("p_value")), ~. <= alpha) %>%
+  group_by(trait, dist_method) %>%
+  summarize_at(vars(starts_with("p_value")), funs(mean))
+
+# Plot
+window_pred_toplot_fit_sig %>% 
+  gather(test, prop_sig, starts_with("p_value")) %>% 
+  ggplot(aes(x = dist_method, y = prop_sig, fill = test)) + 
+  geom_col(position = "dodge") + 
+  facet_grid(~trait)
+
+
+
+
+
+
+
+#########
+
+## The distribution of the ranks should follow a uniform distribution under the
+## null hypothesis of idependence of rank and training environment. I will use a 
+## KS test to test the observed rank distribution versus a uniform distribution
+## 
+
+train_env_rank_test <- train_env_rank %>% 
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  group_by(trait, dist_method, train_envs) %>% 
+  do({data_frame(
+    mean_rank = mean(.$train_env_rank),
+    sd_rank = sd(.$train_env_rank),
+    # The less than alternative tests if the distribution is stochastically larger (higher rank)
+    # The greater than alternative tests if the distribution is stochastically less (lower rank)
+    ks_test_low = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "l")),
+    ks_test_high = list(ks.test(x = .$train_env_rank, y = "punif", min = 1, max = nrow(.), alternative = "g"))
+  )}) %>%
+  # Extract the p_value and adjust
+  group_by(trait, dist_method) %>% 
+  mutate(p_value_lt = map_dbl(ks_test_low, "p.value"), 
+         p_value_gt = map_dbl(ks_test_high, "p.value"),
+         n_test = n(),
+         p_adj_lt = p.adjust(p = p_value_lt, method = "bonf"),
+         p_adj_gt = p.adjust(p = p_value_gt, method = "bonf")) %>%
+  ungroup()
+
+## Examine the significance results
+# Get the training environments with the lowest and highest rank
+train_env_rank_test_sig <- train_env_rank_test %>% 
+  select(trait:sd_rank, contains("p_adj")) %>%
+  gather(test_type, p_adj, contains("p_adj")) %>%
+  filter(p_adj <= 0.05) %>% 
+  group_by(trait, dist_method, test_type) %>% 
+  filter(mean_rank == min(mean_rank) | mean_rank == max(mean_rank))
+
+## Count the number of times a training environment is significant
+train_env_rank_test_count <- train_env_rank_test %>% 
+  select(trait:sd_rank, contains("p_adj")) %>%
+  gather(test_type, p_adj, contains("p_adj"))  %>% 
+  group_by(trait, train_envs, test_type) %>% 
+  summarize(n_times_sig = sum(p_adj <= 0.05)) %>%
+  arrange(desc(n_times_sig))
+
+## Add heritability information for comparison
+train_env_rank_test %>% 
+  select(trait, dist_method, train_envs, mean_rank) %>% 
+  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
+  group_by(trait, dist_method) %>% 
+  summarize(rank_herit_cor = cor(mean_rank, heritability))
+
+## Heritability only seems to be correlated with the D phenotypic distance metric,
+## which makes sense.
+# Plot this - actually evidence is not strong enough to suggest a trend between
+# heritability and the rank
+train_env_rank_test %>% 
+  select(trait, dist_method, train_envs, mean_rank) %>% 
+  left_join(., bind_rows(env_herit_rank), by = c("trait", "train_envs" = "environment")) %>% 
+  ggplot(aes(x = mean_rank, heritability)) +
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) + 
+  facet_grid(trait ~ dist_method, scales = "free_y")
+
+
+## For each prediction environment, take the mean rank of environments from the same
+## year and the mean rank of environments not from the same year
+train_env_rank_year <- train_env_rank %>%
+  filter(dist_method %in% names(dist_method_replace)) %>%
+  mutate_at(vars(environment, train_envs), funs(year = str_extract(string = ., pattern = "[0-9]{2}") %>%
+                                                  parse_date_time(orders = "y") %>% year())) %>%
+  mutate(same_year = environment_year == train_envs_year) %>% 
+  group_by(trait, dist_method, same_year, environment) %>% 
+  summarize_at(vars(train_env_rank), funs(mean, sd)) %>% 
+  mutate(overall_mean = mean(mean)) %>%
+  ungroup()
+
+## Plot
+train_env_rank_year %>% 
+  ggplot(aes(x = dist_method, y = mean, fill = same_year)) + 
+  geom_boxplot(position = "dodge") + 
+  facet_grid(~trait) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+
+### Fit a model to compare the effects of the different factors
+cumulative_pred_models <- cumulative_pred_toplot_annotate %>% 
+  mutate(environment = as.factor(environment)) %>% 
+  group_by(trait) %>%
+  do(fit = lm(advantage ~ environment + dist_method + annotation, data = .))
+
+# dist_method:annotation is not signficant
+
+cumulative_pred_effects <- cumulative_pred_models %>% 
+  mutate(effects = list(effects::allEffects(fit)))
+
+cumulative_pred_effects1 <- bind_cols(
+  cumulative_pred_effects, 
+  cumulative_pred_effects$effects %>% map(~map(., as.data.frame)) %>% transpose() %>% as_data_frame())
+
+## Plot
+cumulative_pred_effects1 %>% 
+  unnest(dist_method) %>% 
+  ggplot(aes(x = dist_method, y = fit, ymin = lower, ymax = upper)) +
+  geom_point() + 
+  geom_errorbar() +
+  ylab("effect") + 
+  facet_wrap(~trait) + 
+  theme_bw()
+
+cumulative_pred_effects1 %>% 
+  unnest(annotation) %>% 
+  ggplot(aes(x = annotation, y = fit, ymin = lower, ymax = upper)) +
+  geom_point() + 
+  geom_errorbar() +
+  ylab("effect") + 
+  facet_wrap(~trait) + 
+  theme_bw()
 
 
 
