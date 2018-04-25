@@ -231,7 +231,7 @@ breeding_prediction_results <- breeding_dataset %>%
 # We need to only use the "all_env" rows
 breeding_dataset_tomodel <- breeding_dataset %>%
   bind_rows() %>%
-  filter(dist_method == "all_env") %>%
+  filter(criteria == "all_env") %>%
   # Add cores
   assign_cores(n_core) %>%
   split(.$core)
