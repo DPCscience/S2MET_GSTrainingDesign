@@ -282,11 +282,13 @@ breeding_prediction_iterative_results <- breeding_dataset_tomodel %>%
 breeding_prediction_iterative_results_random <- breeding_dataset_random %>% 
   map(~{ # Perform the operation for each year individually
 
-    assign_cores(., n_core) %>%
-      split(.$core) %>%
-      # Parallelize
-      mclapply(X = ., FUN = function(core_df) {
-        
+    #assign_cores(., n_core) %>%
+    #  split(.$core) %>%
+    #  # Parallelize
+    #  mclapply(X = ., FUN = function(core_df) {
+     
+    core_df <- .
+   
         # Iterate over the core_df rows
         results_out <- core_df %>%
           select(trait, train_environment) %>%
@@ -318,10 +320,9 @@ breeding_prediction_iterative_results_random <- breeding_dataset_random %>%
         
         ## Add the results back to the core_df
         core_df %>% 
-          mutate(results_out = results_out) %>% 
-          select(-core)
+          mutate(results_out = results_out) %>% # select(-core)
         
-      }, mc.cores = n_core) %>% bind_rows()
+      #}, mc.cores = n_core) %>% bind_rows()
     
   })
             
