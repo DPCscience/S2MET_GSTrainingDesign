@@ -320,7 +320,7 @@ breeding_prediction_iterative_results_random <- breeding_dataset_random %>%
         
         ## Add the results back to the core_df
         core_df %>% 
-          mutate(results_out = results_out) %>% # select(-core)
+          mutate(results_out = results_out) # %>% select(-core)
         
       #}, mc.cores = n_core) %>% bind_rows()
     

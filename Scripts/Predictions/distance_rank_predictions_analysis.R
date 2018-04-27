@@ -905,9 +905,36 @@ cumulative_pred_analysis_terminal <- cumulative_pred_toplot %>%
 # Now subset the dataframe for use as a base
 cumulative_pred_analysis_final <- cumulative_pred_toplot %>% 
   select(-scaled_distance, -lower:-upper) %>% 
-  left_join(., cumulative_pred_toplot_terminal, by = c("environment", "trait")) %>%
+  left_join(., cumulative_pred_analysis_terminal, by = c("environment", "trait")) %>%
   rename(n_train_env = n_train_env.x, accuracy = accuracy.x, max_train_env = n_train_env.y, 
-         terminal_accuracy = accuracy.y, terminal_lower = lower, terminal_upper = upper)
+         terminal_accuracy = accuracy.y, terminal_lower = lower, terminal_upper = upper) %>%
+  mutate(advantage = accuracy - terminal_accuracy)
+
+
+## For each n_train_env, plot the average advantage across all environments using a
+## boxplot
+g_advantage <- cumulative_pred_analysis_final %>% 
+  ggplot(aes(x = n_train_env, y = advantage, group = n_train_env)) +
+  geom_hline(yintercept = 0) + 
+  geom_boxplot() + 
+  facet_grid(trait ~ dist_method) +
+  theme_bw()
+
+## Try summarizing the mean and quantile
+cumulative_pred_analysis_summary <- cumulative_pred_analysis_final %>% 
+  group_by(trait, dist_method, n_train_env) %>% 
+  summarize_at(vars(advantage), funs(mean = mean(.), lower = quantile(., probs = 0.025), 
+                                     upper = quantile(., probs = 0.975)))
+
+## Plot the confidence interval
+cumulative_pred_analysis_summary %>%
+  ggplot(aes(x = n_train_env, y = mean, ymin = lower, ymax = upper)) +
+  geom_hline(yintercept = 0) + 
+  geom_line() + 
+  geom_ribbon(alpha = 0.5) + 
+  facet_grid(trait ~ dist_method) +
+  theme_bw()
+
 
 
 
