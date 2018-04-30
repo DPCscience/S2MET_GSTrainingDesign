@@ -335,7 +335,8 @@ window_pred_random <- window_pred_adj %>%
   filter(str_detect(dist_method, "sample")) %>%
   group_by(environment, trait, window_rank) %>% 
   summarize_at(vars(accuracy, scaled_distance), 
-               funs(mean = mean(.), lower = quantile(., probs = 0.025), upper = quantile(., probs = 0.975))) %>%
+               funs(mean = mean(.), lower = quantile(., probs = 0.025), 
+                    upper = quantile(., probs = 0.975))) %>%
   ungroup() %>%
   select(environment:window_rank, accuracy = accuracy_mean, scaled_distance = scaled_distance_mean,
          lower = accuracy_lower, upper = accuracy_upper) %>%
@@ -344,9 +345,14 @@ window_pred_random <- window_pred_adj %>%
 # Now grab the original runs
 window_pred_orig <- window_pred_adj %>% 
   filter(dist_method %in% names(dist_method_replace)) %>%
-  select(environment, trait, dist_method, scaled_distance, window_rank, accuracy)
+  select(environment, trait, dist_method, scaled_distance, window_rank, accuracy,
+         lower = ci_lower, upper = ci_upper)
 
 ## Combine
+## Remember that the confidence interval for the non-random distance methods
+## are from the bootstrapping of the correlation
+## The confidence interval for the random distance methods is calculated using
+## the accuracy for each random sample
 window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random)
 
 
@@ -910,6 +916,20 @@ cumulative_pred_analysis_final <- cumulative_pred_toplot %>%
          terminal_accuracy = accuracy.y, terminal_lower = lower, terminal_upper = upper) %>%
   mutate(advantage = accuracy - terminal_accuracy)
 
+## Calculate the average advantage for each distance method, then compare
+## with random
+cumulative_pred_analysis_final_summ <- cumulative_pred_analysis_final %>% 
+  group_by(trait, dist_method, n_train_env) %>% 
+  summarize_at(vars(advantage), funs(mean, adv_lower = quantile(., probs = 0.025), 
+                                     adv_upper = quantile(., probs = 0.975))) %>%
+  ungroup()
+
+cumulative_pred_analysis_final_summ1 <- left_join(
+  filter(cumulative_pred_analysis_final_summ, dist_method != "Random"),
+  select(filter(cumulative_pred_analysis_final_summ, dist_method == "Random"),
+         trait, n_train_env, random_mean = mean, random_adv_lower = adv_lower,
+         random_adv_upper = adv_upper)
+)
 
 ## For each n_train_env, plot the average advantage across all environments using a
 ## boxplot
@@ -920,35 +940,86 @@ g_advantage <- cumulative_pred_analysis_final %>%
   facet_grid(trait ~ dist_method) +
   theme_bw()
 
-## Try summarizing the mean and quantile
-cumulative_pred_analysis_summary <- cumulative_pred_analysis_final %>% 
-  group_by(trait, dist_method, n_train_env) %>% 
-  summarize_at(vars(advantage), funs(mean = mean(.), lower = quantile(., probs = 0.025), 
-                                     upper = quantile(., probs = 0.975)))
-
-## Plot the confidence interval
-cumulative_pred_analysis_summary %>%
-  ggplot(aes(x = n_train_env, y = mean, ymin = lower, ymax = upper)) +
-  geom_hline(yintercept = 0) + 
-  geom_line() + 
-  geom_ribbon(alpha = 0.5) + 
+## Plot the mean advantage for each distance method, with a ribbon to illustrate
+## the confidence interval of the random
+g_mean_advantage <- cumulative_pred_analysis_final_summ1 %>% 
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
+  ggplot(aes(x = n_train_env, y = mean, col = dist_method, fill = dist_method)) + 
+  geom_ribbon(aes(ymin = random_adv_lower, ymax = random_adv_upper,
+                  color = "Random", fill = "Random"), alpha = 0.5) + 
+  geom_line(aes(y = random_mean, color = "Random"), lwd = 1) +
+  # Above I assign the color to Random to induce the designated Random color in dist_colors
+  geom_line(lwd = 1) + 
+  scale_fill_manual(values = dist_colors) + 
+  scale_color_manual(values = dist_colors) + 
+  ylab("Prediction Advantage Over Using All Data") +
+  xlab("Number of Training Environments") + 
   facet_grid(trait ~ dist_method) +
-  theme_bw()
+  theme_bw() +
+  theme(legend.key.height = unit(x = 2, units = "lines"))
+
+## Save
+ggsave(filename = "cumulative_mean_advantage.jpg", plot = g_mean_advantage,
+       path = fig_dir, height = 6, width = 8, dpi = 1000)
+
+
+
+
+## Add the terminal accuracies to the window results, too
+window_pred_analysis_final <- window_pred_toplot %>%
+  select(-scaled_distance, -lower:-upper) %>%
+  left_join(., cumulative_pred_analysis_terminal, by = c("environment", "trait")) %>%
+  rename(accuracy = accuracy.x, max_train_env = n_train_env, terminal_accuracy = accuracy.y, 
+         terminal_lower = lower, terminal_upper = upper) %>%
+  mutate(advantage = accuracy - terminal_accuracy)
+
+## Calculate the average advantage for each distance method, then compare
+## with random
+window_pred_analysis_final_summ <- window_pred_analysis_final %>% 
+  group_by(trait, dist_method, window_rank) %>% 
+  summarize_at(vars(advantage), funs(mean, adv_lower = quantile(., probs = 0.025), 
+                                     adv_upper = quantile(., probs = 0.975))) %>%
+  ungroup()
+
+window_pred_analysis_final_summ1 <- left_join(
+  filter(window_pred_analysis_final_summ, dist_method != "Random"),
+  select(filter(window_pred_analysis_final_summ, dist_method == "Random"),
+         trait, window_rank, random_mean = mean, random_adv_lower = adv_lower,
+         random_adv_upper = adv_upper)
+)
+
+
+
+## Plot the mean advantage for each distance method, with a ribbon to illustrate
+## the confidence interval of the random
+g_mean_advantage_window <- window_pred_analysis_final_summ1 %>% 
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
+  ggplot(aes(x = window_rank, y = mean, col = dist_method, fill = dist_method)) + 
+  geom_ribbon(aes(ymin = random_adv_lower, ymax = random_adv_upper,
+                  color = "Random", fill = "Random"), alpha = 0.5) + 
+  geom_line(aes(y = random_mean, color = "Random"), lwd = 1) +
+  # Above I assign the color to Random to induce the designated Random color in dist_colors
+  geom_line(lwd = 1) + 
+  scale_fill_manual(values = dist_colors) + 
+  scale_color_manual(values = dist_colors) + 
+  ylab("Prediction Advantage Over Using All Data") +
+  xlab("Distance Rank of Sliding Window") + 
+  facet_grid(trait ~ dist_method) +
+  theme_bw() +
+  theme(legend.key.height = unit(x = 2, units = "lines"))
+
+## Save
+ggsave(filename = "window_mean_advantage.jpg", plot = g_mean_advantage_window,
+       path = fig_dir, height = 6, width = 8, dpi = 1000)
 
 
 
 
 
 
-## Combine the data together
-cumulative_pred_analysis_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
-                                             cumulative_pred_toplot_Nenv,
-                                             cumulative_pred_toplot_lrt) %>%
-  # Calculate the difference between the annotated accuracy and the "final" accuracy
-  mutate(advantage = accuracy - terminal_accuracy,
-         pos_advantage = advantage > 0,
-         annotation = as_replaced_factor(x = annotation, replacement = annotation_replace),
-         dist_method = as_replaced_factor(x = dist_method, c(dist_method_replace, "Random" = "Random")))
+
+
+
 
 
 

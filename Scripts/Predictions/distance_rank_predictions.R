@@ -158,7 +158,7 @@ pred_env_dist_rank_split <- pred_env_dist_rank %>%
 ### 
 
 # Number of environments in the sliding window
-window_size <- 5
+window_size <- 1
 
 
 # Run over multiple cores
