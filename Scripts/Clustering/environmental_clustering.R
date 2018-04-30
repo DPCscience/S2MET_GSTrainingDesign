@@ -113,6 +113,39 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
     dist1 })
 
 
+# ## Distance based on SREG
+# 
+# ## Iterate over the pairs of environments
+# # Fit the SREG model, then calculate the residual sum of squares
+# env_pair_list <- combn(x = sort(as.character(unique(pheno$environment))), m = 2, function(env_pair) { 
+#   
+#   # Subset the phenotype data
+#   pheno_sub <- filter(pheno, environment %in% env_pair)
+#   
+#   # Check the dataset balance
+#   pheno_check <- pheno_sub %>%
+#     group_by(line_name) %>%
+#     summarize(obs = n())
+#   
+#   ## Check that at least two genotypes are evaluated in both environments
+#   if (sum(pheno_check$obs == 2) >= 2) {
+# 
+#     fit <- sreg(formula = value ~ line_name + environment + line_name:environment, 
+#                 data = subset(pheno, environment %in% env_pair), gen.col = "line_name", 
+#                 env.col = "environment")
+#     rss <- sum(fit$effects$residual^2)
+#     mse <- mean(fit$effects$residual^2)
+#     
+#   } else {
+#     rss <- mse <- NA
+#   
+#   }
+#   
+#   data.frame(env1 = env_pair[1], env2 = env_pair[2], rss = rss, mse = mse, row.names = NULL, 
+#              stringsAsFactors = FALSE)
+#   
+# }, simplify = FALSE)
+
 
 ## PCA of GxE BLUPs
 

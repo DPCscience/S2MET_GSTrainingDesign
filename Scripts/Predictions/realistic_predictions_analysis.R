@@ -19,21 +19,8 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   filter(line_name %in% vp_geno)
 
 
-# # Load the results
-# load(file.path(result_dir, "realistic_breeding_predictions.RData"))
-# # Extract the useful results
-# breeding_prediction_iterative_results_use <- breeding_prediction_iterative_results
-# 
-# 
-# load(file.path(result_dir, "realistic_breeding_predictions_useable.RData"))
-# ## Consolidate the useful results
-# save_file <- file.path(result_dir, "realistic_breeding_predictions_useable.RData")
-# save("breeding_dataset", "breeding_dataset_random", "breeding_prediction_iterative_results_use", 
-#      "breeding_prediction_iterative_results_random", "breeding_prediction_results",
-#      file = save_file)
-
 # Load the true results
-load(file.path(result_dir, "realistic_breeding_predictions_useable.RData"))
+load(file.path(result_dir, "realistic_breeding_predictions.RData"))
 
 
 ## Create a character vector to replace the criteria for environmental selection
