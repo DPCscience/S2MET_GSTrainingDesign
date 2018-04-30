@@ -158,76 +158,84 @@ pred_env_dist_rank_split <- pred_env_dist_rank %>%
 ### 
 
 # Number of environments in the sliding window
-window_size <- 1
+window_size_list <- c(1, 5, 10)
 
 
 # Run over multiple cores
-env_dist_window_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
-
-  ## Create an empty results list
-  results_out <- vector("list", nrow(core_df))
-
-  # Iterate over the rows in the core_df
-  for (i in seq_along(results_out)) {
-
-    ## Given an ordered list of environments sorted by distance to the prediction
-    ## environment, implement a function that calculates a cumulative mean distance
-    ## and then use the information from those environments to run predictions
-    pred_env <- core_df$environment[i]
-    tr <- core_df$trait[i]
-    dist_met <- core_df$dist_method[i]
-
-    # Subset the trainin environments for the trait
-    tr_train_env <- train_envs_traits %>% filter(trait == tr) %>% pull(environment)
-
-    # Subset the prediction environment data from the BLUEs
-    pred_env_data <- S2_MET_BLUEs_use %>%
-      filter(environment == pred_env, trait == tr, line_name %in% vp_geno)
-
-    # Remove the environments not in the training environments for that trait
-    sorted_train_envs <- core_df$env_rank[[i]] %>% unlist() %>% .[names(.) %in% tr_train_env]
-
-    # Create a list of length (n - k + 1) of the training environments in the sliding
-    # window
-    n <- length(sorted_train_envs) - window_size
-
-    # Create the list
-    train_envs_accumulate <- seq(0, n) %>%
-      map(~. + seq(window_size)) %>%
-      map(~sorted_train_envs[.]) %>%
-      map(~list(train_envs = names(.), mean_dist = mean(.)))
-
-
-    # Map over these environments and gather training data
-    train_envs_data <- train_envs_accumulate %>%
-      map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
-
-
-    # Map over the data and predict
-    predictions_out <- train_envs_data %>%
-      map(~rename(., env = environment)) %>%
-      map(~gblup(K = K, train = ., test = pred_env_data, bootreps = 100))
-
-    # Return the bootstrap data.frame results
-    predictions_boot <- predictions_out %>%
-      map_df("boot") %>%
-      rename(accuracy = cor)
-
-    # Return a data_frame with the training environments, cumumative mean distance,
-    # and the prediction accuracy results
-    results_out[[i]] <- bind_cols(
-      data_frame(train_envs = map(train_envs_accumulate, "train_envs"),
-                 distance = map_dbl(train_envs_accumulate, "mean_dist")),
-      predictions_boot)
-
-  } # Close the for loop
-
-  # Add the results list to the original core DF
-  core_df %>%
-    select(-env_rank, -core) %>%
-    mutate(results_out = results_out)
-
-}, mc.cores = n_core)
+# Map over the list of window sizes
+env_dist_window_predictions_out <- window_size_list %>%
+  map(~{
+    
+    window_size <- .
+    
+    mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
+    
+      ## Create an empty results list
+      results_out <- vector("list", nrow(core_df))
+    
+      # Iterate over the rows in the core_df
+      for (i in seq_along(results_out)) {
+    
+        ## Given an ordered list of environments sorted by distance to the prediction
+        ## environment, implement a function that calculates a cumulative mean distance
+        ## and then use the information from those environments to run predictions
+        pred_env <- core_df$environment[i]
+        tr <- core_df$trait[i]
+        dist_met <- core_df$dist_method[i]
+    
+        # Subset the trainin environments for the trait
+        tr_train_env <- train_envs_traits %>% filter(trait == tr) %>% pull(environment)
+    
+        # Subset the prediction environment data from the BLUEs
+        pred_env_data <- S2_MET_BLUEs_use %>%
+          filter(environment == pred_env, trait == tr, line_name %in% vp_geno)
+    
+        # Remove the environments not in the training environments for that trait
+        sorted_train_envs <- core_df$env_rank[[i]] %>% unlist() %>% .[names(.) %in% tr_train_env]
+    
+        # Create a list of length (n - k + 1) of the training environments in the sliding
+        # window
+        n <- length(sorted_train_envs) - window_size
+    
+        # Create the list
+        train_envs_accumulate <- seq(0, n) %>%
+          map(~. + seq(window_size)) %>%
+          map(~sorted_train_envs[.]) %>%
+          map(~list(train_envs = names(.), mean_dist = mean(.)))
+    
+    
+        # Map over these environments and gather training data
+        train_envs_data <- train_envs_accumulate %>%
+          map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
+    
+    
+        # Map over the data and predict
+        predictions_out <- train_envs_data %>%
+          map(~rename(., env = environment)) %>%
+          map(~gblup(K = K, train = ., test = pred_env_data, bootreps = 100))
+    
+        # Return the bootstrap data.frame results
+        predictions_boot <- predictions_out %>%
+          map_df("boot") %>%
+          rename(accuracy = cor)
+    
+        # Return a data_frame with the training environments, cumumative mean distance,
+        # and the prediction accuracy results
+        results_out[[i]] <- bind_cols(
+          data_frame(train_envs = map(train_envs_accumulate, "train_envs"),
+                     distance = map_dbl(train_envs_accumulate, "mean_dist")),
+          predictions_boot)
+    
+      } # Close the for loop
+    
+      # Add the results list to the original core DF
+      core_df %>%
+        select(-env_rank, -core) %>%
+        mutate(results_out = results_out)
+    
+    }, mc.cores = n_core)
+      
+  })
 
 
 
