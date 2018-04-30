@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #### #PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
-#PBS -l walltime=08:00:00,mem=24gb,nodes=1:ppn=16
+#PBS -l walltime=12:00:00,mem=24gb,nodes=1:ppn=16
 #### #PBS -N S2_MET_environmental_distance_pred
 #PBS -N S2_MET_environmental_distance_realistic
 #### #PBS -N S2_MET_environmental_distance_pred_window
