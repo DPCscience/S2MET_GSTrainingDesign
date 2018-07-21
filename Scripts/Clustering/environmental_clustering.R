@@ -23,8 +23,8 @@ source(file.path(repo_dir, "source.R"))
 ## 
 ## 1. Great Circle Distance using lat/long
 ## 2. The environment distance metric (as described in Bernardo2010)
-## 3. Factor analytic or PCA of GxE term
-## 4. 1 year environmental covariables
+## 3. Factor analytic or PCA of GxE term ## Removed
+## 4. 1 year environmental covariables ## Removed
 ## 5. 10 year environmental covariables
 ## 
 
@@ -70,7 +70,10 @@ great_circle_dist_list <- rerun(length(traits), great_circle_dist) %>% set_names
 
 
 
+
 # ## Genetic correlation of the TP or all lines
+# ## This is deprecated
+# 
 # # Load the environmental genetic correlation matrices
 # load(file.path(result_dir, "environmental_genetic_correlations.RData"))
 # 
@@ -147,80 +150,81 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
 # }, simplify = FALSE)
 
 
-## PCA of GxE BLUPs
-
-# Fit a new model with compound symmetry and get the GxE BLUPs
-S2_MET_BLUPs_ge_all <- S2_MET_BLUEs %>%
-  split(.$trait) %>%
-  map(function(df) {
-
-    # Create an object for the data.frame
-    ## Center and scale the data
-    df <- mutate(df, value = scale(value))
-
-    # Extract the standard errors
-    wts <- df$std_error^2
-
-    # lmer control
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
-                                calc.derivs = FALSE)
-
-    # Fit the model
-    form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
-    fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
-
-    # Extract the model.frame
-    mf <- model.frame(fit)
-
-    # Extract the BLUPs of each genotype in each environment
-    blups <- ranef(fit)$`line_name:environment` %>%
-      rownames_to_column("term") %>%
-      separate(term, c("line_name", "environment"), sep = ":") %>%
-      rename(value = "(Intercept)")
-
-    # Extract the variance components
-    var_comp <- as.data.frame(VarCorr(fit))
-
-    # Return a data.frame
-    data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
-
-
-# Fit a new model with compound symmetry and get the GxE BLUPs
-# Use only the TP data
-S2_MET_BLUPs_ge_tp <- S2_MET_BLUEs %>%
-  filter(line_name %in% tp_geno) %>%
-  split(.$trait) %>%
-  map(function(df) {
-    
-    # Create an object for the data.frame
-    ## Center and scale the data
-    df <- mutate(df, value = scale(value))
-    
-    # Extract the standard errors
-    wts <- df$std_error^2
-    
-    # lmer control
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
-                                calc.derivs = FALSE)
-    
-    # Fit the model
-    form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
-    fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
-    
-    # Extract the model.frame
-    mf <- model.frame(fit)
-    
-    # Extract the BLUPs of each genotype in each environment
-    blups <- ranef(fit)$`line_name:environment` %>%
-      rownames_to_column("term") %>%
-      separate(term, c("line_name", "environment"), sep = ":") %>%
-      rename(value = "(Intercept)")
-    
-    # Extract the variance components
-    var_comp <- as.data.frame(VarCorr(fit))
-    
-    # Return a data.frame
-    data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
+# ## PCA of GxE BLUPs
+# ## Deprecated
+# 
+# # Fit a new model with compound symmetry and get the GxE BLUPs
+# S2_MET_BLUPs_ge_all <- S2_MET_BLUEs %>%
+#   split(.$trait) %>%
+#   map(function(df) {
+# 
+#     # Create an object for the data.frame
+#     ## Center and scale the data
+#     df <- mutate(df, value = scale(value))
+# 
+#     # Extract the standard errors
+#     wts <- df$std_error^2
+# 
+#     # lmer control
+#     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+#                                 calc.derivs = FALSE)
+# 
+#     # Fit the model
+#     form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
+#     fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
+# 
+#     # Extract the model.frame
+#     mf <- model.frame(fit)
+# 
+#     # Extract the BLUPs of each genotype in each environment
+#     blups <- ranef(fit)$`line_name:environment` %>%
+#       rownames_to_column("term") %>%
+#       separate(term, c("line_name", "environment"), sep = ":") %>%
+#       rename(value = "(Intercept)")
+# 
+#     # Extract the variance components
+#     var_comp <- as.data.frame(VarCorr(fit))
+# 
+#     # Return a data.frame
+#     data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
+# 
+# 
+# # Fit a new model with compound symmetry and get the GxE BLUPs
+# # Use only the TP data
+# S2_MET_BLUPs_ge_tp <- S2_MET_BLUEs %>%
+#   filter(line_name %in% tp_geno) %>%
+#   split(.$trait) %>%
+#   map(function(df) {
+#     
+#     # Create an object for the data.frame
+#     ## Center and scale the data
+#     df <- mutate(df, value = scale(value))
+#     
+#     # Extract the standard errors
+#     wts <- df$std_error^2
+#     
+#     # lmer control
+#     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+#                                 calc.derivs = FALSE)
+#     
+#     # Fit the model
+#     form <- value ~ (1|line_name) + (1|environment) + (1|line_name:environment)
+#     fit <- lmer(formula = form, data = df, control = lmer_control, weights = wts)
+#     
+#     # Extract the model.frame
+#     mf <- model.frame(fit)
+#     
+#     # Extract the BLUPs of each genotype in each environment
+#     blups <- ranef(fit)$`line_name:environment` %>%
+#       rownames_to_column("term") %>%
+#       separate(term, c("line_name", "environment"), sep = ":") %>%
+#       rename(value = "(Intercept)")
+#     
+#     # Extract the variance components
+#     var_comp <- as.data.frame(VarCorr(fit))
+#     
+#     # Return a data.frame
+#     data_frame(fit = list(fit), var_comp = list(var_comp), BLUP = list(blups)) })
 
 # # Factor analysis using BLUEs
 # ge_mean_FA <- S2_MET_BLUEs_use %>%
@@ -246,74 +250,101 @@ S2_MET_BLUPs_ge_tp <- S2_MET_BLUEs %>%
 # Number of PCs to choose for GxE BLUPs and ECs
 n_PC <- 2
 
-# Extract the GxE BLUPs and run PCA
-ge_PCA_dist_all <- S2_MET_BLUPs_ge_all %>%
-  map_df(function(out) {
-    blup_mat <- out$BLUP[[1]] %>%
-      spread(environment, value) %>%
-      as.data.frame() %>%
-      remove_rownames() %>%
-      column_to_rownames("line_name") %>%
-      as.matrix() 
-    
-    # Impute with mean
-    blup_prcomp <- blup_mat %>%
-      apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
-      t() %>%
-      prcomp(center = TRUE, scale. = TRUE)
-    
-    # Extract all the PCs
-    blup_pcs <- blup_prcomp$x
-    # Subset the ones to use
-    blup_pcs_use <- blup_pcs[,1:n_PC,drop = FALSE]
-    # Calculate the distance between points using the PCs
-    blup_pc_dist <- dist(blup_pcs_use)
-    
-    # Return a data.frame
-    data_frame(blup_mat = list(blup_mat), blup_prcomp = list(blup_prcomp), 
-               blup_pcs = list(blup_pcs), blup_pc_dist = list(blup_pc_dist))
-    
-  })
-    
-# Copy for the tp
-ge_PCA_dist_tp <- S2_MET_BLUPs_ge_tp %>%
-  map_df(function(out) {
-    blup_mat <- out$BLUP[[1]] %>%
-      spread(environment, value) %>%
-      as.data.frame() %>%
-      remove_rownames() %>%
-      column_to_rownames("line_name") %>%
-      as.matrix() 
-    
-    # Impute with mean
-    blup_prcomp <- blup_mat %>%
-      apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
-      t() %>%
-      prcomp(center = TRUE, scale. = TRUE)
-    
-    # Extract all the PCs
-    blup_pcs <- blup_prcomp$x
-    # Subset the ones to use
-    blup_pcs_use <- blup_pcs[,1:n_PC,drop = FALSE]
-    # Calculate the distance between points using the PCs
-    blup_pc_dist <- dist(blup_pcs_use)
-    
-    # Return a data.frame
-    data_frame(blup_mat = list(blup_mat), blup_prcomp = list(blup_prcomp), 
-               blup_pcs = list(blup_pcs), blup_pc_dist = list(blup_pc_dist))
-    
-  })
+# # Extract the GxE BLUPs and run PCA
+# ge_PCA_dist_all <- S2_MET_BLUPs_ge_all %>%
+#   map_df(function(out) {
+#     blup_mat <- out$BLUP[[1]] %>%
+#       spread(environment, value) %>%
+#       as.data.frame() %>%
+#       remove_rownames() %>%
+#       column_to_rownames("line_name") %>%
+#       as.matrix() 
+#     
+#     # Impute with mean
+#     blup_prcomp <- blup_mat %>%
+#       apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
+#       t() %>%
+#       prcomp(center = TRUE, scale. = TRUE)
+#     
+#     # Extract all the PCs
+#     blup_pcs <- blup_prcomp$x
+#     # Subset the ones to use
+#     blup_pcs_use <- blup_pcs[,1:n_PC,drop = FALSE]
+#     # Calculate the distance between points using the PCs
+#     blup_pc_dist <- dist(blup_pcs_use)
+#     
+#     # Return a data.frame
+#     data_frame(blup_mat = list(blup_mat), blup_prcomp = list(blup_prcomp), 
+#                blup_pcs = list(blup_pcs), blup_pc_dist = list(blup_pc_dist))
+#     
+#   })
+#     
+# # Copy for the tp
+# ge_PCA_dist_tp <- S2_MET_BLUPs_ge_tp %>%
+#   map_df(function(out) {
+#     blup_mat <- out$BLUP[[1]] %>%
+#       spread(environment, value) %>%
+#       as.data.frame() %>%
+#       remove_rownames() %>%
+#       column_to_rownames("line_name") %>%
+#       as.matrix() 
+#     
+#     # Impute with mean
+#     blup_prcomp <- blup_mat %>%
+#       apply(MARGIN = 2, FUN = function(env) ifelse(is.na(env), mean(env, na.rm = T), env)) %>%
+#       t() %>%
+#       prcomp(center = TRUE, scale. = TRUE)
+#     
+#     # Extract all the PCs
+#     blup_pcs <- blup_prcomp$x
+#     # Subset the ones to use
+#     blup_pcs_use <- blup_pcs[,1:n_PC,drop = FALSE]
+#     # Calculate the distance between points using the PCs
+#     blup_pc_dist <- dist(blup_pcs_use)
+#     
+#     # Return a data.frame
+#     data_frame(blup_mat = list(blup_mat), blup_prcomp = list(blup_prcomp), 
+#                blup_pcs = list(blup_pcs), blup_pc_dist = list(blup_pc_dist))
+#     
+#   })
 
 
 
 ## Environmental covariates
 # Use the PCs of the environmental covariates to form clusters
 EC_one_PCA <- prcomp(x = one_year_env_mat, center = TRUE, scale. = TRUE)
-EC_multi_PCA <- prcomp(x = multi_year_env_mat, center = TRUE, scale. = TRUE)
+EC_multi_PCA <- prcomp(x = multi_year_env_mat, center = TRUE, scale = TRUE)
+
+## Tidy up
+EC_one_PCA_df <- bind_rows(
+  broom::tidy(x = EC_one_PCA, matrix = "u") %>% rename(label = row),
+  broom::tidy(x = EC_one_PCA, matrix = "v") %>% rename(label = column)
+) %>% 
+  mutate(PC = str_c("PC", PC),
+         type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
+
+EC_multi_PCA_df <- bind_rows(
+  broom::tidy(x = EC_multi_PCA, matrix = "u") %>% rename(label = row),
+  broom::tidy(x = EC_multi_PCA, matrix = "v") %>% rename(label = column)
+) %>% 
+  mutate(PC = str_c("PC", PC),
+         type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
+  
+
+## Visualize briefly
+EC_one_PCA_df %>% 
+  filter(PC %in% c("PC1", "PC2")) %>% 
+  spread(PC, value) %>% 
+  ggplot(aes(x = PC1, y = PC2, col = type)) +
+  geom_point() + 
+  geom_text(aes(label = label), check_overlap = T) + 
+  theme_classic()
+
+
 
 # Copy the list per trait (the distance is the same for each trait)
-EC_one_PCA_dist_list <- rerun(length(traits), dist(EC_one_PCA$x[,1:n_PC, drop = FALSE])) %>% 
-  set_names(traits)
+# EC_one_PCA_dist_list <- rerun(length(traits), dist(EC_one_PCA$x[,1:n_PC, drop = FALSE])) %>% 
+#   set_names(traits)
 EC_multi_PCA_dist_list <- rerun(length(traits), dist(EC_multi_PCA$x[,1:n_PC, drop = FALSE])) %>% 
   set_names(traits)
 
@@ -325,8 +356,8 @@ dist_method_df_all <- data_frame(
   great_circle_dist = great_circle_dist_list, 
   # env_cor_dist = env_cor_all_dist_list, 
   ge_mean_D = ge_mean_D_all, 
-  ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
-  ec_one_PCA_dist = EC_one_PCA_dist_list,
+  # ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
+  # ec_one_PCA_dist = EC_one_PCA_dist_list,
   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 
 
@@ -335,8 +366,8 @@ dist_method_df_tp <- data_frame(
   great_circle_dist = great_circle_dist_list, 
   # env_cor_dist = env_cor_tp_dist_list, 
   ge_mean_D = ge_mean_D_tp, 
-  ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
-  ec_one_PCA_dist = EC_one_PCA_dist_list,
+  # ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
+  # ec_one_PCA_dist = EC_one_PCA_dist_list,
   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 
 
@@ -385,6 +416,11 @@ clust_method_df <- bind_rows(clust_method_df_all, clust_method_df_tp)
 
 
 
+### Visualize the environmental covariables
+
+
+
+
 
 
 ### Rank environments according to a prediction environment
@@ -418,7 +454,7 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
 
 
 ## Rank the environments relative to each other
-# D othis for both population groups
+# Do this for both population groups
 dist_method_df <- clust_method_df %>%
   split(.$population) %>%
   map(~select(., -cluster) %>%
@@ -472,6 +508,10 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 # Save this
 save_file <- file.path(result_dir, "distance_methods_results.RData")
 save("clust_method_df", "pred_env_rank_random", file = save_file)
+
+
+
+
 
 
 

@@ -99,7 +99,7 @@ lr_test <- function(model1, model2) {
   model_list <- list(model1 = model1, model2 = model2)
   
   # Degrees of freedom
-  df_list <- sapply(X = model_list, FUN = df.residual)
+  df_list <- sapply(X = model_listt, FUN = df.residual)
   fuller_model <- names(which.min(df_list))
   red_model <- names(which.max(df_list))
   
@@ -132,7 +132,7 @@ lr_test <- function(model1, model2) {
 ## Bootstrap a correlation coefficient
 boot_cor <- function(x, y, boot.reps = 1000, alpha = 0.05) {
   
-  # Error
+  # Error handling
   boot.reps <- as.integer(boot.reps)
   
   # Prob must be between 0 and 1

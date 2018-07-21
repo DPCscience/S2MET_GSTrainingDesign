@@ -20,13 +20,14 @@ library(ggridges)
 # Load the results
 load(file.path(result_dir, "environmental_distance_predictions.RData"))
 load(file.path(result_dir, "environmental_distance_window_predictions.RData"))
-load(file.path(result_dir, "environmental_distance_heritability.RData"))
+# load(file.path(result_dir, "environmental_distance_heritability.RData"))
 
 # Load the results of the model-based clustering
 load(file.path(result_dir, "environmental_distance_lrt.RData"))
 
 ## Create a color scheme for the distance methods
 dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_method_replace), "Random" = "grey75")
+
 ## Significant level
 alpha <- 0.05
 
@@ -315,52 +316,74 @@ g_cumulative_pred1 <- dist_method_replace %>%
 ## Prediction accuracy using a sliding window
 ## Bind the list elements together and unnest
 window_pred_results <- env_dist_window_predictions_out %>% 
-  bind_rows() %>% 
-  unnest()
+  map(~bind_rows(.) %>% unnest())
+
+## First, group by environment, trait, and distance method and then find 
+## the minimum number of observations
+window_pred_results_filter_obs <- window_pred_results %>%
+  map(filter, dist_method != "ge_PCA_dist") %>%
+  map(~group_by(., trait, dist_method, environment) %>% 
+        mutate(nobs = n()) %>% 
+        group_by(trait, dist_method) %>% 
+        filter(nobs == min(nobs)) %>%
+        ungroup())
+
+
 
 # Re-scale the distance measurements to unit variance
-window_pred_adj <- window_pred_results %>%
-  group_by(environment, trait, dist_method) %>% 
-  mutate(scaled_distance = scale(distance),
-         scaled_distance = scaled_distance - min(scaled_distance),
-         window_rank = seq(n())) %>% # Create a vector specifying the order of the windows
-  ungroup() %>%
-  mutate(n_train_env = map_dbl(train_envs, length))
+window_pred_adj <- window_pred_results_filter_obs %>%
+  map(~{
+    mutate(., n_train_env = map_dbl(train_envs, length)) %>%
+    group_by(environment, trait, dist_method) %>% 
+    mutate(scaled_distance = scale(distance),
+           scaled_distance = scaled_distance - min(scaled_distance),
+           window_rank = seq(n())) %>% # Create a vector specifying the order of the windows
+    ungroup()
+  })
 
 
 ## Separate the original samples from the random samples
 ## Then summarize the mean and quantiles of the prediction accuracies
 ## for each additional training population environment
 window_pred_random <- window_pred_adj %>% 
-  filter(str_detect(dist_method, "sample")) %>%
-  group_by(environment, trait, window_rank) %>% 
-  summarize_at(vars(accuracy, scaled_distance), 
-               funs(mean = mean(.), lower = quantile(., probs = 0.025), 
-                    upper = quantile(., probs = 0.975))) %>%
-  ungroup() %>%
-  select(environment:window_rank, accuracy = accuracy_mean, scaled_distance = scaled_distance_mean,
-         lower = accuracy_lower, upper = accuracy_upper) %>%
-  mutate(dist_method = "Random")
+  map(~{
+    filter(., str_detect(dist_method, "sample")) %>%
+    group_by(environment, trait, window_rank, n_train_env) %>% 
+    summarize_at(vars(accuracy, scaled_distance), 
+                 funs(mean = mean(.), lower = quantile(., probs = 0.025), 
+                      upper = quantile(., probs = 0.975))) %>%
+    ungroup() %>%
+    select(environment:window_rank, n_train_env, accuracy = accuracy_mean, scaled_distance = scaled_distance_mean,
+           lower = accuracy_lower, upper = accuracy_upper) %>%
+    mutate(dist_method = "Random")
+  })
 
 # Now grab the original runs
 window_pred_orig <- window_pred_adj %>% 
-  filter(dist_method %in% names(dist_method_replace)) %>%
-  select(environment, trait, dist_method, scaled_distance, window_rank, accuracy,
-         lower = ci_lower, upper = ci_upper)
+  map(~{
+    filter(., dist_method %in% names(dist_method_replace)) %>%
+    select(environment, trait, dist_method, scaled_distance, window_rank, n_train_env, accuracy,
+           lower = ci_lower, upper = ci_upper)
+  })
+
+
+
+
 
 ## Combine
 ## Remember that the confidence interval for the non-random distance methods
 ## are from the bootstrapping of the correlation
 ## The confidence interval for the random distance methods is calculated using
 ## the accuracy for each random sample
-window_pred_toplot <- bind_rows(window_pred_orig, window_pred_random)
+window_pred_toplot <- list(window_pred_orig, window_pred_random) %>%
+  pmap_df(bind_rows)
 
 
 
 
 ## Identify the largest prediction accuracy among the sliding windows
 window_pred_toplot_maxima <- window_pred_toplot %>%
-  group_by(environment, trait, dist_method) %>% 
+  group_by(environment, trait, dist_method, n_train_env) %>% 
   mutate(local_max_accuracy = max(accuracy),
          local_max_window_rank = window_rank[accuracy == local_max_accuracy]) %>%
   ungroup() %>%
@@ -391,6 +414,10 @@ window_blank <- window_pred_toplot %>%
   map(~select(., annotation, trait, dist_method, environment) %>% 
         distinct() %>% 
         arrange(trait, dist_method, environment))
+
+
+
+
 
 
 ## Distribution of the number of training environments or the scaled distance (cumulative) 
@@ -433,7 +460,7 @@ ggsave(filename = save_file, plot = g_local_max, height = 6, width = 8, dpi = 10
 ## Calculate the average environmental distance (scaled) where the local maxima is
 ## found and calculate the average rank of the window where the maximum is found
 window_pred_maxima_summary <- window_pred_toplot_maxima_filter %>% 
-  group_by(trait, dist_method) %>% 
+  group_by(trait, dist_method, n_train_env) %>% 
   summarize_at(vars(window_rank, scaled_distance), mean)
 
 
@@ -969,34 +996,53 @@ ggsave(filename = "cumulative_mean_advantage.jpg", plot = g_mean_advantage,
 window_pred_analysis_final <- window_pred_toplot %>%
   select(-scaled_distance, -lower:-upper) %>%
   left_join(., cumulative_pred_analysis_terminal, by = c("environment", "trait")) %>%
-  rename(accuracy = accuracy.x, max_train_env = n_train_env, terminal_accuracy = accuracy.y, 
-         terminal_lower = lower, terminal_upper = upper) %>%
+  rename(accuracy = accuracy.x, window_size = n_train_env.x, max_train_env = n_train_env.y, 
+         terminal_accuracy = accuracy.y, terminal_lower = lower, terminal_upper = upper) %>%
   mutate(advantage = accuracy - terminal_accuracy)
 
 ## Calculate the average advantage for each distance method, then compare
 ## with random
 window_pred_analysis_final_summ <- window_pred_analysis_final %>% 
-  group_by(trait, dist_method, window_rank) %>% 
-  summarize_at(vars(advantage), funs(mean, adv_lower = quantile(., probs = 0.025), 
+  group_by(trait, dist_method, window_size, window_rank) %>% 
+  summarize_at(vars(advantage), funs(adv_mean = mean(.), adv_lower = quantile(., probs = 0.025), 
                                      adv_upper = quantile(., probs = 0.975))) %>%
   ungroup()
 
 window_pred_analysis_final_summ1 <- left_join(
   filter(window_pred_analysis_final_summ, dist_method != "Random"),
   select(filter(window_pred_analysis_final_summ, dist_method == "Random"),
-         trait, window_rank, random_mean = mean, random_adv_lower = adv_lower,
+         trait, window_size, window_rank, random_mean = adv_mean, random_adv_lower = adv_lower,
          random_adv_upper = adv_upper)
 )
 
+
+## For each n_train_env, plot the average advantage across all environments using a
+## boxplot
+g_advantage_window <- window_pred_analysis_final %>% 
+  filter(dist_method != "Random") %>%
+  # filter(window_size == 5) %>%
+  ggplot(aes(x = window_rank, y = advantage, group = window_rank)) +
+  geom_hline(yintercept = 0) + 
+  geom_boxplot() + 
+  # facet_grid(trait ~ dist_method) +
+  facet_grid(trait ~ dist_method + window_size) +
+  theme_bw()
+
+# Save
+ggsave(filename = "window_advantage.jpg", plot = g_advantage_window,
+       path = fig_dir, height = 6, width = 8, dpi = 1000)
 
 
 ## Plot the mean advantage for each distance method, with a ribbon to illustrate
 ## the confidence interval of the random
 g_mean_advantage_window <- window_pred_analysis_final_summ1 %>% 
+  filter(window_size == 5) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
-  ggplot(aes(x = window_rank, y = mean, col = dist_method, fill = dist_method)) + 
+  ggplot(aes(x = window_rank, y = adv_mean, col = dist_method, fill = dist_method)) + 
+  geom_hline(yintercept = 0) + 
   geom_ribbon(aes(ymin = random_adv_lower, ymax = random_adv_upper,
                   color = "Random", fill = "Random"), alpha = 0.5) + 
+  # geom_ribbon(aes(ymin = adv_lower, ymax = adv_upper), alpha = 0.5) +
   geom_line(aes(y = random_mean, color = "Random"), lwd = 1) +
   # Above I assign the color to Random to induce the designated Random color in dist_colors
   geom_line(lwd = 1) + 
@@ -1004,6 +1050,7 @@ g_mean_advantage_window <- window_pred_analysis_final_summ1 %>%
   scale_color_manual(values = dist_colors) + 
   ylab("Prediction Advantage Over Using All Data") +
   xlab("Distance Rank of Sliding Window") + 
+  # facet_grid(trait ~ dist_method + window_size) +
   facet_grid(trait ~ dist_method) +
   theme_bw() +
   theme(legend.key.height = unit(x = 2, units = "lines"))
@@ -1013,6 +1060,10 @@ ggsave(filename = "window_mean_advantage.jpg", plot = g_mean_advantage_window,
        path = fig_dir, height = 6, width = 8, dpi = 1000)
 
 
+
+## What is going on with the uptick in accuracy at the end of the sliding windows?
+## These are the C1R-only environments, so they have one extra window (I trimmed these
+## off)
 
 
 

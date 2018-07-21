@@ -1,7 +1,7 @@
 ## Analyze the clustering and heritability results
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 29, 2018
+## Last modified: May 2, 2018
 ## 
 ## This script will perform different clustering procedures on the S2MET data
 ## and calculate the within and across-cluster heritabilities.
@@ -15,6 +15,7 @@ source(file.path(repo_dir, "source.R"))
 # Load packages and the source script
 library(lme4)
 library(broom)
+library(lubridate)
 
 # Load the clustering results
 load(file.path(result_dir, "distance_methods_results.RData"))
@@ -74,51 +75,87 @@ clust_method_df_use <- clust_method_df %>%
   pmap_df(~mutate(.x, k = .y))
 
 
+
+
+
+##### Visualize Distance in 2 Dimensions
+
 ## Use multi-dimensional scaling to convert the distance matrices to a 2D matrix
 clust_method_mds <- clust_method_df %>%
+  filter(dist_method != "ec_one_PCA_dist") %>%
   mutate(mds = map(dist, ~cmdscale(d = ., k = 2) %>%
                      fix_data_frame(newnames = c("x", "y"), newcol = "environment"))) %>%
-  unnest(mds)
+  unnest(mds) %>%
+  mutate(dist_method = as_replaced_factor(dist_method, dist_method_replace),
+         ## Extract year from environment
+         year = as.factor(year(parse_date_time(x = parse_number(environment), orders = "y"))))
+         
 
 
-# Plot function
-plot_fun <- function(tr, pop, label = TRUE) {
-  g <- filter(clust_method_mds, trait == tr, population == pop) %>% 
-    mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
-           dist_method = factor(dist_method, levels = dist_method_replace)) %>% 
-    ggplot(aes(x = x, y = y)) + 
-    geom_point() + 
-    facet_wrap(~ dist_method, scales = "free") +
-    labs(title = str_c("Trait: ", tr, "; Population: ", pop)) +
-    theme_bw() +
-    theme(panel.grid = element_blank())
-  
-  if (label) {
-    g1 <- g + geom_text(aes(label = environment), size = 2, check_overlap = TRUE, vjust = 2)
-  } else {
-    g1 <- g
-  }
-  return(g1)
-}
 
-## Plot the the results of multi-dimensional scaling
-g_dist_mds_all <- set_names(traits, traits) %>%
-  map(plot_fun, pop = "all")
 
-# Save the images
-for (tr in traits) {
-  save_file <- file.path(fig_dir, str_c("environment_distance_all_", tr, ".jpg"))
-  ggsave(filename = save_file, plot = g_dist_mds_all[[tr]], width = 8, height = 6, dpi = 1000)
-}
+### First plot everything for each trait
+g_mds_traits <- clust_method_mds %>% 
+  split(.$trait) %>%
+  map(~{
+    tr <- unique(.$trait)
+    ggplot(., aes(x = x, y = y)) +
+      geom_point() +
+      geom_text(aes(label = environment), size = 2, check_overlap = TRUE, vjust = 2) +
+      facet_wrap(population ~ dist_method, scales = "free", ncol = 3) +
+      theme_bw() +
+      theme(panel.grid = element_blank()) +
+      labs(title = str_c("Trait: ", tr))
+  })
+    
 
-g_dist_mds_tp <- set_names(traits, traits) %>%
-  map(plot_fun, pop = "tp")
+## Use this space to visualize individual traits
+g_mds_traits$GrainYield
+g_mds_traits$HeadingDate
+g_mds_traits$PlantHeight
 
-# Save the images
-for (tr in traits) {
-  save_file <- file.path(fig_dir, str_c("environment_distance_tp_", tr, ".jpg"))
-  ggsave(filename = save_file, plot = g_dist_mds_tp[[tr]], width = 8, height = 6, dpi = 1000)
-}
+
+
+### Second plot everything for each distance measure
+g_mds_dist <- clust_method_mds %>% 
+  mutate(dist_method = str_replace_all(dist_method, pattern = "\n", replacement = " ")) %>%
+  split(.$dist_method) %>%
+  map(~{
+    dm <- unique(.$dist_method)
+    ggplot(., aes(x = x, y = y)) +
+      geom_point() +
+      geom_text(aes(label = environment), size = 2, check_overlap = TRUE, vjust = 2) +
+      facet_wrap(population ~ trait, scales = "free", ncol = 3) +
+      theme_bw() +
+      theme(panel.grid = element_blank()) +
+      labs(title = str_c("Distance Method: ", dm))
+  })
+
+## Use this space to visualize individual traits
+g_mds_dist$`Phenotypic Distance`
+g_mds_dist$`10 yr Environmental Covariates`
+g_mds_dist$`Great Circle Distance`
+
+
+
+
+## Plot all distance methods for each trait and each distance methods
+g_clust_trait <- clust_method_mds %>% 
+  filter(population == "all") %>%
+  ggplot(aes(x = x, y = y, color = year)) +
+  geom_point() +
+  # geom_text(aes(label = environment), size = 2, check_overlap = TRUE, vjust = 2) +
+  facet_wrap(trait ~ dist_method, scales = "free") +
+  scale_color_discrete(name = "Year") + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank())
+
+ggsave(filename = "cluster_trait_mds.jpg", plot = g_clust_trait, path = fig_dir,
+       height = 6, width = 6, dpi = 1000)
+
+
 
 
 

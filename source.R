@@ -12,12 +12,13 @@ library(boot)
 proj_dir <- repo_dir
 
 # Geno, pheno, and enviro data
-geno_dir <-  "C:/Users/Jeff/Google Drive/Barley Lab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/"
+geno_dir <-  "C:/Users/Jeff/GoogleDrive/BarleyLab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/"
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")
 data_dir <- pheno_dir <- file.path(proj_dir, "Data")
 result_dir <- file.path(proj_dir, "Results")
+
 
 
 ######
@@ -77,6 +78,7 @@ K <- A.mat(X = s2_imputed_mat_use, min.MAF = 0, max.missing = 1)
 # also included the unit
 trait_replace <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield", "Heading Date", "Plant Height"), nm = .)
+
 trait_replace_unit <- unique(S2_MET_BLUEs$trait) %>%
   set_names(x = c("Grain Yield\n(kg ha^-1)", "Heading Date\n(days)", "Plant Height\n(cm)"), nm = .)
 

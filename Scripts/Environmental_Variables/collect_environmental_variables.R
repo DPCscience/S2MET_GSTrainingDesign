@@ -1,28 +1,27 @@
 ## Collect and Gather Environmental Covariates
 ## 
+## Author: Jeff Neyhart
+## Last modified: May 25, 2018
+## 
 ## This R Script outlines the methods to gather environmental covariables on soil
 ## and weather data
+## 
+
+
+# Run the source script
+repo_dir <- getwd()
+source(file.path(repo_dir, "source.R"))
+
 
 # Load packages and set directories
-
-library(stringr)
 library(lubridate)
 library(rnoaa)
 library(geosphere)
 library(soilDB)
 library(foreign)
 library(raster)
-library(tidyverse)
-library(purrrlyr)
 
-# Directory
-proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
-pheno_dir <- file.path(proj_dir, "Phenotype_Data")
-env_var_dir <- file.path(proj_dir, "Environmental_Variables/")
-figure_dir <- file.path(proj_dir, "Figures/")
 
-# Trial Information
-trial_info <- read_csv(file.path(pheno_dir, "trial_metadata.csv"))
 
 
 ## Data Collection
@@ -66,8 +65,7 @@ max_missing <- 0.20
 desired_vars <- c("TMIN", "TMAX", "PRCP")
 
 # Load the list of cooperative stations
-station_file <- file.path(env_var_dir, "Climate_Data/NOAA_Weather_Stations/GHCND_stations.RData")
-load(station_file)
+load(file.path(data_dir, "Climate_Data/NOAA_Weather_Stations/GHCND_stations.RData"))
 
 
 # Remove stations with no id and keep stations with the USC prefix
@@ -86,44 +84,198 @@ stations_unique <- station_list1 %>%
 
 # Create a data.frame of unique trial locations
 locations_unique <- trial_info %>%
-  filter(!is.na(latitude), !is.na(longitude)) %>%
+  filter(!is.na(latitude), !is.na(longitude),
+         !location %in% c("Sidney_MT", "Driscoll_ND")) %>%
   distinct(location, .keep_all = T) %>% 
   dplyr::select(location, latitude, longitude)
 
 # Create a list of distances from each trial location to all of the stations
 # The distance is the great circle distance given the WGS84 ellipsoid
-trial_loc_dist <- locations_unique %>%
-  by_row(function(loc) {
+loc_dist <- locations_unique %>%
+  dplyr::select(-location) %>%
+  pmap(~{
     
     # Extract coordiates
-    coord <- c(loc$longitude, loc$latitude)
+    coord <- c(.y, .x)
     
     stations_unique %>% 
       group_by(id) %>% 
       summarize(dist_to_site = distGeo(p1 = coord, p2 = c(unique(longitude), unique(latitude))))
     
-  }, .to = "station_dist")
+  })
+
+trial_loc_dist <- locations_unique %>%
+  mutate(station_dist = loc_dist)
 
 
-# Find the 3 stations that are closest to each location
+# Find the 10 stations that are closest to each location
 closest_station <- trial_loc_dist %>% 
   unnest() %>% 
   group_by(location) %>% 
-  top_n(n = -5, wt = dist_to_site) %>% 
+  top_n(n = -10, wt = dist_to_site) %>% 
   arrange(location, dist_to_site) %>%
   ungroup()
 
 # Group by environment and pull out data
-trial_station_data <- closest_station %>%
+trial_station <- closest_station %>%
   # Filter by the closest station. If tied, take the first
   group_by(location) %>% 
   top_n(n = -1, wt = dist_to_site) %>% 
-  dplyr::slice(1) %>% 
-  # Apply function by rows
-  by_row(function(i) {
+  dplyr::slice(1) %>%
+  ungroup()
+
+trial_station_data <- map(trial_station$id, ~{
+  
+  # Change the station name
+  station_id <- str_c("GHCND:", .)
+  
+  # Year sequences
+  yrs <- seq(start_year, end_year)
+  
+  # Create a list of length number of years
+  data_list <- vector("list", length(yrs)) %>%
+    structure(names = yrs)
+  
+  # Iterate over the requested years
+  for (yr in seq(start_year, end_year)) {
+    
+    # Format the date
+    start_ymd <- ymd(str_c(yr, start_date))
+    end_ymd <- ymd(str_c(yr, end_date))
+    
+    # Pull data
+    ncdc_data <- ncdc(datasetid = 'GHCND', datatypeid = desired_vars, stationid = station_id, 
+                      startdate = as.character(start_ymd), enddate = as.character(end_ymd), 
+                      limit = 1000, token = token, )
+    
+    # Reformat and determine the number of days since the start date
+    data_list[[as.character(yr)]] <- ncdc_data$data %>%
+      as_data_frame()
+    
+  } # Close the loop
+  
+  # Print the completion of the location
+  print(str_c("Data for collected for station ID: ", .))
+  
+  # Return the list
+  bind_rows(data_list)
+  
+})
+
+# Combine with the trial location data.frame
+trial_station_df <- trial_station %>% 
+  mutate(out = trial_station_data)
+  
+
+# Quality-control the data
+trial_station_data_qc <- trial_station_df %>% 
+  unnest() %>%
+  mutate(date = ymd(ymd_hms(date))) %>%
+  group_by(location, station) %>% 
+  filter(fl_q == "") %>%
+  # Reorder
+  dplyr::select(location, id = station, date, datatype, value)
+
+
+# Complete the data.frame for all possible observations
+trial_station_data_complete <- trial_station_data_qc %>%
+  ungroup() %>%
+  mutate_at(vars(datatype, date), as.factor) %>%
+  group_by(location, id) %>%
+  complete(datatype, date) %>% 
+  mutate(year = year(date), 
+         month = month(date),
+         day = yday(date) - yday(date[1])) %>% 
+  dplyr::select(location:date, year:day, value)
+  
+
+
+
+
+# Deal with missing data by first assessing the level of missingness. If the level of missing 
+# data is above the threshold provided above, reject the data from that environment. Then look 
+# for data from the next closest station for each environment and extract data.
+
+
+## Find the level of missing data for each environment
+trial_station_missing <- trial_station_data_complete %>%
+  group_by(location, datatype, year) %>%
+  summarize(prop_miss = mean(is.na(value)))
+
+## Plot this
+g_station_missing <- trial_station_missing %>%
+  ggplot(aes(x = year, y = prop_miss, color = datatype)) + 
+  geom_line() + 
+  facet_wrap(~location, ncol = 4) +
+  theme_bw()
+
+
+
+
+## Pull out environments that need re-gathering - total
+redo_env_all <- trial_station_missing %>% 
+  group_by(location, datatype) %>% 
+  summarize(prop_miss = mean(prop_miss)) %>% 
+  filter(any(prop_miss > max_missing)) %>%
+  ungroup() %>% 
+  distinct(location) %>%
+  pull()
+
+## Pull out environments that need re-gathering for 2015, 2016, or 2017
+redo_env_rel <- trial_station_missing %>% 
+  group_by(location, datatype) %>% 
+  filter(year >= 2015) %>%
+  filter(any(prop_miss > max_missing)) %>% 
+  ungroup() %>% 
+  distinct(location) %>%
+  pull()
+
+# Common environments
+redo_env <- union(redo_env_all, redo_env_rel)
+
+## Save the data from those environments that will not be re-done for 2015-2017
+trial_station_data_oneyear_complete1 <- trial_station_data_complete %>%
+  ungroup() %>%
+  filter(year >= 2015, !location %in% redo_env_rel)
+
+# Create a copy of the data
+trial_station_data_multiyear_complete1 <- trial_station_data_complete %>%
+  ungroup() %>%
+  filter(!location %in% redo_env_all)
+
+# Look for the second-closest station and proceed
+dist_rank <- 2
+
+# What is the max rank?
+max_rank <- closest_station %>%
+  group_by(location) %>% 
+  summarize(n = n()) %>% 
+  pull(n) %>% 
+  unique()
+
+# If the number of redo environments is greater than 0, proceed
+while (length(redo_env) >= 1) {
+  
+  # IS the rank greater than the max rank? If so, stop
+  if (dist_rank > max_rank) {
+    print("Rank is above the max. Stopping.")
+    break
+  }
+  
+  # Go back to the closest_station data frame and pull out the next closest station
+  trial_redo_station<- closest_station %>% 
+    filter(location %in% redo_env) %>% 
+    group_by(location) %>%
+    top_n(n = -dist_rank, dist_to_site) %>% 
+    top_n(n = 1, wt = dist_to_site) %>%
+    # If tied, select the second
+    top_n(n = 1, wt = id) 
+  
+  
+  trial_redo_station_data <- map(trial_redo_station$id, ~{
     
     # Change the station name
-    station_id <- str_c("GHCND:", i$id)
+    station_id <- str_c("GHCND:", .)
     
     # Year sequences
     yrs <- seq(start_year, end_year)
@@ -151,144 +303,20 @@ trial_station_data <- closest_station %>%
     } # Close the loop
     
     # Print the completion of the location
-    print(str_c("Data for collected for location: ", i$location))
+    print(str_c("Data for collected for station ID: ", .))
     
     # Return the list
     bind_rows(data_list)
     
-  }, .to = "out_df")
-
-
-# Quality-control the data
-trial_station_data_qc <- trial_station_data %>% 
-  unnest() %>%
-  mutate(date = ymd(ymd_hms(date))) %>%
-  group_by(location, station) %>% 
-  filter(fl_q == "") %>%
-  # Reorder
-  dplyr::select(location, id = station, date, datatype, value)
-
-
-# Complete the data.frame for all possible observations
-trial_station_data_complete <- trial_station_data_qc %>%
-  ungroup() %>%
-  mutate(datatype = as.factor(datatype),
-         date = as.factor(date)) %>% 
-  group_by(location, id) %>%
-  complete(datatype, date) %>% 
-  mutate(year = year(date), 
-         month = month(date),
-         day = yday(date) - yday(date[1])) %>% 
-  dplyr::select(location:date, year:day, value)
+  })
   
-
-
-
-
-# Deal with missing data by first assessing the level of missingness. If the level of missing 
-# data is above the threshold provided above, reject the data from that environment. Then look 
-# for data from the next closest station for each environment and extract data.
-
-
-## Find the level of missing data for each environment
-trial_station_missing <- trial_station_data_complete %>%
-  group_by(location, datatype, year) %>%
-  summarize(prop_miss = mean(is.na(value)))
-
-
-## Pull out environments that need re-gathering - total
-## These are environments with 
-redo_env_all <- trial_station_missing %>% 
-  group_by(location, datatype) %>% 
-  summarize(prop_miss = mean(prop_miss)) %>% 
-  filter(any(prop_miss > max_missing)) %>%
-  ungroup() %>% 
-  distinct(location) %>%
-  pull()
-
-## Pull out environments that need re-gathering for 2015, 2016, or 2017
-redo_env_rel <- trial_station_missing %>% 
-  group_by(location, datatype) %>% 
-  filter(year >= 2015) %>%
-  filter(any(prop_miss > max_missing)) %>% 
-  ungroup() %>% 
-  distinct(location) %>%
-  pull()
-
-# Common environments
-redo_env <- union(redo_env_all, redo_env_rel)
   
-# Create a copy of the data
-trial_station_data_complete1 <- trial_station_data_complete
-
-# Look for the second-closest station and proceed
-dist_rank <- 2
-
-# What is the max rank?
-max_rank <- closest_station %>%
-  group_by(location) %>% 
-  summarize(n = n()) %>% 
-  pull(n) %>% 
-  unique()
-
-# If the number of redo environments is greater than 0, proceed
-while (length(redo_env) >= 1) {
-  
-  # IS the rank greater than the max rank? If so, stop
-  if (dist_rank > max_rank) {
-    print("Rank is above the max. Stopping.")
-    break
-  }
-  
-  # Go back to the closest_station data frame and pull out the next closest station
-  trial_redo_station_data <- closest_station %>% 
-    filter(location %in% redo_env) %>% 
-    group_by(location) %>%
-    top_n(n = -dist_rank, dist_to_site) %>% 
-    top_n(n = 1, wt = dist_to_site) %>%
-    # If tied, select the second
-    top_n(n = 1, wt = id) %>%
-    # Apply function by rows
-    by_row(function(i) {
-      
-      # Change the station name
-      station_id <- str_c("GHCND:", i$id)
-      
-      # Year sequences
-      yrs <- seq(start_year, end_year)
-      
-      # Create a list of length number of years
-      data_list <- vector("list", length(yrs)) %>%
-        structure(names = yrs)
-      
-      # Iterate over the requested years
-      for (yr in seq(start_year, end_year)) {
-        
-        # Format the date
-        start_ymd <- ymd(str_c(yr, start_date))
-        end_ymd <- ymd(str_c(yr, end_date))
-        
-        # Pull data
-        ncdc_data <- ncdc(datasetid = 'GHCND', datatypeid = desired_vars, stationid = station_id, 
-                          startdate = as.character(start_ymd), enddate = as.character(end_ymd), 
-                          limit = 1000, token = token)
-        
-        # Reformat and determine the number of days since the start date
-        data_list[[as.character(yr)]] <- ncdc_data$data %>%
-          as_data_frame()
-        
-      } # Close the loop
-      
-      # Print the completion of the location
-      print(str_c("Data for collected for location: ", i$location))
-      
-      # Return the list
-      bind_rows(data_list)
-      
-    }, .to = "out_df")
+  trial_redo_station_df <- trial_redo_station %>% 
+    ungroup() %>%
+    mutate(out = trial_redo_station_data)
   
   # Quality-control the data
-  trial_redo_station_data_qc <- trial_redo_station_data %>% 
+  trial_redo_station_data_qc <- trial_redo_station_df %>% 
     unnest() %>%
     mutate(date = ymd(ymd_hms(date))) %>%
     group_by(location, station) %>% 
@@ -300,8 +328,7 @@ while (length(redo_env) >= 1) {
   # Complete the data.frame for all possible observations
   trial_redo_station_data_complete <- trial_redo_station_data_qc %>%
     ungroup() %>%
-    mutate(datatype = as.factor(datatype),
-           date = as.factor(date)) %>% 
+    mutate_at(vars(datatype, date), as.factor) %>%
     group_by(location, id) %>%
     complete(datatype, date) %>% 
     mutate(year = year(date), 
@@ -319,25 +346,33 @@ while (length(redo_env) >= 1) {
   redo_env_all <- trial_station_missing %>% 
     filter(any(mean(prop_miss) > max_missing)) %>% 
     ungroup() %>% 
-    distinct(location)
+    distinct(location) %>%
+    pull()
   
   ## Pull out environments that need re-gathering for 2015, 2016, or 2017
   redo_env_rel <- trial_station_missing %>% 
     filter(year >= 2015) %>%
     filter(any(prop_miss > max_missing)) %>% 
     ungroup() %>% 
-    distinct(location)
+    distinct(location) %>%
+    pull()
   
-  # Combine the redo dataset with the remaining data
-  trial_station_data_complete1 <- trial_station_data_complete1 %>% 
-    filter(!location %in% redo_env) %>%
-    list(., trial_redo_station_data_complete) %>%
-    bind_rows() %>%
+  
+  ## Combine the redo data with the saved data
+  # First do this for environments that were re-done for 2015-2017
+  trial_station_data_oneyear_complete1 <- trial_station_data_oneyear_complete1 %>%
+    bind_rows(., filter(trial_redo_station_data_complete, year >= 2015, 
+                        !location %in% trial_station_data_oneyear_complete1$location,
+                        !location %in% redo_env_rel)) %>%
     arrange(location)
-  
-  # Save a copy
-  trial_station_data_complete_save <- trial_station_data_complete1
-  
+
+  # Now do this for environments that were re-done for the whole period
+  trial_station_data_multiyear_complete1 <- trial_station_data_multiyear_complete1 %>% 
+    bind_rows(., filter(trial_redo_station_data_complete, 
+                        !location %in% trial_station_data_multiyear_complete1$location,
+                        !location %in% redo_env_all)) %>%
+    arrange(location)
+
   # Create an object with the environments to be re-sampled
   redo_env <- union(redo_env_all, redo_env_rel) %>%
     unlist()
@@ -349,21 +384,26 @@ while (length(redo_env) >= 1) {
 
 
 # Nest the data for each location and add station metadata
-noaa_trial_data_complete <- trial_station_data_complete_save %>% 
+# Include the closest station and the station that was actually used
+noaa_trial_data_oneyear_complete <- trial_station_data_oneyear_complete1 %>%
   nest(datatype:value) %>% 
   left_join(., mutate(closest_station, id = str_c("GHCND:", id)), by = c("location", "id")) %>%
-  select(location, id, latitude:dist_to_site, data)
-
-# Add station metadata
-noaa_trial_data_complete <- noaa_trial_data_complete %>% 
-  separate(id, c("database", "id"), sep = ":") %>% 
-  dplyr::select(-latitude, -longitude) %>% 
-  left_join(., distinct(station_list1, id, latitude, longitude, elevation, state), by = "id") %>% 
-  dplyr::select(location:dist_to_site, latitude:state, data)
+  left_join(., by = c("location"), y = mutate(trial_station, id = str_c("GHCND:", id)) %>%
+              dplyr::select(location, closest_station_id = id, dist_to_closest_station = dist_to_site)) %>%
+  separate(id, c("database", "id"), sep = ":") %>%
+  left_join(., distinct(station_list1, id, elevation, state), by = "id")
 
 
-save_file <- file.path(env_var_dir, "Climate_Data/NOAA_Data/noaa_stations_trial_data.RData")
-save("noaa_trial_data_complete", file = save_file)
+noaa_trial_data_multiyear_complete <- trial_station_data_multiyear_complete1 %>%
+  nest(datatype:value) %>% 
+  left_join(., mutate(closest_station, id = str_c("GHCND:", id)), by = c("location", "id")) %>%
+  left_join(., by = c("location"), y = mutate(trial_station, id = str_c("GHCND:", id)) %>%
+              dplyr::select(location, closest_station_id = id, dist_to_closest_station = dist_to_site)) %>%
+  separate(id, c("database", "id"), sep = ":") %>%
+  left_join(., distinct(station_list1, id, elevation, state), by = "id")
+
+save_file <- file.path(data_dir, "Climate_Data/NOAA_Data/noaa_stations_trial_data.RData")
+save("noaa_trial_data_oneyear_complete", "noaa_trial_data_multiyear_complete", file = save_file)
 
 
 

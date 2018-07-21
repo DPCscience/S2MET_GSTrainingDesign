@@ -1,7 +1,7 @@
 ## S2MET Phenotypic Data Summary
 ## 
 ## Author: Jeff Neyhart
-## Last updated: March 15, 2018
+## Last updated: May 2, 2018
 ## 
 ## This notebook outlines procedures for calculating adjusted phenotypic means of
 ## entries in trials that belong to the `S2MET` experiment.
@@ -24,11 +24,17 @@ library(modelr)
 library(pbr)
 library(rrBLUP)
 library(ggridges)
+# Load a new optimizer
+library(optimx)
+library(lme4qtl)
 
 # The head directory
 repo_dir <- getwd()
 
 source(file.path(repo_dir, "source.R"))
+
+# Load the distance matrices
+load(file.path(result_dir, "distance_methods_results.RData"))
 
 
 ## Basic Summaries
@@ -98,14 +104,14 @@ g_met_dist <- S2_MET_BLUEs_toplot %>%
 # Alternatively, plot using boxplot
 g_met_boxplot <- S2_MET_BLUEs_toplot %>%
   ggplot(aes(x = environment, y = value, fill = environment)) +
-  geom_boxplot(width = 1) +
+  geom_boxplot(width = 0.75) +
   facet_grid(trait ~ ., scales = "free_y", switch = "y") +
   scale_fill_discrete(guide = FALSE) +
   ylab("Phenotypic Value") +
   xlab("Environment") +
-  labs(title = "Trait Distributions in All Environments") + 
+  # labs(title = "Trait Distributions in All Environments") + 
   theme_bw() +
-  theme(axis.text.x = element_text(size = 6, angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(size = 12, angle = 45, hjust = 1))
 
 
 # Save it
@@ -113,14 +119,115 @@ save_file <- file.path(fig_dir, "met_trait_dist.jpg")
 ggsave(filename = save_file, plot = g_met_dist, width = 5, height = 5, dpi = 1000)
 
 # Save it
-save_file <- file.path(fig_dir, "met_trait_dist_boxplot.jpg")
-ggsave(filename = save_file, plot = g_met_boxplot, width = 9, height = 7, dpi = 1000)
+ggsave(filename = "met_trait_dist_boxplot.jpg", plot = g_met_boxplot, path = fig_dir,
+       width = 9, height = 7, dpi = 1000)
+
+
+g_met_boxplot1 <- g_met_boxplot + theme(axis.title = element_text(size = 18), axis.text = element_text(size = 12),
+                                        strip.text = element_text(size = 16))
+ggsave(filename = "met_trait_dist_boxplot_poster.jpg", plot = g_met_boxplot1, path = fig_dir,
+       width = 12.05, height = 6, dpi = 1000)
 
 
 
 
 
 ## Stage-Two analysis
+
+# Fit a random model where environment is defined as location-year combinations
+random_terms <- c("(1|line_name)", "(1|environment)", "(1|line_name:environment)")
+
+# Create formulas
+reduced_forms <- combn(x = random_terms, m = length(random_terms) - 1, paste, simplify = FALSE, collapse = " + ") %>%
+  map(~str_c("value ~ ", .) %>% as.formula) %>%
+  set_names(rev(random_terms))
+
+# Add the full formula
+forms <- c(full = as.formula(str_c("value ~ ", str_c(random_terms, collapse = " + "))),
+           reduced_forms)
+
+
+# Group by trait and fit the multi-environment model
+stage_two_fits_GE <- S2_MET_BLUEs %>%
+  mutate_at(vars(location:line_name), as.factor) %>%
+  group_by(trait) %>%
+  do({
+    
+    df <- droplevels(.)
+    
+    # Table of lines by environments (i.e. plots)
+    plot_table <- xtabs(formula = ~ line_name + environment, data = df)
+    
+    ## Harmonic means
+    # Locations
+    harm_env <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+      ifelse(. > 1, 1, .) %>%
+      rowSums() %>% 
+      harm_mean()
+    
+    # Reps
+    harm_rep <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+      harm_mean()
+    
+    # Lmer control
+    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore",
+                                calc.derivs = FALSE,
+                                optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE))
+    
+    # lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+    
+    # Get the weights
+    wts <- pull(df, std_error)^2
+    
+    # Fit the models and return
+    fits <- fit_with(data = df, lmer, forms, weights = wts, control = lmer_control)
+    
+    ## Likelihood ratio tests
+    lrt <- fits[-1] %>% 
+      map(~lr_test(model1 = fits$full, model2 = .)) %>%
+      list(., names(.)) %>%
+      pmap_df(~mutate(.x, term = .y)) %>%
+      mutate(variation_source = str_replace_all(string = term, pattern = "\\(1\\||\\)", "")) %>%
+      select(variation_source, df:p_value)
+    
+    # Calculate heritability
+    h2 <- herit(object = fits$full, n_e = harm_env, n_r = harm_rep,
+                exp = "line_name / (line_name + (environment / n_e) + (Residual / (n_e * n_r)))")
+    
+    # Return data_frame
+    data_frame(fit = list(fits$full), lrt = list(lrt), h2 = list(h2), n_e = harm_env, n_r = harm_rep) 
+    
+    })
+
+
+## Plot the proportion of variance from each source
+stage_two_fits_GE_varprop <- stage_two_fits_GE %>%
+  unnest(h2) %>% 
+  filter(map_lgl(h2, is.data.frame)) %>% 
+  unnest() %>% 
+  group_by(trait) %>% 
+  mutate(var_prop = variance / sum(variance),
+         source = str_replace_all(source, c("line_name:environment" = "Genotype x Environment",
+                                            "environment" = "Environment", "line_name" = "Genotype")),
+         source = factor(source, levels = c("Environment", "Genotype", "Genotype x Environment",
+                                            "Residual")))
+
+## Plot
+stage_two_fits_GE_varprop_plot <- stage_two_fits_GE_varprop %>% 
+  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+  geom_col() +
+  ylab("Proportion of Variance") +
+  scale_fill_manual(values = umn_palette(3, 4), name = "Source") +
+  theme_bw() +
+  theme(axis.title.x = element_blank(),
+        legend.position = "bottom")
+
+ 
+
+
+
+
+
 
 # Mixed model formula - everything is random!
 random_terms <- c("(1|line_name)", "(1|location)", "(1|year)", "(1|line_name:location)",
@@ -136,8 +243,6 @@ forms <- c(full = as.formula(str_c("value ~ ", str_c(random_terms, collapse = " 
            reduced_forms)
 
 
-# Load a new optimizer
-library(optimx)
 
 # Group by trait and fit the multi-environment model
 stage_two_fits <- S2_MET_BLUEs %>%
@@ -323,4 +428,21 @@ ggsave(filename = save_file, plot = g_env_cor, height = 8, width = 8)
 
 save_file <- file.path(result_dir, "environmental_genetic_correlations.RData")
 save("env_cor_tp", "env_cor_all", file = save_file)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
