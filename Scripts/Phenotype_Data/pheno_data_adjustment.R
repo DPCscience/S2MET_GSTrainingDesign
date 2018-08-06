@@ -10,9 +10,9 @@
 # Load libraries and directories
 
 library(tidyverse)
-library(stringr)
 library(readxl)
 library(lme4)
+library(lmerTest)
 library(modelr)
 library(broom)
 library(pbr)
@@ -31,7 +31,7 @@ proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 traits <- c("GrainYield", "HeadingDate", "PlantHeight")
 
 # Load the tidy S2 data
-load("C:/Users/Jeff/Google Drive/Barley Lab/Breeding//Phenotypic Data/Final/Master Phenotypes/S2_MET_tidy.RData")
+load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_MET_tidy.RData")
 
 
 ## Create a data.frame of data to model
@@ -46,7 +46,7 @@ data_to_model <- S2_MET_tidy %>%
   mutate(line_name = as.character(line_name),
          line = ifelse(!line_name %in% checks, line_name, "00check"),
          check = ifelse(line_name %in% checks, line_name, "00line")) %>%
-  mutate_at(vars(rep, line, check), as.factor)
+  mutate_at(vars(rep, line, check, row, column, blk), as.factor)
 
 
 
@@ -60,101 +60,103 @@ data_to_model <- S2_MET_tidy %>%
 # Stage-one models are environment specific and estimate the standard error in each
 # environment
 
-# Designate two models, depending on the environment and the experimental design
-forms <- formulas(~ value,
-                  form1 = ~ -1 + line + check,
-                  form2 = ~ -1 + line + check + (1|blk))
+# I will include row, column, and blk as random effects and use backwards elimination to reduce
+# the models
+rand_eff <- c("row", "column", "blk")
 
-# Fit the models
-stage_one <- data_to_model %>%
-  group_by(trial, trait) %>%
-  do({
-    
-    # Create a separate df object - this greatly improves the speed of the model fitting
-    df <- droplevels(.)
-    
-    # Print the trait
-    print(unique(df$trait))
-    
-    # Extract the function and the formula, then fit
-    if (is.na(df$blk[1])) {
-      f <- forms$form1
-      f_mean <- str_replace(string = f, pattern = "-1 \\+", "") %>%
-        tail(-1) %>% 
-        str_c(collapse = " ~")
-        
-      fit <- lm(formula = f, data = df)
-      fit_mean <- lm(formula = f_mean, data = df)
-      
-      # Tidy
-      fit_tidy <- tidy(fit) %>% 
-        mutate(group = "fixed")
-      
-      fit_mean_tidy <- tidy(fit_mean) %>% 
-        mutate(group = "fixed")
-      
-    } else {
-      f <- forms$form2
-      f_mean <- str_replace(string = f, pattern = "-1 \\+", "") %>%
-        tail(-1) %>% 
-        str_c(collapse = " ~")
-      
-      fit <- lmer(formula = f, data = df)
-      fit_mean <- lmer(formula = f_mean, data = df)
-      
-      fit_tidy <- tidy(fit)
-      fit_mean_tidy <- tidy(fit_mean)
-      
-    }
-    
-    # Get the levels of the checks
-    check_levels <- levels(df$check)
-    
-    fit_tidy1 <- fit_tidy %>% 
-      filter(group == "fixed") %>% 
-      mutate(term = if_else(term == "line00check", tail(check_levels, 1), 
-                            str_replace_all(term, pattern = "line|check", replacement = "")), 
-             estimate = if_else(term %in% head(check_levels, -1), estimate + estimate[1], estimate)) %>% 
-      select(line = term, estimate, std.error)
-    
-    # Estimate z scores
-    z_scores <- fit_mean_tidy %>% 
-      filter(str_detect(term, "line")) %>% 
-      transmute(line = str_replace_all(term, "line", ""), z = estimate / std.error)
+# The base formula will have line and check as fixed effects
+base_form <- value ~ -1 + line + check
 
-    
-    ## Fit a new model to calulate heritability
-    f_ran <- str_replace_all(string = f, pattern = "line", replacement = "(1|line)") %>% 
-      tail(1) %>% 
-      str_c("value ~ ", .) %>% 
-      as.formula()
-    
-    fit_ran <- lmer(formula = f_ran, data = df)
-    
-    # Find the harmonic mean of the number of replicates
-    n_r <- table(df$line_name) %>%
-      harm_mean()
-    
-    # Add the z scores to the fit_tidy
-    fit_tidy2 <- left_join(x = fit_tidy1, y = z_scores, by = "line")
-    
-    # Return the coefficients and the variance of the adjusted means
-    data_frame(fit = list(fit), fit_ran = list(fit_ran), BLUE = list(fit_tidy2), 
-               n_r = n_r) })
+## Create a empty data frame of the distinct trials and traits
+stage_one_results <- data_to_model %>% 
+  distinct(trait, trial) %>%
+  mutate(out = list(NULL))
 
+# Iterate over rows
+for (i in seq(nrow(stage_one_results))) {
 
-## Calculate the heritability in each environment
-
-# Calculate heritability
-stage1_herit <- stage_one %>% 
-  do(suppressWarnings(herit_boot(object = .$fit_ran[[1]], exp = "line / (line + (Residual / n_r))", 
-                                 n_r = .$n_r, boot.reps = 100)))
+  # Create a separate df object - this greatly improves the speed of the model fitting
+  df <- data_to_model %>%
+    filter(trait == stage_one_results$trait[i], trial == stage_one_results$trial[i]) %>%
+    droplevels()
   
+  # Print the trait
+  cat(c(unique(df$trait), unique(df$trial)))
+  
+  # Determine the random effects that are available
+  rand_eff_tomodel <- rand_eff[which(!is.na(df[1,rand_eff]))]
+  
+  # Create the full formula
+  full_form <- base_form %>%
+    add_predictors(as.formula(str_c("~ ", str_c("(1|", rand_eff_tomodel, ")", collapse = " + "))))
+  
+  # Fit the model
+  fit <- lmer(formula = full_form, data = df, contrasts = list(line = "contr.sum"))
+  # Backwards elimination
+  back_elim <- step(fit, alpha.random = 0.05, reduce.fixed = FALSE)
+  fit_final <- get_model(back_elim)
+  
+  # Tidy up
+  if (class(fit_final) == "lm") {
+    fit_final_tidy <- tidy(fit_final)
+    
+  } else {
+    fit_final_tidy <- structure(fit_final, class = "merMod") %>%
+      tidy() %>%
+      filter(group == "fixed")
+    
+  }
+  
+  # Get the levels of the checks
+  check_levels <- levels(df$check)
+  
+  fit_tidy1 <- fit_final_tidy %>% 
+    mutate(term = if_else(term == "line00check", tail(check_levels, 1), 
+                          str_replace_all(term, pattern = "line|check", replacement = "")), 
+           estimate = if_else(term %in% head(check_levels, -1), estimate + estimate[1], estimate)) %>% 
+    select(line = term, estimate, std.error)
+
+  ## Fit a new model to calulate heritability
+  ran_form <- str_replace_all(string = formula(fit_final), pattern = "line", replacement = "(1|line)") %>%
+    str_replace_all("- 1", "") %>%
+    tail(1) %>% 
+    str_c("value ~ ", .) %>% 
+    as.formula()
+  
+  fit_ran <- lmer(formula = f_ran, data = df)
+  
+  # Find the harmonic mean of the number of replicates
+  n_r <- table(df$line_name) %>%
+    harm_mean()
+  
+  # Calculate heritability
+  h2 <- herit(object = fit_ran, exp = "line / (line + (Residual / n_r))", n_r = n_r)[[1]]
+  
+  # Return the coefficients and the variance of the adjusted means
+  stage_one_results$out[[i]] <- data_frame(
+    BLUE = list(fit_tidy1), 
+    terms = list(attr(terms(fit_final), "term.labels")),
+    heritability = h2) 
+
+}
+
+
+# Unnest
+stage_one_data <- stage_one_results %>%
+  unnest()
+
+
+# Extract the heritability estimates
+stage_one_herit <- stage_one_data %>%
+  select(trial, trait, heritability)
+
+
+
 # Plot
-stage1_herit %>%
-  ggplot(aes(x = trial, y = heritability - bias)) +
+stage_one_herit %>%
+  ggplot(aes(x = trial, y = heritability )) +
   geom_col() +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.25) +
+  # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.25) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   facet_grid(trait ~ .) +
   labs(title = "Broad-Sense Heritability of Each Trial") +
@@ -166,7 +168,7 @@ stage1_herit %>%
 
 
 # Combine trial information from the metadata (ie. change some trial/environment names)
-stage_one_data <- full_join(stage_one, stage1_herit) %>% 
+stage_one_data <- stage_one_data %>%
   left_join(., select(trial_info, trial, environment, location, year), by = ("trial")) %>%
   select(trial, environment, location, year, names(.))
 

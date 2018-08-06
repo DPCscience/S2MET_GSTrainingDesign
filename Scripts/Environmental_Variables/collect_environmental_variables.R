@@ -1,7 +1,7 @@
 ## Collect and Gather Environmental Covariates
 ## 
 ## Author: Jeff Neyhart
-## Last modified: May 25, 2018
+## Last modified: July 21, 2018
 ## 
 ## This R Script outlines the methods to gather environmental covariables on soil
 ## and weather data
@@ -20,11 +20,114 @@ library(geosphere)
 library(soilDB)
 library(foreign)
 library(raster)
+library(rvest)
+library(measurements)
 
+# Start and end year
+end_year <- max(trial_info$year)
+start_year <- min(trial_info$year) - 10
 
+# Collect data from March 1 to August 31 of each year
+start_date <- "03-01"
+end_date <- "08-31"
 
 
 ## Data Collection
+
+
+### Day length
+
+# Get data from the USNO
+url <- "http://aa.usno.navy.mil/data/docs/Dur_OneYear.php"
+
+# Start an html session
+session <- html_session(url)
+
+# Get the form
+blank_form <- html_form(session)[[2]]
+
+# Define a function to convert a lat or long to decimal degrees
+conv_latlong <- function(x) {
+  x_conv <- conv_unit(x = x, from = "dec_deg", "deg_dec_min")
+  # Split on space
+  x_conv1 <- as.character(str_split(string = x_conv, pattern = " ", simplify = TRUE))
+  x_conv1 %>% str_replace_all("-", "") %>% parse_number() %>% 
+    round(x = ., digits = 0) %>% as.character() %>% str_c(collapse = " ")
+}
+
+## Prepare the trial information for use in the form
+trial_info_use <- trial_info %>% 
+  filter(!is.na(latitude)) %>% 
+  distinct(environment, year, latitude, longitude) %>%
+  mutate_at(vars(-environment, -year), ~map_chr(., conv_latlong)) %>%
+  gather(coord, string, -environment, -year) %>%
+  separate(col = "string", into = c("deg", "min"), sep = " ") %>%
+  split(.$environment)
+
+# Iterate over environments and get the daylength information
+daylength_raw <- trial_info_use %>%
+  map_df(~{
+    env <- .
+    
+    full_form <- blank_form %>%
+      set_values(year = as.character(unique(env$year)),
+                 lon_deg = env$deg[2], lon_min = env$min[2],
+                 lat_deg = env$deg[1], lat_min = env$min[1])
+    
+    # Submit the form
+    form_sub <- submit_form(session = session, form = full_form, submit = "tz_sign")
+    
+    # Return the lines
+    raw_lines <- form_sub %>% 
+      read_html() %>%
+      html_text()
+    
+    # Read into a table
+    raw_table <- read_table(raw_lines, skip = 8) %>% 
+      dplyr::select(-contains("X")) %>%
+      mutate(Day = parse_number(Day, na = c(NA, "", "Back"))) %>% 
+      filter(Day %in% seq(31))
+    
+    # Convert the hour-minute into fractions of hours
+    parsed_table <- raw_table %>% 
+      gather(month, hours, -Day) %>% 
+      mutate(hours = parse_date_time(x = hours, orders = "HM") %>% {hour(.) + (minute(.) / 60)}) %>%
+      rename(day = Day) %>%
+      filter(!is.na(hours)) %>%
+      mutate(day = str_c(month, day, sep = " ") %>% parse_date_time(orders = "md") %>% yday()) %>%
+      dplyr::select(-month)
+    
+    # Add env information
+    distinct(env, environment, year) %>%
+      mutate(out = list(parsed_table)) %>% 
+      unnest()
+    
+  })
+
+
+## Subset data from the relevant dates
+daylength_df <- daylength_raw %>%
+  filter(between(day, yday(parse_date_time(start_date, orders = "md")), yday(parse_date_time(end_date, orders = "md")))) %>%
+  dplyr::select(-year)
+
+## Only use one set of observations per location (this should be unchanged across years
+daylength_loc_df <- daylength_df %>% 
+  full_join(trial_info, .) %>% 
+  dplyr::select(environment, location, latitude, longitude, day, hours) %>%
+  group_by(location, day) %>% 
+  dplyr::slice(1) %>% 
+  ungroup() %>%
+  arrange(location) %>% 
+  dplyr::select(-environment)
+
+
+## Save
+save_file <- file.path(data_dir, "Climate_Data/USNO_daylength_data.RData")
+save("daylength_loc_df", file = save_file)
+
+
+
+
 
 ### NOAA Weather Data
 
@@ -49,16 +152,10 @@ library(raster)
 # API token
 token <- 'ubmUkwrtxZOQLeyXZdtCMjkKcCTpPDcK'
 
-# Start and end year
-end_year <- max(trial_info$year)
-start_year <- min(trial_info$year) - 10
-
-# Collect data from March 1 to August 31 of each year
-start_date <- "03-01"
-end_date <- "08-31"
-
-# Set a threshold for missing data on a station-datatype basis
+# Set a threshold for missing data on a station-datatype-year basis
 max_missing <- 0.20
+# Set threshold for number of years in which the missing data threshold is breached
+max_year <- 3
 
 
 # Desired data types
@@ -108,11 +205,11 @@ trial_loc_dist <- locations_unique %>%
   mutate(station_dist = loc_dist)
 
 
-# Find the 10 stations that are closest to each location
+# Find the n closest stations to each location
 closest_station <- trial_loc_dist %>% 
   unnest() %>% 
   group_by(location) %>% 
-  top_n(n = -10, wt = dist_to_site) %>% 
+  top_n(n = -15, wt = dist_to_site) %>% 
   arrange(location, dist_to_site) %>%
   ungroup()
 
@@ -123,6 +220,12 @@ trial_station <- closest_station %>%
   top_n(n = -1, wt = dist_to_site) %>% 
   dplyr::slice(1) %>%
   ungroup()
+
+## For each station, 
+
+
+
+
 
 trial_station_data <- map(trial_station$id, ~{
   
@@ -146,7 +249,7 @@ trial_station_data <- map(trial_station$id, ~{
     # Pull data
     ncdc_data <- ncdc(datasetid = 'GHCND', datatypeid = desired_vars, stationid = station_id, 
                       startdate = as.character(start_ymd), enddate = as.character(end_ymd), 
-                      limit = 1000, token = token, )
+                      limit = 1000, token = token)
     
     # Reformat and determine the number of days since the start date
     data_list[[as.character(yr)]] <- ncdc_data$data %>%
@@ -193,7 +296,7 @@ trial_station_data_complete <- trial_station_data_qc %>%
 
 
 # Deal with missing data by first assessing the level of missingness. If the level of missing 
-# data is above the threshold provided above, reject the data from that environment. Then look 
+# data is above the threshold provided above, reject the data from that station Then look 
 # for data from the next closest station for each environment and extract data.
 
 
@@ -214,9 +317,10 @@ g_station_missing <- trial_station_missing %>%
 
 ## Pull out environments that need re-gathering - total
 redo_env_all <- trial_station_missing %>% 
-  group_by(location, datatype) %>% 
-  summarize(prop_miss = mean(prop_miss)) %>% 
-  filter(any(prop_miss > max_missing)) %>%
+  group_by(location, datatype, year) %>% 
+  summarize(prop_miss = mean(prop_miss)) %>%  
+  summarize(n_missing_year = sum(prop_miss > max_missing)) %>% 
+  filter(any(n_missing_year > max_year)) %>%
   ungroup() %>% 
   distinct(location) %>%
   pull()
@@ -344,13 +448,17 @@ while (length(redo_env) >= 1) {
   
   ## Pull out environments that need re-gathering - total
   redo_env_all <- trial_station_missing %>% 
-    filter(any(mean(prop_miss) > max_missing)) %>% 
+    group_by(location, datatype, year) %>% 
+    summarize(prop_miss = mean(prop_miss)) %>%  
+    summarize(n_missing_year = sum(prop_miss > max_missing)) %>% 
+    filter(any(n_missing_year > max_year)) %>%
     ungroup() %>% 
     distinct(location) %>%
     pull()
   
   ## Pull out environments that need re-gathering for 2015, 2016, or 2017
   redo_env_rel <- trial_station_missing %>% 
+    group_by(location, datatype) %>% 
     filter(year >= 2015) %>%
     filter(any(prop_miss > max_missing)) %>% 
     ungroup() %>% 

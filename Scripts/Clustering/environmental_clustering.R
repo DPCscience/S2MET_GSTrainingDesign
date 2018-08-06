@@ -1,7 +1,7 @@
 ## Cluster environments in the S2MET project
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: August 06, 2018
 ## 
 ## This script will create different distance matrices for use in clustering. The
 ## clustering algorithm will be constant
@@ -9,9 +9,10 @@
 
 # Load packages and the source script
 library(tidyverse)
-library(stringr)
 library(readxl)
 library(pbr)
+library(ggdendro)
+library(cowplot)
 
 # The head directory
 repo_dir <- getwd()
@@ -23,14 +24,13 @@ source(file.path(repo_dir, "source.R"))
 ## 
 ## 1. Great Circle Distance using lat/long
 ## 2. The environment distance metric (as described in Bernardo2010)
-## 3. Factor analytic or PCA of GxE term ## Removed
-## 4. 1 year environmental covariables ## Removed
-## 5. 10 year environmental covariables
+## 4. 4 - 1 year environmental covariables
+## 5. 4- 10 year environmental covariables
 ## 
 
 
-## Load the environment covariable data
-load(file.path(data_dir, "environmental_data_compiled.RData"))
+## Load the environment covariable distance matrices
+load(file.path(result_dir, "environmental_covariable_distance_mat.RData"))
 
 # # Create a new data.frame to hold the different datasets
 # S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
@@ -91,7 +91,7 @@ great_circle_dist_list <- rerun(length(traits), great_circle_dist) %>% set_names
 #   map(as.dist)
 
 
-## Environmental distance metric
+## Phenotypic distance metric
 # This is described by Bernardo2010
 
 # First calculate the distance using all data
@@ -247,9 +247,6 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
 #   mutate(FA = list(dist(delta)))
 
 
-# Number of PCs to choose for GxE BLUPs and ECs
-n_PC <- 2
-
 # # Extract the GxE BLUPs and run PCA
 # ge_PCA_dist_all <- S2_MET_BLUPs_ge_all %>%
 #   map_df(function(out) {
@@ -310,72 +307,94 @@ n_PC <- 2
 
 
 
-## Environmental covariates
-# Use the PCs of the environmental covariates to form clusters
-EC_one_PCA <- prcomp(x = one_year_env_mat, center = TRUE, scale. = TRUE)
-EC_multi_PCA <- prcomp(x = multi_year_env_mat, center = TRUE, scale = TRUE)
-
-## Tidy up
-EC_one_PCA_df <- bind_rows(
-  broom::tidy(x = EC_one_PCA, matrix = "u") %>% rename(label = row),
-  broom::tidy(x = EC_one_PCA, matrix = "v") %>% rename(label = column)
-) %>% 
-  mutate(PC = str_c("PC", PC),
-         type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
-
-EC_multi_PCA_df <- bind_rows(
-  broom::tidy(x = EC_multi_PCA, matrix = "u") %>% rename(label = row),
-  broom::tidy(x = EC_multi_PCA, matrix = "v") %>% rename(label = column)
-) %>% 
-  mutate(PC = str_c("PC", PC),
-         type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
-  
-
-## Visualize briefly
-EC_one_PCA_df %>% 
-  filter(PC %in% c("PC1", "PC2")) %>% 
-  spread(PC, value) %>% 
-  ggplot(aes(x = PC1, y = PC2, col = type)) +
-  geom_point() + 
-  geom_text(aes(label = label), check_overlap = T) + 
-  theme_classic()
-
-
-
-# Copy the list per trait (the distance is the same for each trait)
-# EC_one_PCA_dist_list <- rerun(length(traits), dist(EC_one_PCA$x[,1:n_PC, drop = FALSE])) %>% 
+# ## Environmental covariates
+# # Use the PCs of the environmental covariates to form clusters
+# EC_one_PCA <- prcomp(x = one_year_env_mat, center = TRUE, scale. = TRUE)
+# EC_multi_PCA <- prcomp(x = multi_year_env_mat, center = TRUE, scale = TRUE)
+# 
+# ## Tidy up
+# EC_one_PCA_df <- bind_rows(
+#   broom::tidy(x = EC_one_PCA, matrix = "u") %>% rename(label = row),
+#   broom::tidy(x = EC_one_PCA, matrix = "v") %>% rename(label = column)
+# ) %>% 
+#   mutate(PC = str_c("PC", PC),
+#          type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
+# 
+# EC_multi_PCA_df <- bind_rows(
+#   broom::tidy(x = EC_multi_PCA, matrix = "u") %>% rename(label = row),
+#   broom::tidy(x = EC_multi_PCA, matrix = "v") %>% rename(label = column)
+# ) %>% 
+#   mutate(PC = str_c("PC", PC),
+#          type = ifelse(str_detect(label, "[A-Z]{3}[0-9]{2}"), "env", "cov"))
+#   
+# 
+# ## Visualize briefly
+# EC_one_PCA_df %>% 
+#   filter(PC %in% c("PC1", "PC2")) %>% 
+#   spread(PC, value) %>% 
+#   ggplot(aes(x = PC1, y = PC2, col = type)) +
+#   geom_point() + 
+#   geom_text(aes(label = label), check_overlap = T) + 
+#   theme_classic()
+# 
+# 
+# 
+# # Copy the list per trait (the distance is the same for each trait)
+# # EC_one_PCA_dist_list <- rerun(length(traits), dist(EC_one_PCA$x[,1:n_PC, drop = FALSE])) %>% 
+# #   set_names(traits)
+# EC_multi_PCA_dist_list <- rerun(length(traits), dist(EC_multi_PCA$x[,1:n_PC, drop = FALSE])) %>% 
 #   set_names(traits)
-EC_multi_PCA_dist_list <- rerun(length(traits), dist(EC_multi_PCA$x[,1:n_PC, drop = FALSE])) %>% 
-  set_names(traits)
 
 
+## Combine the one-year and multi-year ECs
+one_year_ec_dist1 <- one_year_ec_dist %>%
+  mutate(model = str_c("OYEC_", model))
+multi_year_ec_dist1 <- multi_year_ec_dist %>%
+  mutate(model = str_c("MYEC_", model))
 
-## Combine the lists into a data.frame
-dist_method_df_all <- data_frame(
-  trait = traits, 
-  great_circle_dist = great_circle_dist_list, 
-  # env_cor_dist = env_cor_all_dist_list, 
-  ge_mean_D = ge_mean_D_all, 
-  # ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
-  # ec_one_PCA_dist = EC_one_PCA_dist_list,
-  ec_multi_PCA_dist = EC_multi_PCA_dist_list)
+# Combine and add the other distance matrices
+dist_method_df_all <- bind_rows(
+  data_frame(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list),
+  data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_all),
+  one_year_ec_dist1,
+  multi_year_ec_dist1
+)
+
+# Combine and add the other distance matrices
+dist_method_df_tp <- bind_rows(
+  data_frame(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list),
+  data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_tp),
+  one_year_ec_dist1,
+  multi_year_ec_dist1
+)
 
 
-dist_method_df_tp <- data_frame(
-  trait = traits, 
-  great_circle_dist = great_circle_dist_list, 
-  # env_cor_dist = env_cor_tp_dist_list, 
-  ge_mean_D = ge_mean_D_tp, 
-  # ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
-  # ec_one_PCA_dist = EC_one_PCA_dist_list,
-  ec_multi_PCA_dist = EC_multi_PCA_dist_list)
+# 
+# ## Combine the lists into a data.frame
+# dist_method_df_all <- data_frame(
+#   trait = traits, 
+#   great_circle_dist = great_circle_dist_list, 
+#   # env_cor_dist = env_cor_all_dist_list, 
+#   ge_mean_D = ge_mean_D_all, 
+#   # ge_PCA_dist = ge_PCA_dist_all$blup_pc_dist,
+#   # ec_one_PCA_dist = EC_one_PCA_dist_list,
+#   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
+# 
+# 
+# dist_method_df_tp <- data_frame(
+#   trait = traits, 
+#   great_circle_dist = great_circle_dist_list, 
+#   # env_cor_dist = env_cor_tp_dist_list, 
+#   ge_mean_D = ge_mean_D_tp, 
+#   # ge_PCA_dist = ge_PCA_dist_tp$blup_pc_dist,
+#   # ec_one_PCA_dist = EC_one_PCA_dist_list,
+#   ec_multi_PCA_dist = EC_multi_PCA_dist_list)
 
 
 # Tidy the the distance matrix data.frame, then combine the data.frames for
 # TP and TP + VP
 dist_method_df_all_tidy <- dist_method_df_all %>% 
-  mutate(population = "all") %>% 
-  gather(dist_method, dist, -trait, -population)
+  mutate(population = "all")
 
 # For each trait, identify the most common set of environments
 dist_method_df_common_env <- dist_method_df_all_tidy %>% 
@@ -387,14 +406,13 @@ dist_method_df_common_env <- dist_method_df_all_tidy %>%
 # Then create cluster objects
 clust_method_df_all <- full_join(dist_method_df_all_tidy, dist_method_df_common_env, by = "trait") %>% 
   mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
-         cluster = map(dist, hclust)) %>%
+         cluster = map(dist, ~hclust(., method = "ward.D"))) %>%
   select(-common_env)
 
 
 # Just the TP
 dist_method_df_tp_tidy <- dist_method_df_tp %>% 
-  mutate(population = "tp") %>% 
-  gather(dist_method, dist, -trait, -population)
+  mutate(population = "tp")
 
 # For each trait, identify the most common set of environments
 dist_method_df_common_env <- dist_method_df_tp_tidy %>% 
@@ -406,7 +424,7 @@ dist_method_df_common_env <- dist_method_df_tp_tidy %>%
 # Then create cluster objects
 clust_method_df_tp <- full_join(dist_method_df_tp_tidy, dist_method_df_common_env, by = "trait") %>% 
   mutate(dist = list(dist, common_env) %>% pmap(~subset_env(dist = .x, envs = .y)),
-         cluster = map(dist, hclust)) %>%
+         cluster = map(dist, ~hclust(., method = "ward.D"))) %>%
   select(-common_env)
 
 ## Combine the data.frames
@@ -414,9 +432,56 @@ clust_method_df_tp <- full_join(dist_method_df_tp_tidy, dist_method_df_common_en
 clust_method_df <- bind_rows(clust_method_df_all, clust_method_df_tp)
 
 
+## For each model, plot the MDS of the distance matrix and the clustering
+clust_method_df_toplot <- clust_method_df %>%
+  group_by(trait, model, population) %>%
+  nest(dist, cluster) %>%
+  ## For each row, create a DF of the mds of the distance object
+  mutate(data = map(data, ~{
+    # Create the data.frame of MDS coordinates
+    dist_df <- cmdscale(.$dist[[1]]) %>% 
+      as.data.frame() %>% 
+      rename_all(~c("x", "y")) %>% 
+      rownames_to_column("environment") %>% 
+      as_data_frame()
+    
+    # Return a list
+    data_frame(dist_df = list(dist_df), cluster = .$cluster[1])
+  }))
 
+## Plot
+clust_method_plot_list <- clust_method_df_toplot %>%
+  group_by(model, population) %>% 
+  nest(trait, data) %>%
+  mutate(plot_obj = map(data, ~{
+    # Unnest the df
+    temp1 <- unnest(.)
+    
+    # Create the plot objects
+    dist_plots <- temp1$dist_df %>% 
+      map2(.x = ., .y = temp1$trait, ~mutate(.x, trait = .y)) %>%
+      map(~ggplot(data = ., aes(x = x, y = y, label = environment)) + 
+            geom_text(size = 2) + 
+            facet_wrap(~ trait, strip.position = "left") + 
+            theme_acs() +
+            theme(axis.title = element_blank(), axis.text = element_blank()))
+    
+    # Create the cluster plot objects
+    clust_plots <- temp1$cluster %>% 
+      map(~ggdendrogram(.) + 
+            theme(axis.text.x = element_text(size = 8), axis.text.y = element_blank()))
+    
+    # Create cowplots
+    plots2 <- map2(.x = dist_plots, .y = clust_plots, plot_grid, nrow = 1)
+    # Bind these together and return
+    plot_grid(plotlist = plots2, ncol = 1) }))
 
-### Visualize the environmental covariables
+## Iterate and save
+for (i in seq(nrow(clust_method_plot_list))) {
+  filename <- str_c("distance_cluster_plot_", clust_method_plot_list$model[i], "_", clust_method_plot_list$population[i], ".jpg")
+  ggsave(filename = filename, plot = clust_method_plot_list$plot_obj[[i]], path = fig_dir)
+}
+    
 
 
 
@@ -491,12 +556,12 @@ pred_env_rank_random <- pred_env_dist_rank %>%
         do({
           df <- .
           smpls <- rerun(.n = n_sample, sample(df$env_rank[[1]]))
-          sample_df <- data_frame(environment = df$environment[1], trait = df$trait[1],
-                                  population = df$population[1], dist_method = str_c("sample", seq_along(smpls)), 
-                                  env_rank = smpls)
+          data_frame(environment = df$environment[1], trait = df$trait[1],
+                     population = df$population[1], model = str_c("sample", seq_along(smpls)), 
+                     env_rank = smpls)
           
-          # Combine
-          bind_rows(df, sample_df)
+          # # Combine
+          # bind_rows(df, sample_df)
           
         }) %>%
         ungroup() )
@@ -506,8 +571,8 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 
 
 # Save this
-save_file <- file.path(result_dir, "distance_methods_results.RData")
-save("clust_method_df", "pred_env_rank_random", file = save_file)
+save_file <- file.path(result_dir, "distance_method_results.RData")
+save("clust_method_df", "pred_env_dist_rank","pred_env_rank_random", file = save_file)
 
 
 

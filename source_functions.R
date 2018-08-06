@@ -126,61 +126,104 @@ lr_test <- function(model1, model2) {
 
 
 
+# Function that generates regression values for a population against an environmental index
+# (i.e. stability), then performs an F test to test differences among the regression coefficients
+fwr <- function(formula, data, gen = "line_name", env = "environment") {
+  
+  out <- data %>%
+    split(.[[gen]]) %>%
+    map(~{
+      fit <- lm(formula, data = .)
+      data_frame(g = coef(fit)[1], b = coef(fit)[2], d = sum(resid(fit)^2))
+    }) %>%
+    map2_df(.y = names(.), ~mutate(.x, line_name = .y)) %>%
+    select(line_name, names(.))
 
-
-
-## Bootstrap a correlation coefficient
-boot_cor <- function(x, y, boot.reps = 1000, alpha = 0.05) {
   
-  # Error handling
-  boot.reps <- as.integer(boot.reps)
+  # Calculate degrees of freedom
+  df_b <- n_distinct(data[[gen]]) - 1
+  df_d <- df_b * (n_distinct(data[[env]]) - 2)
   
-  # Prob must be between 0 and 1
-  alpha_check <- alpha > 0 | alpha < 1
+  # Environmental index sums of squares
+  index <- distinct_(data, env, as.character(formula)[3])[[as.character(formula)[3]]]
+  e_ss <- sum(index^2)
   
-  if (!alpha_check)
-    stop("'alpha' must be between 0 and 1.")
+  ## Significance test
+  b_ss <- sum(scale(out$b, scale = FALSE)^2) * e_ss
+  d_ss <- sum(out$d)
   
-  # Define a function for the correlation
-  boot.cor <- function(input.data, i) {
-    rep_data <- input.data[i,]
-    return(cor(rep_data[,1], rep_data[,2]))
-  }
+  # Mean squares
+  b_ms <- b_ss / df_b
+  d_ms <- d_ss / df_d
+  
+  # F stat
+  Fstat <- b_ms / d_ms
+  pvalue <- pf(q = Fstat, df1 = df_b, df2 = df_d, lower.tail = FALSE)
+  
+  ## Output the results
+  data_frame(
+    regression = list(out),
+    Fstat = Fstat,
+    pvalue = pvalue
+  )
   
   
-  # First calculate the base statistic
-  base_cor <- suppressWarnings(cor(x, y))
-  
-  # If the correlation is not NA, proceed
-  if (!is.na(base_cor)) {
-    
-    # Perform the bootstrapping
-    boot_results <- boot(data = cbind(x, y), statistic = boot.cor, R = boot.reps)
-    
-    # Standard error
-    se <- sd(boot_results$t)
-    # Bias
-    bias <- mean(boot_results$t) - base_cor
-    
-    
-    # Confidence interval
-    ci_upper <- quantile(boot_results$t, 1 - (alpha / 2))
-    ci_lower <- quantile(boot_results$t, (alpha / 2))
-    
-  } else {
-    
-    se <- bias <- ci_lower <- ci_upper <- NA
-    
-  }
-  
-  # Assemble list and return
-  data.frame(cor = base_cor, se = se, bias = bias,
-             ci_lower = ci_lower, ci_upper = ci_upper, row.names = NULL)
 }
 
 
 
-## Heritability functions
+
+
+### Function that computes the significance of principal components via permutation.
+## This function will first run a principal component analysis using data,
+## then it will permute the order of the data and for each permutation re-run
+## the PCA. PCs will be retained if their proportion of variance is significant when
+## compared to the distribution of variance proportion under permutation
+## Note that the test is one-sided, since the variance cannot be negative.
+prcomp_perm <- function(x, scale = TRUE, permutations = 1000, level = 0.95) {
+  
+  # Scale the data, if called
+  x1 <- if (scale) scale(x) else x
+  
+  # Fit the original PCA
+  pc_fit <- prcomp(x = x1, center = FALSE, scale. = FALSE)
+  # Summarize
+  pc_fit_summ <- summary(pc_fit)
+  
+  ## Permute the data
+  data_permute <- replicate(n = permutations, t(apply(X = x1, MARGIN = 1, FUN = sample)), simplify = FALSE)
+  
+  # Run the PCA
+  pc_perm_fit_list <- map(data_permute, ~prcomp(x = ., center = FALSE, scale. = FALSE)) %>%
+    map(summary) %>%
+    # Pull out the variance explained
+    map(~.$importance[2,])
+  
+  pc_perm_var <- do.call("rbind", pc_perm_fit_list)
+  
+  ## Compare to the original variance to get a p-value
+  pvalues <- rowMeans(apply(X = pc_perm_var, MARGIN = 1, FUN = function(x) x >= pc_fit_summ$importance[2,]))
+  
+  # Get a confidence interval
+  var_ci <- apply(X = pc_perm_var, MARGIN = 2, FUN = quantile, probs = c((1 - level) / 2, 1 - ((1 - level) / 2)))
+  
+  # Return a list
+  list(
+    tidy = tidy(pc_fit),
+    summary = data.frame(PC = colnames(pc_fit$x), var_exp = pc_fit_summ$importance[2,], as.data.frame(t(var_ci)), 
+                         p_value = pvalues, row.names = NULL, stringsAsFactors = FALSE, check.names = FALSE)
+  )
+  
+}
+
+
+
+
+
+
+
+
+
 ## Write a function to subset a distance matrix using a set of environments
 subset_env <- function(dist, envs) {
   as.matrix(dist) %>%
@@ -462,6 +505,23 @@ optim_env <- function(environments, data, criterion = c("lrt", "first1", "first5
   
 
 
+## Function to calculate the mean in sliding window
+window_mean <- function(x, y, window = 8) {
+  
+  # Size of window on either side
+  side_window <- ceiling(window / 2)
+  # Get the min and max
+  min_x <- min(x)
+  max_x <- max(x)
+  
+  # Create a list of indices
+  x_use <- map(x, ~seq(. - side_window, . + side_window) %>% .[between(., min_x, max_x)]) %>%
+    map(~match(x = ., table = x))
+  
+  # Calculate the mean y within that x
+  map_dbl(x_use, ~mean(y[.], na.rm = TRUE))
+  
+}
 
 
 
