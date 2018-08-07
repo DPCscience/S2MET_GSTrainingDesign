@@ -70,6 +70,7 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
 
 ## Use the distances calculated using 'all' data
 pred_env_dist_rank_tomodel <- pred_env_rank_random$all %>%
+  rename(model = dist_method) %>%
   # Use only the first 50 samples
   filter(!model %in% str_c("sample", 51:100)) %>% 
   bind_rows(pred_env_dist_rank, .)

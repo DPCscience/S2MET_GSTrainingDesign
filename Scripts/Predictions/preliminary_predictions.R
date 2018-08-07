@@ -11,7 +11,6 @@
 # Load packages and the source script
 library(tidyverse)
 library(broom)
-library(stringr)
 library(readxl)
 library(modelr)
 library(pbr)
