@@ -79,6 +79,7 @@ pred_env_dist_rank_tomodel <- pred_env_rank_random$all %>%
 ## Split the 'pred_env_rank_random' data.frame by core and then pipe to mclapply
 pred_env_dist_rank_split <- pred_env_dist_rank_tomodel %>% 
   filter(!str_detect(model, "top_cor|mr_red")) %>%
+  filter(trait == "HeadingDate") %>% # One trait at-a-time
   assign_cores(n_core = n_core) %>%
   split(.$core)
 
