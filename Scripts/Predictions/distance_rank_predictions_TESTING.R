@@ -1,15 +1,15 @@
 ## Predictions based on environmental distance
+## TESTING VERSION
 ## 
 ## Author: Jeff Neyhart
-## Last Updated: August 6, 2018
+## Last Updated: August 9, 2018
 ## 
 ## This script will look at prediction accuracies from adding environments after
-## ranking based on specific distance metrics
+## ranking based on specific distance metrics - TESTING
 ## 
 
 
 ### Run for MSI
-
 # Run the source script
 repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
 source(file.path(repo_dir, "source_MSI.R"))
@@ -52,8 +52,13 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 
 ## For each prediction environment (the tp+vp envs and just the vp envs), rank the 
 ## training environments by different distance metrics
-pred_envs <- c(tp_vp_env, vp_only_env)
-train_envs <- c(tp_vp_env, tp_only_env)
+# Seed for sampling
+set.seed(415)
+
+pred_envs <- c(tp_vp_env, vp_only_env) %>%
+  sample(size = 5)
+train_envs <- c(tp_vp_env, tp_only_env) %>%
+  sample(size = 15)
 
 # Summarize the traits available in those environments
 pred_envs_traits <- S2_MET_BLUEs_use %>%
@@ -68,12 +73,19 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
   distinct(trait) %>%
   ungroup()
 
+## Filter the non-random environments
+pred_env_dist_rank1 <- pred_env_dist_rank$all %>%
+  filter(environment %in% pred_envs)
+
 ## Use the distances calculated using 'all' data
 pred_env_dist_rank_tomodel <- pred_env_rank_random$all %>%
+  # Get only the desired prediction environments
+  filter(environment %in% pred_envs) %>%
+  mutate(env_rank = map(env_rank, ~select(., which(names(.) %in% train_envs)))) %>%
   rename(model = dist_method) %>%
   # Use only the first 50 samples
-  filter(!model %in% str_c("sample", 51:100)) %>% 
-  bind_rows(pred_env_dist_rank, .)
+  filter(model %in% str_c("sample", 1:10)) %>% # the first 10 "random" environments
+  bind_rows(pred_env_dist_rank1, .)
 
 
 ## Split the 'pred_env_rank_random' data.frame by core and then pipe to mclapply
@@ -82,32 +94,33 @@ pred_env_dist_rank_split <- pred_env_dist_rank_tomodel %>%
   assign_cores(n_core = n_core) %>%
   split(.$core)
 
+
 # Run over multiple cores
 env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = function(core_df) {
-
+  
   ## Create an empty results list
   results_out <- vector("list", nrow(core_df))
-
+  
   # Iterate over the rows in the core_df
   for (i in seq_along(results_out)) {
-
+    
     ## Given an ordered list of environments sorted by distance to the prediction
     ## environment, implement a function that calculates a cumulative mean distance
     ## and then use the information from those environments to run predictions
     pred_env <- core_df$environment[i]
     tr <- core_df$trait[i]
     model <- core_df$model[i]
-
+    
     # Subset the trainin environments for the trait
     tr_train_env <- train_envs_traits %>% filter(trait == tr) %>% pull(environment)
-
+    
     # Subset the prediction environment data from the BLUEs
     pred_env_data <- S2_MET_BLUEs_use %>%
       filter(environment == pred_env, trait == tr, line_name %in% vp_geno)
-
+    
     # Remove the environments not in the training environments for that trait
     sorted_train_envs <- core_df$env_rank[[i]] %>% unlist() %>% .[names(.) %in% tr_train_env]
-
+    
     ## Use the accumulate function in dplyr to create lists of training environments
     ## and the cumulative mean distance from the prediction environment
     train_envs_accumulate <- sorted_train_envs %>%
@@ -115,16 +128,16 @@ env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = functio
       accumulate(~c(.x, .y)) %>%
       map(~sorted_train_envs[.]) %>%
       map(~list(train_envs = names(.), cummean_dist = mean(.)))
-
+    
     # Map over these environments and gather training data
     train_envs_data <- train_envs_accumulate %>%
       map(~filter(S2_MET_BLUEs_use, environment %in% .$train_envs, trait == tr, line_name %in% tp_geno))
-
+    
     # Map over the data and predict
     predictions_out <- train_envs_data %>%
       map(~rename(., env = environment)) %>%
       map(~gblup(K = K, train = ., test = pred_env_data))
-
+    
     # Return the bootstrap data.frame results
     prediction_acc <- predictions_out %>%
       map_dbl("accuracy")
@@ -135,19 +148,21 @@ env_dist_predictions_out <- mclapply(X = pred_env_dist_rank_split, FUN = functio
       train_envs = map(train_envs_accumulate, "train_envs"),
       distance = map_dbl(train_envs_accumulate, "cummean_dist"),
       accuracy = prediction_acc)
-
+    
   } # Close the for loop
-
+  
   # Add the results list to the original core DF
   core_df %>%
     select(-env_rank, -core) %>%
     mutate(results_out = results_out)
-
+  
 }, mc.cores = n_core)
-
+  
+  
+  
 
 # Save the results
-save_file <- file.path(result_dir, "environmental_distance_predictions.RData")
+save_file <- file.path(result_dir, "environmental_distance_predictions_TESTING.RData")
 save("env_dist_predictions_out", file = save_file)
 
 
