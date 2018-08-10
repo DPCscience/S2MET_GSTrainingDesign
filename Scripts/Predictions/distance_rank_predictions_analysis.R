@@ -136,6 +136,20 @@ cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random
          lower = lower / sqrt(heritability),
          upper = upper / sqrt(heritability))
 
+## Alternatively, center by the minimum and scale by the heritability
+# This should center at 0
+cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
+  mutate(n_train_env = as.integer(n_train_env)) %>%
+  left_join(., select(stage_one_data, environment, trait, heritability)) %>%
+  filter(heritability >= 0.10) %>%
+  group_by(trait, environment, dist_method) %>%
+  mutate(pred_ability = accuracy,
+         accuracy = scale(accuracy, center = min(accuracy),  scale = sqrt(unique(heritability))),
+         lower = scale(lower, center = min(accuracy), scale = sqrt(unique(heritability))),
+         upper = scale(upper, center = min(accuracy), scale = sqrt(unique(heritability)))) %>%
+  ungroup()
+
+
 
 
 ## Find the local maximum and create a data.frame
@@ -227,30 +241,22 @@ g_mod <- list(
   # geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)),
   ylab("Prediction Accuracy"),
   xlab("Number of Environments in Training Set"),
-  scale_color_manual(values = dist_colors),
-  scale_fill_manual(values = dist_colors),
-  theme_bw(),
-  theme(panel.grid = element_blank(),
-        legend.key.height = unit(2, units = "line"),
-        text = element_text(size = 8)),
-  labs(title = "Cumulative Environmental Clusters")
+  scale_color_manual(values = dist_colors, name = NULL),
+  scale_fill_manual(values = dist_colors, name = NULL),
+  theme_acs(),
+  theme(legend.key.height = unit(2, units = "line"))
 )
 
 
 ## Testing
-cumulative_pred_toplot %>%
-  ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) + 
-  geom_line() + 
-  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "grey75", alpha = 0.25) + 
-  facet_grid(trait ~ environment, scale = "free_y") + 
-  theme_acs()
-
-cumulative_pred_toplot %>%
+g_cumupred_test <- cumulative_pred_toplot %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
   ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) + 
   g_mod +
   facet_grid(trait ~ environment, scale = "free_y")
 
+ggsave(filename = "cumulative_env_dist_pred_testing.jpg", plot = g_cumupred_test, path = fig_dir,
+       height = 6, width = 10, dpi = 1000)
 
 
 

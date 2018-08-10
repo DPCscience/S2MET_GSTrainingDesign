@@ -233,16 +233,16 @@ for (s in seq(nrow(env_dist_window_predictions_out))) {
         map(~gblup(K = K, train = ., test = pred_env_data))
 
       # Return the bootstrap data.frame results
-      predictions_boot <- predictions_out %>%
-        map_df("boot") %>%
-        rename(accuracy = cor)
+      prediction_acc <- predictions_out %>%
+        map_dbl("accuracy")
+
 
       # Return a data_frame with the training environments, cumumative mean distance,
       # and the prediction accuracy results
-      results_out[[i]] <- bind_cols(
-        data_frame(train_envs = map(train_envs_accumulate, "train_envs"),
-                   distance = map_dbl(train_envs_accumulate, "mean_dist")),
-        predictions_boot)
+      results_out[[i]] <- data_frame(
+        train_envs = map(train_envs_accumulate, "train_envs"),
+        distance = map_dbl(train_envs_accumulate, "mean_dist"),
+        accuracy = prediction_acc)
 
     } # Close the for loop
 
