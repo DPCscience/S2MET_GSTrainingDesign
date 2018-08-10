@@ -230,7 +230,7 @@ for (s in seq(nrow(env_dist_window_predictions_out))) {
       # Map over the data and predict
       predictions_out <- train_envs_data %>%
         map(~rename(., env = environment)) %>%
-        map(~gblup(K = K, train = ., test = pred_env_data, bootreps = 100))
+        map(~gblup(K = K, train = ., test = pred_env_data))
 
       # Return the bootstrap data.frame results
       predictions_boot <- predictions_out %>%

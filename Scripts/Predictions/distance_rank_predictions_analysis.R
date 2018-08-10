@@ -18,26 +18,36 @@ library(ggforce)
 library(ggridges)
 
 # Load the results
-load(file.path(result_dir, "environmental_distance_predictions.RData"))
-load(file.path(result_dir, "environmental_distance_window_predictions.RData"))
+# load(file.path(result_dir, "environmental_distance_predictions.RData"))
+# load(file.path(result_dir, "environmental_distance_window_predictions.RData"))
 # load(file.path(result_dir, "environmental_distance_heritability.RData"))
 
-# Load the results of the model-based clustering
-load(file.path(result_dir, "environmental_distance_lrt.RData"))
-
-## Create a color scheme for the distance methods
-dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_method_replace), "Random" = "grey75")
-
-## Significant level
-alpha <- 0.05
-
-
+load(file.path(result_dir, "environmental_distance_predictions_TESTING.RData"))
 
 
 ## Bind the list elements together and unnest
 cumulative_pred_results <- env_dist_predictions_out %>% 
   bind_rows() %>% 
-  unnest()
+  unnest() %>%
+  rename(dist_method = model)
+
+## Create a color scheme for the distance methods
+dist_method_unique <- cumulative_pred_results$dist_method %>%
+  unique() %>% 
+  .[!str_detect(., "sample")] 
+
+dist_method_replace <- dist_method_unique %>%
+  str_replace_all("_", " ") %>% 
+  str_to_title() %>% 
+  str_replace_all(" ", "") %>%
+  set_names(., dist_method_unique)
+  
+
+dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_method_replace), "Random" = "grey75")
+
+## Significant level
+alpha <- 0.05
+
 
 # Re-scale the distance measurements to unit variance
 cumulative_pred_adj <- cumulative_pred_results %>%
@@ -60,21 +70,23 @@ train_env_rank <- cumulative_pred_adj %>%
 
 
 
-## Bind the elements of the LRT results list
-env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
-  bind_rows() %>%
-  select(environment:dist_method, results_out) %>%
-  unnest()
 
-## Select when it is first significant ("first")
-env_dist_lrt_results_first <- env_dist_lrt_results %>% 
-  group_by(environment, trait, dist_method) %>% 
-  mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
-  filter(is_sig) %>%
-  mutate(which_sig = which(is_sig)) %>% 
-  filter(which_sig == min(which_sig)) %>%
-  ungroup()
 
+# ## Bind the elements of the LRT results list
+# env_dist_lrt_results <- env_dist_lrt_predictions_out %>%
+#   bind_rows() %>%
+#   select(environment:dist_method, results_out) %>%
+#   unnest()
+# 
+# ## Select when it is first significant ("first")
+# env_dist_lrt_results_first <- env_dist_lrt_results %>% 
+#   group_by(environment, trait, dist_method) %>% 
+#   mutate(is_sig = p_value <= alpha | n_env == max(n_env)) %>% 
+#   filter(is_sig) %>%
+#   mutate(which_sig = which(is_sig)) %>% 
+#   filter(which_sig == min(which_sig)) %>%
+#   ungroup()
+# 
 
 
 
@@ -111,16 +123,18 @@ cumulative_pred_random <- cumulative_pred_adj %>%
 # Now grab the original runs
 cumulative_pred_orig <- cumulative_pred_adj %>% 
   filter(dist_method %in% names(dist_method_replace)) %>%
-  select(environment, trait, dist_method, scaled_distance, n_train_env, accuracy,
-         lower = ci_lower, upper = ci_upper)
+  select(environment, trait, dist_method, scaled_distance, n_train_env, accuracy)
 
-## Combine
+## Combine and add heritability information
+# Remove environment-trait combinations with < h2 = 0.10
 cumulative_pred_toplot <- bind_rows(cumulative_pred_orig, cumulative_pred_random) %>%
-  mutate(n_train_env = as.integer(n_train_env))
-
-
-
-
+  mutate(n_train_env = as.integer(n_train_env)) %>%
+  left_join(., select(stage_one_data, environment, trait, heritability)) %>%
+  filter(heritability >= 0.10) %>%
+  mutate(pred_ability = accuracy,
+         accuracy = accuracy / sqrt(heritability),
+         lower = lower / sqrt(heritability),
+         upper = upper / sqrt(heritability))
 
 
 
@@ -141,64 +155,67 @@ cumulative_pred_toplot_Nenv <- cumulative_pred_toplot %>%
 
 
 
-## Use the LRT results to select the accuracy when the LRT is deemed significant.
-## First use the random results to identify the points along the 'add-one-environment' line
 
+# ## Use the LRT results to select the accuracy when the LRT is deemed significant.
+# ## First use the random results to identify the points along the 'add-one-environment' line
+# 
+# 
+# ## Separate the original samples from the random samples
+# cumulative_pred_toplot_lrt_random <- env_dist_lrt_results_first %>% 
+#   filter(str_detect(dist_method, "sample")) %>%
+#   # filter(dist_method %in% names(dist_method_replace)) %>%
+#   left_join(., filter(cumulative_pred_toplot, dist_method == "Random"),
+#             by = c("environment", "trait", "n_env" = "n_train_env")) %>%
+#   group_by(environment, trait) %>% 
+#   summarize_at(vars(n_env, scaled_distance, accuracy), mean) %>% 
+#   mutate(dist_method = "Random", annotation = "lrt") %>%
+#   rename(n_train_env = n_env)
+#   
+# # Original
+# cumulative_pred_toplot_lrt_orig <- cumulative_pred_toplot %>%
+#   inner_join(., env_dist_lrt_results_first, by = c("environment", "trait", "dist_method", "n_train_env" = "n_env")) %>%
+#   select(environment:upper) %>% 
+#   mutate(annotation = "lrt")
+# 
+# # Combine
+# cumulative_pred_toplot_lrt <- bind_rows(cumulative_pred_toplot_lrt_orig, cumulative_pred_toplot_lrt_random)
+#   
 
-## Separate the original samples from the random samples
-cumulative_pred_toplot_lrt_random <- env_dist_lrt_results_first %>% 
-  filter(str_detect(dist_method, "sample")) %>%
-  # filter(dist_method %in% names(dist_method_replace)) %>%
-  left_join(., filter(cumulative_pred_toplot, dist_method == "Random"),
-            by = c("environment", "trait", "n_env" = "n_train_env")) %>%
-  group_by(environment, trait) %>% 
-  summarize_at(vars(n_env, scaled_distance, accuracy), mean) %>% 
-  mutate(dist_method = "Random", annotation = "lrt") %>%
-  rename(n_train_env = n_env)
-  
-# Original
-cumulative_pred_toplot_lrt_orig <- cumulative_pred_toplot %>%
-  inner_join(., env_dist_lrt_results_first, by = c("environment", "trait", "dist_method", "n_train_env" = "n_env")) %>%
-  select(environment:upper) %>% 
-  mutate(annotation = "lrt")
-
-# Combine
-cumulative_pred_toplot_lrt <- bind_rows(cumulative_pred_toplot_lrt_orig, cumulative_pred_toplot_lrt_random)
-  
-
-
-
-
-## A vector to replace the annotation names
-annotation_replace <- c(
-  "local_maximum" = "Maximum", 
-  setNames(str_replace(string = str_c(Ntrain_envs, "envs"), pattern = "e", replacement = " E"), 
-           str_c(Ntrain_envs, "envs")), 
-  "lrt" = "Likelihood Ratio Test")
-
-
-## Combine the data together
-cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
-                                             cumulative_pred_toplot_Nenv,
-                                             cumulative_pred_toplot_lrt) %>%
-  # Calculate the difference between the annotated accuracy and the "final" accuracy
-  mutate(annotation = as_replaced_factor(x = annotation, replacement = annotation_replace),
-         dist_method = as_replaced_factor(x = dist_method, c(dist_method_replace, "Random" = "Random")))
-
-
-# Change the distance methods to a factor
-cumulative_pred_toplot_final <- cumulative_pred_toplot %>%
-  mutate(dist_method = as_replaced_factor(x = dist_method, replacement = c(dist_method_replace, "Random" = "Random")),
-         # Remove the upper/lower for non random dist_methods
-         lower = if_else(dist_method == "Random", lower, as.numeric(NA)),
-         upper = if_else(dist_method == "Random", upper, as.numeric(NA)))
-
+# 
+# 
+# ## A vector to replace the annotation names
+# annotation_replace <- c(
+#   "local_maximum" = "Maximum", 
+#   setNames(str_replace(string = str_c(Ntrain_envs, "envs"), pattern = "e", replacement = " E"), 
+#            str_c(Ntrain_envs, "envs")), 
+#   "lrt" = "Likelihood Ratio Test")
+# 
+# 
+# ## Combine the data together
+# cumulative_pred_toplot_annotate <- bind_rows(cumulative_pred_toplot_maximum, 
+#                                              cumulative_pred_toplot_Nenv,
+#                                              cumulative_pred_toplot_lrt) %>%
+#   # Calculate the difference between the annotated accuracy and the "final" accuracy
+#   mutate(annotation = as_replaced_factor(x = annotation, replacement = annotation_replace),
+#          dist_method = as_replaced_factor(x = dist_method, c(dist_method_replace, "Random" = "Random")))
+# 
+# 
+# # Change the distance methods to a factor
+# cumulative_pred_toplot_final <- cumulative_pred_toplot %>%
+#   mutate(dist_method = as_replaced_factor(x = dist_method, replacement = c(dist_method_replace, "Random" = "Random")),
+#          # Remove the upper/lower for non random dist_methods
+#          lower = if_else(dist_method == "Random", lower, as.numeric(NA)),
+#          upper = if_else(dist_method == "Random", upper, as.numeric(NA)))
+# 
 
 
 
 
 
 ##### Plotting ######
+
+
+
 
 
 
@@ -218,6 +235,25 @@ g_mod <- list(
         text = element_text(size = 8)),
   labs(title = "Cumulative Environmental Clusters")
 )
+
+
+## Testing
+cumulative_pred_toplot %>%
+  ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "grey75", alpha = 0.25) + 
+  facet_grid(trait ~ environment, scale = "free_y") + 
+  theme_acs()
+
+cumulative_pred_toplot %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
+  ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) + 
+  g_mod +
+  facet_grid(trait ~ environment, scale = "free_y")
+
+
+
+
 
 
 # List over traits
