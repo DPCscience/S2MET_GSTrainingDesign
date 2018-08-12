@@ -93,8 +93,9 @@ loeo_predictions_out <- mclapply(X = loeo_predictions_split, FUN = function(core
     Z_ge <- model.matrix(~ -1 + line_name:environment, mf)
     
     ## Create the GxE covariance matrix
-    E <- loeo_predictions_df$env_cov_mat[[i]][levels(train_df$environment), levels(train_df$environment)]
+    E <- core_df$env_cov_mat[[i]][levels(train_df$environment), levels(train_df$environment)]
     E <- cor(E)
+    # E <- scale(E, center = rep(mean(E), ncol(E)), scale = rep(sd(E), ncol(E)))
     
     K_ge <- kronecker(E, K, make.dimnames = T)
     
@@ -102,29 +103,9 @@ loeo_predictions_out <- mclapply(X = loeo_predictions_split, FUN = function(core
     # Fit the model
     fit_ge <- mixed.solve(y = y, Z = Z_ge, K = K_ge)
     
-    # # Just predict the genotype mean
-    # Z_g <- Z_ge <- model.matrix(~ -1 + line_name, mf)
-    # 
-    # fit_g <- mixed.solve(y = y, Z = Z_g, K = K)
-    
-    # Create a list of models
-    fit_list <- list(ge = fit_ge)
-    
     ## Extract the random effects
-    preds <- fit_list %>%
-      map("u") %>%
-      map(~{
-        if (all(str_detect(names(.), ":"))) {
-          data_frame(term = names(.), pred_value = .) %>% 
-            separate(term, c("environment", "line_name"), sep = ":")
-          
-        } else {
-          data_frame(line_name = names(.), pred_value = .)
-          
-        } }) %>%
-      # Reduce
-      map2(.x = ., .y = names(.), ~rename_at(.x, vars(pred_value), funs(str_c(., "_", .y)))) %>%
-      reduce(left_join)
+    preds <- fit_ge$u %>% data_frame(term = names(.), pred_value = .) %>% 
+      separate(term, c("environment", "line_name"), sep = ":")
     
   
     # Get the testing set and combine the predictions
@@ -180,37 +161,16 @@ loeo_g_predictions_out <- mclapply(X = loeo_g_predictions_split, FUN = function(
     # Predict using the GxE as the only random effect
     # Z_ge <- model.matrix(~ -1 + line_name:environment, mf)
     Z_g <- model.matrix(~ -1 + line_name, mf)
-    
-    ## Create the GxE covariance matrix
-    # E <- diag(nlevels(train_df$environment)) %>%
-    # E <- matrix(data = 1, nrow = nlevels(train_df$environment), nlevels(train_df$environment)) %>%
-    #   `dimnames<-`(., list(levels(train_df$environment), levels(train_df$environment)))
-    
-    # K_ge <- kronecker(E, K, make.dimnames = T)
-    
+  
     
     # Fit the model
     # fit_ge <- mixed.solve(y = y, Z = Z_ge, K = K_ge)
     fit_g <- mixed.solve(y = y, Z = Z_g, K = K)
     
-    # Create a list of models
-    fit_list <- list(g = fit_g)
-    
     ## Extract the random effects
-    preds <- fit_list %>%
-      map("u") %>%
-      map(~{
-        if (all(str_detect(names(.), ":"))) {
-          data_frame(term = names(.), pred_value = .) %>% 
-            separate(term, c("environment", "line_name"), sep = ":")
-          
-        } else {
-          data_frame(line_name = names(.), pred_value = .)
-          
-        } }) %>%
-      # Reduce
-      map2(.x = ., .y = names(.), ~rename_at(.x, vars(pred_value), funs(str_c(., "_", .y)))) %>%
-      reduce(left_join)
+    ## Extract the random effects
+    preds <- fit_g$u %>% 
+      data_frame(line_name = names(.), pred_value = .)
     
     
     # Get the testing set and combine the predictions
