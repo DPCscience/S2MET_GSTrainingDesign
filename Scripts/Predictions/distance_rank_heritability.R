@@ -1,7 +1,7 @@
 ## Heritability based on environmental distance
 ## 
 ## Author: Jeff Neyhart
-## Last Updated: April 5, 2018
+## Last Updated: August 11, 2018
 ## 
 ## This script will look at prediction accuracies from adding environments after
 ## ranking based on specific distance metrics
@@ -37,17 +37,110 @@ n_core <- ifelse(Sys.info()["sysname"] == "Windows", 1, detectCores())
 
 
 # Load the clustering results
-load(file.path(result_dir, "distance_methods_results.RData"))
+load(file.path(result_dir, "distance_method_results.RData"))
 
 # Modify the BLUEs for predictions
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   filter(line_name %in% c(tp_geno, vp_geno)) %>%
   mutate_at(vars(environment:line_name), as.factor)
 
+# Filter for just the TP
+S2_MET_BLUEs_tp <- S2_MET_BLUEs_use %>%
+  filter(line_name %in% tp_geno) %>%
+  droplevels()
 
-### Question 1 - What is the trend in prediction accuracy as you add increasingly
-### "distant" environment?
-### 
+
+
+## What is the change in the ratio of genetic variance to GxE variance as you add increasingly distant environments?
+
+## Load the distance prediction results
+## Testing
+load(file.path(result_dir, "environmental_distance_predictions_TESTING.RData"))
+
+## Cumulative predictions
+# For each trait/method/environment, find the data.frame of training environments
+cumulative_predictions_df <- env_dist_predictions_out %>% 
+  bind_rows() %>% 
+  unnest()
+
+
+## Look at GxE only in the training set
+training_set_var_comp <- cumulative_predictions_df %>%
+  filter(!str_detect(model, "sample")) %>%
+  mutate(n_train_env = map_dbl(train_envs, length)) %>%
+  mutate(var_comp_out = list(NULL))
+
+# Map over the df
+for (i in seq(nrow(training_set_var_comp))) {
+  
+  # Get the training environment(s)
+  train_env <- training_set_var_comp$train_envs[[i]]
+  tr <- training_set_var_comp$trait[i]
+  
+  # Need at least 2 envs for GxE
+  if (length(train_env) < 2) {
+    training_set_var_comp$var_comp_out[[i]] <- as_data_frame(NULL)
+    
+  } else {
+    
+    # Get the data to model
+    pheno_to_model <- S2_MET_BLUEs_tp %>%
+      filter(environment %in% train_env, trait == tr)
+    
+    # Fit the model
+    control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+    fit <- lmer(value ~ (1|line_name) + environment + (1|line_name:environment), data = pheno_to_model, control = control)
+
+    # Heritability
+    h2 <- herit(object = fit, exp = "line_name / (line_name + (line_name:environment / ne) + (Residual / ne))", ne = training_set_var_comp$n_train_env[i])
+    # Find the proportion of G to total
+    propG <- subset(h2$var_comp, source == "line_name", variance, drop = T) / sum(subset(h2$var_comp, , variance, drop = T))
+    
+      
+    # add to the df
+    training_set_var_comp$var_comp_out[[i]] <- data_frame(h2 = h2$heritability, propG = propG)
+    
+  }
+  
+}
+
+
+training_set_var_comp_df <- training_set_var_comp %>% 
+  mutate(var_comp_out = map(var_comp_out, as_data_frame)) %>%
+  unnest(var_comp_out)
+  
+## Plot propG versus accuracy
+training_set_var_comp_df %>%
+  filter(model == "pheno_dist") %>%
+  ggplot(aes(x = n_train_env)) + 
+  geom_line(aes(y = accuracy, color = "accurary")) + 
+  geom_line(aes(y = propG, color = "propG")) + 
+  facet_grid(trait ~ environment) +
+  theme_bw()
+  
+## Plot h2 versus accuracy
+training_set_var_comp_df %>%
+  # filter(model == "pheno_dist") %>%
+  filter(trait == "GrainYield") %>%
+  ggplot(aes(x = n_train_env)) + 
+  geom_line(aes(y = accuracy, color = "accurary")) + 
+  geom_line(aes(y = h2, color = "h2")) + 
+  facet_grid(trait + model ~ environment) +
+  theme_bw()
+
+
+## Compare these relationships - average over environments
+training_set_var_comp_df %>% 
+  group_by(trait, model, environment) %>% 
+  summarize_at(vars(h2, propG), funs(cor = cor(., accuracy))) %>%
+  ggplot(aes(x = model)) + 
+  geom_boxplot(aes(y = h2_cor, fill = "h2")) +
+  geom_boxplot(aes(y = propG_cor, fill = "propG")) +
+  facet_grid(~ trait)
+
+
+
+
 
 ## For each prediction environment (the tp+vp envs and just the vp envs), rank the 
 ## training environments by different distance metrics
