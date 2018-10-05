@@ -34,7 +34,7 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 # Load the distance matrices
-load(file.path(result_dir, "distance_methods_results.RData"))
+load(file.path(result_dir, "distance_method_results.RData"))
 
 
 ## Basic Summaries
@@ -70,6 +70,19 @@ S2_MET_BLUEs_completeness <- S2_MET_BLUEs %>%
   summarize(completeness = mean(observed))
 
 
+# trait           class completeness
+# 1 GrainYield      S2C1R        0.964
+# 2 GrainYield      S2TP         0.840
+# 3 HeadingDate     S2C1R        0.932
+# 4 HeadingDate     S2TP         0.893
+# 5 HeadingDateAGDD S2C1R        0.932
+# 6 HeadingDateAGDD S2TP         0.893
+# 7 PlantHeight     S2C1R        0.964
+# 8 PlantHeight     S2TP         0.895
+
+# The VP data appears to be more balanced, but this is probably because there are more
+# environments in which only the VP was grown than environments in which only the TP was grown
+
 
 
 ## Visualization of distributions
@@ -79,15 +92,14 @@ env_order <- S2_MET_BLUEs %>%
   mutate_if(is.character, as.factor) %>% 
   group_by(environment, trait) %>% 
   mutate(env_mean = mean(value, na.rm = TRUE)) %>% 
-  filter(trait == "GrainYield") %>% 
+  filter(trait == "HeadingDate") %>% 
   complete(environment) %>%
   arrange(env_mean) %>%
   pull(environment) %>% 
   unique()
 
 S2_MET_BLUEs_toplot <- S2_MET_BLUEs %>%
-  mutate(environment = parse_factor(environment, levels = env_order),
-         trait = str_replace_all(trait, trait_replace))
+  mutate(environment = parse_factor(environment, levels = env_order))
   
 
 
@@ -98,35 +110,26 @@ g_met_dist <- S2_MET_BLUEs_toplot %>%
   scale_fill_discrete(guide = FALSE) +
   ylab("Environment") +
   xlab("Phenotypic Value") +
-  labs(title = "Trait Distributions in All Environments") +
-  theme_bw()
+  theme_acs()
 
-# Alternatively, plot using boxplot
-g_met_boxplot <- S2_MET_BLUEs_toplot %>%
-  ggplot(aes(x = environment, y = value, fill = environment)) +
-  geom_boxplot(width = 0.75) +
-  facet_grid(trait ~ ., scales = "free_y", switch = "y") +
+# Save it
+ggsave(filename = "met_trait_dist_agdd.jpg", plot = g_met_dist, path = fig_dir, width = 6, height = 5, dpi = 1000)
+
+
+## Remove HD in AGDD
+g_met_dist <- S2_MET_BLUEs_toplot %>%
+  filter(trait != "HeadingDateAGDD") %>%
+  ggplot(aes(x = value, y = environment, fill = environment)) +
+  geom_density_ridges() +
+  facet_grid(. ~ trait, scales = "free_x") +
   scale_fill_discrete(guide = FALSE) +
-  ylab("Phenotypic Value") +
-  xlab("Environment") +
-  # labs(title = "Trait Distributions in All Environments") + 
-  theme_bw() +
-  theme(axis.text.x = element_text(size = 12, angle = 45, hjust = 1))
-
+  ylab("Environment") +
+  xlab("Phenotypic Value") +
+  theme_acs()
 
 # Save it
-save_file <- file.path(fig_dir, "met_trait_dist.jpg")
-ggsave(filename = save_file, plot = g_met_dist, width = 5, height = 5, dpi = 1000)
+ggsave(filename = "met_trait_dist.jpg", plot = g_met_dist, path = fig_dir, width = 4.5, height = 5, dpi = 1000)
 
-# Save it
-ggsave(filename = "met_trait_dist_boxplot.jpg", plot = g_met_boxplot, path = fig_dir,
-       width = 9, height = 7, dpi = 1000)
-
-
-g_met_boxplot1 <- g_met_boxplot + theme(axis.title = element_text(size = 18), axis.text = element_text(size = 12),
-                                        strip.text = element_text(size = 16))
-ggsave(filename = "met_trait_dist_boxplot_poster.jpg", plot = g_met_boxplot1, path = fig_dir,
-       width = 12.05, height = 6, dpi = 1000)
 
 
 
@@ -148,9 +151,10 @@ forms <- c(full = as.formula(str_c("value ~ ", str_c(random_terms, collapse = " 
 
 
 # Group by trait and fit the multi-environment model
-stage_two_fits_GE <- S2_MET_BLUEs %>%
+# Fit models in the TP and the TP + VP
+stage_two_fits_GE <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) %>%
   mutate_at(vars(location:line_name), as.factor) %>%
-  group_by(trait) %>%
+  group_by(trait, population) %>%
   do({
     
     df <- droplevels(.)
@@ -200,12 +204,30 @@ stage_two_fits_GE <- S2_MET_BLUEs %>%
     })
 
 
+## What is the significance of each variance component?
+# trait             n_e   n_r variation_source         df statistic   p_value
+# 1 GrainYield       29.3     1 line_name:environment     1     4654. 0.       
+# 2 GrainYield       29.3     1 environment               1    16847. 0.       
+# 3 GrainYield       29.3     1 line_name                 1     1308. 2.12e-286
+# 4 HeadingDate      27.9     1 line_name:environment     1     3749. 0.       
+# 5 HeadingDate      27.9     1 environment               1    11437. 0.       
+# 6 HeadingDate      27.9     1 line_name                 1     4798. 0.       
+# 7 HeadingDateAGDD  27.9     1 line_name:environment     1     3485. 0.       
+# 8 HeadingDateAGDD  27.9     1 environment               1     8294. 0.       
+# 9 HeadingDateAGDD  27.9     1 line_name                 1     4841. 0.       
+# 10 PlantHeight      29.0     1 line_name:environment     1     1860. 0.       
+# 11 PlantHeight      29.0     1 environment               1    13568. 0.       
+# 12 PlantHeight      29.0     1 line_name                 1     1991. 0. 
+
+
+# Everything is significant
+
 ## Plot the proportion of variance from each source
 stage_two_fits_GE_varprop <- stage_two_fits_GE %>%
   unnest(h2) %>% 
   filter(map_lgl(h2, is.data.frame)) %>% 
   unnest() %>% 
-  group_by(trait) %>% 
+  group_by(trait, population) %>% 
   mutate(var_prop = variance / sum(variance),
          source = str_replace_all(source, c("line_name:environment" = "Genotype x Environment",
                                             "environment" = "Environment", "line_name" = "Genotype")),
@@ -213,16 +235,80 @@ stage_two_fits_GE_varprop <- stage_two_fits_GE %>%
                                             "Residual")))
 
 ## Plot
-stage_two_fits_GE_varprop_plot <- stage_two_fits_GE_varprop %>% 
+g_varprop <- stage_two_fits_GE_varprop %>% 
+  filter(population == "all") %>%
   ggplot(aes(x = trait, y = var_prop, fill = source)) + 
   geom_col() +
   ylab("Proportion of Variance") +
-  scale_fill_manual(values = umn_palette(3, 4), name = "Source") +
-  theme_bw() +
+  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+  theme_acs() +
   theme(axis.title.x = element_blank(),
         legend.position = "bottom")
 
- 
+# Save
+ggsave(filename = "variance_components_AGDD.jpg", plot = g_varprop, path = fig_dir, width = 4, height = 4, dpi = 1000)
+
+
+# Remove HeadingDate AGDD
+## Plot
+g_varprop <- stage_two_fits_GE_varprop %>% 
+  filter(population == "all", trait != "HeadingDateAGDD") %>%
+  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+  geom_col() +
+  ylab("Proportion of Variance") +
+  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+  theme_acs() +
+  theme(axis.title.x = element_blank(),
+        legend.position = "bottom")
+
+# Save
+ggsave(filename = "variance_components.jpg", plot = g_varprop, path = fig_dir, width = 4, height = 4, dpi = 1000)
+
+
+
+
+### Plot just the TP
+g_varprop <- stage_two_fits_GE_varprop %>% 
+  filter(population == "tp") %>%
+  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+  geom_col() +
+  ylab("Proportion of Variance") +
+  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+  theme_acs() +
+  theme(axis.title.x = element_blank(),
+        legend.position = "bottom")
+
+# Save
+ggsave(filename = "variance_components_AGDD_tp.jpg", plot = g_varprop, path = fig_dir, width = 4, height = 4, dpi = 1000)
+
+
+# Remove HeadingDate AGDD
+## Plot
+g_varprop <- stage_two_fits_GE_varprop %>% 
+  filter(population == "tp", trait != "HeadingDateAGDD") %>%
+  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+  geom_col() +
+  ylab("Proportion of Variance") +
+  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+  theme_acs() +
+  theme(axis.title.x = element_blank(),
+        legend.position = "bottom")
+
+# Save
+ggsave(filename = "variance_components_tp.jpg", plot = g_varprop, path = fig_dir, width = 4, height = 4, dpi = 1000)
+
+
+## Look at the heritability and plot
+g_herit <- stage_two_fits_GE %>% 
+  mutate(h2 = map_dbl(h2, "heritability")) %>% 
+  ggplot(aes(x = trait, y = h2)) + 
+  geom_col(fill = "grey65") + 
+  geom_text(aes(y = 0.25, label = round(h2, 2))) +
+  facet_grid(~ population, labeller = labeller(population = str_to_upper)) +
+  theme_acs()
+
+ggsave(filename = "heritability.jpg", plot = g_herit, path = fig_dir, width = 4, height = 4, dpi = 1000)
+
 
 
 
@@ -245,9 +331,9 @@ forms <- c(full = as.formula(str_c("value ~ ", str_c(random_terms, collapse = " 
 
 
 # Group by trait and fit the multi-environment model
-stage_two_fits <- S2_MET_BLUEs %>%
+stage_two_fits <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) %>%
   mutate_at(vars(location:line_name), as.factor) %>%
-  group_by(trait) %>%
+  group_by(trait, population) %>%
   do({
     
     df <- droplevels(.)

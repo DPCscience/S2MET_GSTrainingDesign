@@ -1,7 +1,7 @@
 ## Cluster environments in the S2MET project
 ## 
 ## Author: Jeff Neyhart
-## Last modified: August 06, 2018
+## Last modified: October 04, 2018
 ## 
 ## This script will create different distance matrices for use in clustering. The
 ## clustering algorithm will be constant
@@ -37,6 +37,9 @@ load(file.path(result_dir, "environmental_covariable_distance_mat.RData"))
 #   group_by(trait) %>%
 #   nest() %>%
 #   mutate(data = map(data, droplevels))
+
+
+traits <- unique(S2_MET_BLUEs$trait)
 
 
 ## Great Circle Distance
@@ -348,24 +351,24 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
 
 ## Combine the one-year and multi-year ECs
 one_year_ec_dist1 <- one_year_ec_dist %>%
-  mutate(model = str_c("OYEC_", model))
+  mutate(model = str_c("OYEC_", group))
 multi_year_ec_dist1 <- multi_year_ec_dist %>%
-  mutate(model = str_c("MYEC_", model))
+  mutate(model = str_c("MYEC_", group))
 
 # Combine and add the other distance matrices
 dist_method_df_all <- bind_rows(
   data_frame(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list),
   data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_all),
-  one_year_ec_dist1,
-  multi_year_ec_dist1
+  filter(one_year_ec_dist1, population == "all"),
+  filter(multi_year_ec_dist1, population == "all")
 )
 
 # Combine and add the other distance matrices
 dist_method_df_tp <- bind_rows(
-  data_frame(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list),
-  data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_tp),
-  one_year_ec_dist1,
-  multi_year_ec_dist1
+  data_frame(trait = names(ge_mean_D_tp), model = "great_circle_dist", dist = great_circle_dist_list),
+  data_frame(trait = names(ge_mean_D_tp), model = "pheno_dist", dist = ge_mean_D_tp),
+  filter(one_year_ec_dist1, population == "tp"),
+  filter(multi_year_ec_dist1, population == "tp")
 )
 
 
@@ -394,7 +397,8 @@ dist_method_df_tp <- bind_rows(
 # Tidy the the distance matrix data.frame, then combine the data.frames for
 # TP and TP + VP
 dist_method_df_all_tidy <- dist_method_df_all %>% 
-  mutate(population = "all")
+  mutate(population = "all") %>%
+  select(-group)
 
 # For each trait, identify the most common set of environments
 dist_method_df_common_env <- dist_method_df_all_tidy %>% 
@@ -412,7 +416,8 @@ clust_method_df_all <- full_join(dist_method_df_all_tidy, dist_method_df_common_
 
 # Just the TP
 dist_method_df_tp_tidy <- dist_method_df_tp %>% 
-  mutate(population = "tp")
+  mutate(population = "tp") %>%
+  select(-group)
 
 # For each trait, identify the most common set of environments
 dist_method_df_common_env <- dist_method_df_tp_tidy %>% 
@@ -451,8 +456,10 @@ clust_method_df_toplot <- clust_method_df %>%
 
 ## Plot
 clust_method_plot_list <- clust_method_df_toplot %>%
+  mutate(model1 = model) %>%
+  arrange(model, trait) %>%
   group_by(model, population) %>% 
-  nest(trait, data) %>%
+  nest(trait, model1, data) %>%
   mutate(plot_obj = map(data, ~{
     # Unnest the df
     temp1 <- unnest(.)
@@ -469,17 +476,22 @@ clust_method_plot_list <- clust_method_df_toplot %>%
     # Create the cluster plot objects
     clust_plots <- temp1$cluster %>% 
       map(~ggdendrogram(.) + 
-            theme(axis.text.x = element_text(size = 8), axis.text.y = element_blank()))
+            theme(axis.text.x = element_text(size = 6), axis.text.y = element_blank()))
+    
+    # Model name
+    model <- unique(temp1$model1) %>% str_replace_all(pattern = "_", replacement = " ") %>% str_to_title() %>% str_remove_all(" ")
     
     # Create cowplots
-    plots2 <- map2(.x = dist_plots, .y = clust_plots, plot_grid, nrow = 1)
+    plots2 <- map2(.x = dist_plots, .y = clust_plots, plot_grid, nrow = 1, rel_widths = c(0.8, 1))
     # Bind these together and return
-    plot_grid(plotlist = plots2, ncol = 1) }))
+    plot_grid(plotlist = plots2, ncol = 1) %>% add_sub(label = model) %>% ggdraw()
+    
+    }))
 
 ## Iterate and save
 for (i in seq(nrow(clust_method_plot_list))) {
-  filename <- str_c("distance_cluster_plot_", clust_method_plot_list$model[i], "_", clust_method_plot_list$population[i], ".jpg")
-  ggsave(filename = filename, plot = clust_method_plot_list$plot_obj[[i]], path = fig_dir)
+  filename <- str_c("distance_cluster_plot_", clust_method_plot_list$model[i], "_pop", clust_method_plot_list$population[i], ".jpg")
+  ggsave(filename = filename, plot = clust_method_plot_list$plot_obj[[i]], path = fig_dir, height = 6, width = 5, dpi = 1000)
 }
     
 
@@ -534,7 +546,7 @@ dist_method_df_rank <- dist_method_df %>%
                            map(~.[,!names(.) %in% .$env] %>% .[,-1] %>% sort() %>% 
                                  select(., which(names(.) %in% train_envs))) %>% 
                            data_frame(environment = names(.), env_rank = .))) %>%
-  select(-dist) %>%
+  select(-dist, -cov) %>%
   unnest() )
 
 
@@ -573,22 +585,5 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 # Save this
 save_file <- file.path(result_dir, "distance_method_results.RData")
 save("clust_method_df", "pred_env_dist_rank","pred_env_rank_random", file = save_file)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

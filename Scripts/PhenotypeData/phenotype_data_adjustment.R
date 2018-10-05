@@ -24,29 +24,57 @@ repo_dir <- getwd()
 # Source the main project script
 source(file.path(repo_dir, "source.R"))
 
+
+
+
 # Project directory
 proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
 
-# Traits
-traits <- c("GrainYield", "HeadingDate", "PlantHeight")
 
 # Load the tidy S2 data
-load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_MET_tidy.RData")
+load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
+
+# Subset the traits and relevant trials
+S2_MET_tidy <- s2_tidy_pheno %>%
+  filter(trait %in% c("GrainYield", "HeadingDate", "PlantHeight"),
+         year %in% 2015:2017,
+         !str_detect(trial, "FHB|PVV")) %>%
+  mutate(location = ifelse(location == "CNY", "HNY", location),
+         environment = ifelse(environment == "CNY15", "HNY15", environment))
+
+
 
 
 ## Create a data.frame of data to model
 # Set a dummy variable for check or test
 # Also add correct replicate numbers
-data_to_model <- S2_MET_tidy %>% 
-  # Filter for relevant traits
-  filter(trait %in% traits) %>%
+data_to_model <- S2_MET_tidy %>%
   group_by(trial, trait, line_name) %>% 
-  mutate(rep = seq(sum(duplicated(line_name)) + 1)) %>%
   ungroup() %>%
   mutate(line_name = as.character(line_name),
          line = ifelse(!line_name %in% checks, line_name, "00check"),
          check = ifelse(line_name %in% checks, line_name, "00line")) %>%
   mutate_at(vars(rep, line, check, row, column, blk), as.factor)
+
+
+## Add heading date as AGDD
+## Load the environmental covariables
+load(file.path(data_dir, "environmental_data_compiled.RData"))
+
+# Select the accumulated growing degree days
+agdd <- one_year_daily_summary$agdd
+
+# Pull out heading date, round to the nearest whole number, then assign the AGDD value
+data_to_model_HD <- data_to_model %>%
+  filter(trait == "HeadingDate") %>% 
+  mutate(day_from_planting = round(value, 0)) %>% 
+  left_join(., agdd) %>%
+  mutate(trait = "HeadingDateAGDD") %>%
+  select(-value, -day_from_planting) %>%
+  rename(value = AGDD)
+
+
+data_to_model1 <- bind_rows(data_to_model, data_to_model_HD)
 
 
 
@@ -68,7 +96,7 @@ rand_eff <- c("row", "column", "blk")
 base_form <- value ~ -1 + line + check
 
 ## Create a empty data frame of the distinct trials and traits
-stage_one_results <- data_to_model %>% 
+stage_one_results <- data_to_model1 %>% 
   distinct(trait, trial) %>%
   mutate(out = list(NULL))
 
@@ -76,7 +104,7 @@ stage_one_results <- data_to_model %>%
 for (i in seq(nrow(stage_one_results))) {
 
   # Create a separate df object - this greatly improves the speed of the model fitting
-  df <- data_to_model %>%
+  df <- data_to_model1 %>%
     filter(trait == stage_one_results$trait[i], trial == stage_one_results$trial[i]) %>%
     droplevels()
   
@@ -123,7 +151,7 @@ for (i in seq(nrow(stage_one_results))) {
     str_c("value ~ ", .) %>% 
     as.formula()
   
-  fit_ran <- lmer(formula = f_ran, data = df)
+  fit_ran <- lmer(formula = ran_form, data = df)
   
   # Find the harmonic mean of the number of replicates
   n_r <- table(df$line_name) %>%
@@ -135,7 +163,7 @@ for (i in seq(nrow(stage_one_results))) {
   # Return the coefficients and the variance of the adjusted means
   stage_one_results$out[[i]] <- data_frame(
     BLUE = list(fit_tidy1), 
-    terms = list(attr(terms(fit_final), "term.labels")),
+    terms = list(formula(fit_final)),
     heritability = h2) 
 
 }
@@ -152,7 +180,7 @@ stage_one_herit <- stage_one_data %>%
 
 
 
-# Plot
+# Plot heritability
 stage_one_herit %>%
   ggplot(aes(x = trial, y = heritability )) +
   geom_col() +
@@ -164,6 +192,20 @@ stage_one_herit %>%
   xlab("Environment") +
   theme_bw() +
   theme(axis.text.x = element_text(size = 6, angle = 45, hjust = 1))
+
+
+## Plot heritability of heading date (DAP) to heading date (AGDD)
+stage_one_herit %>% 
+  filter(str_detect(trait, "HeadingDate")) %>%
+  spread(trait, heritability) %>% 
+  qplot(x = HeadingDate, y = HeadingDateAGDD, data = .) + 
+  geom_abline(slope = 1)
+
+
+## How many trials/traits had co-factors in the final model?
+stage_one_data <- stage_one_data %>%
+  mutate(nCofactors = map_dbl(terms, ~str_count(string = ., pattern = paste0(rand_eff, collapse = "|")) %>% sum()))
+
 
 
 
@@ -205,6 +247,9 @@ g_herit_se <- stage_one_data %>%
 # Save
 save_file <- file.path(data_dir, "S2_MET_BLUEs.RData") 
 save("S2_MET_BLUEs_all", "S2_MET_BLUEs", "stage_one_data", file = save_file)
+
+
+
 
 
 

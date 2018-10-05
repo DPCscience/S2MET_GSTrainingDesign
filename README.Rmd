@@ -9,14 +9,6 @@ always_allow_html: yes
 ```{r, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE)
 
-# Load packages
-library(tidyverse)
-library(readxl)
-library(ggmap)
-
-# Load the trial information
-trial_info <- read_csv(file = "Environmental_Variables/trial_metadata.csv")
-  
 
 ```
 
@@ -26,44 +18,21 @@ trial_info <- read_csv(file = "Environmental_Variables/trial_metadata.csv")
 
 Project repository for the spring two-row (**S2**) barley multi-environment trial (**MET**) project. This project will look at the impact of genotype-by-environment interaction when performing genomewide prediction. The project includes a panel of 183 training population lines, 50 validation population lines, and 9 repeated checks.
 
-### Objectives
+## Script Order
 
-The objectives of the project are to:
-
-1. Build a nationwide infrastructure for genomewide selection of two-row spring barley for new environments or growing regions
-2. Test the use of environmental covariables for genomwide selection and for environmental clustering
-3. Develop an `R` package for widespread use among breeders, including those outside of barley
+This is the order in which scripts should be executed to replicate the results. All scripts are located in the [Scripts](`r file.path(gsub(pattern = "\\.git", replacement = "", x = git2r::remote_url()), "tree/master/Scripts")`) directory.
 
 
-## Methods and Materials
-
-Trials in the `S2MET` will be performed in `r n_distinct(trial_info$Location)` environments over `r n_distinct(trial_info$Year)` years for a total of `r n_distinct(trial_info$Environment)` environments. Below is a map of the location across North America.
-
-
-```{r make.map, echo = FALSE, fig.align='center'}
-
-# First subset the data.frame for lng/lat
-trial_info_sub <- trial_info %>%
-  select(Longitude, Latitude, Location) %>%
-  na.omit() %>%
-  distinct()
-
-# Make a zoom box
-na <- c(left = -130, bottom = 25, right = -55, top = 55)
-
-# Make the map
-my_map <- get_map(location = na, maptype = "terrain", source = "google")
-
-# Make the map - first subset the data.frame for lng/lat
-trial_info %>%
-  select(Longitude, Latitude, Location) %>%
-  na.omit() %>%
-  distinct() %>%
+Phenotypic data  
+  1. `phenotype_data_adjustment.R` - Calculate genotypic means and calculate heritability in each environment.  
+  2. `phenotype_data_summary.R` - Summarize phenotypic data across all environments, including distributions and heritability.
   
-  # Now make the map
-  leaflet() %>%
-  addTiles() %>%
-  addMarkers(~Longitude, ~Latitude, popup = ~Location)
-
-```
+Environmental variables  
+  1. `collect_environmental_variables.R` - Collect environmental covariate data from NOAA and Soil Survey databases.  
+  2. `manipulate_analyze_environmental_variables.R` - Calculate summary variables, including growing degree days (GDD), accumulated GDD (AGDD), and photothermality.  
+  3. `model_environmental_variables.R` - Find the variables that are highly correlated with the environmental mean and create covariance and distance matrices.
+  
+Clustering  
+  1. `environmental_clustering.R` - Calculate great circle distance and phenotypic distance, then create hierarchical clusters based on the distance objects.  
+  2. `cluster_heritability.R` - 
 

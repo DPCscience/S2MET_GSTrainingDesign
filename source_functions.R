@@ -99,7 +99,7 @@ lr_test <- function(model1, model2) {
   model_list <- list(model1 = model1, model2 = model2)
   
   # Degrees of freedom
-  df_list <- sapply(X = model_listt, FUN = df.residual)
+  df_list <- sapply(X = model_list, FUN = df.residual)
   fuller_model <- names(which.min(df_list))
   red_model <- names(which.max(df_list))
   
@@ -424,85 +424,6 @@ gblup <- function(K, train, test, bootreps = NULL) {
   list(accuracy = acc, pgv = comb, boot = as_data_frame(boot))
 }
 
-
-## Define a function that returns an "optimal" set of environments based on 
-## a specified criteria
-## environments is a sorted vector of possible training environments
-## data is a data.frame of training data
-## criterion is character specifying the criterion to select the training environment(s)
-## alpha is the significance level used for the LRT algorithm
-optim_env <- function(environments, data, criterion = c("lrt", "first1", "first5", "first10"),
-                      alpha = 0.05) {
-  
-  criterion <- match.arg(criterion)
-  
-  if (criterion != "lrt") {
-    # Get the number of environments
-    index <- parse_number(criterion)
-    # Return the environments
-    opt <- as.character(na.omit(environments[1:index]))
-
-  } else {
-    
-    # Model control
-    control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-    
-    ## Define the formula and fit the full model
-    ## Use the last element in the above list, because it has all the data
-    form_full <- value ~ 1 + env + (1|line_name) + (1|line_name:env)
-    fit_full <- lmer(formula = form_full, data = data, control = control)
-    
-    # First create an empty list to store the output of the lrt
-    lrt_list <- vector("list", length(environments))
-    
-    # Define the expanded model
-    form_exp <- value ~ 1 + env + (1|line_name) + (1|line_name:env) + (1|line_name:cluster) + (1|line_name:env:cluster)
-    
-    # Setup the while loop conditions
-    lrt_sig <- FALSE
-    j <- 1
-    
-    # Iterate using a while loop
-    # While lrt_sig or lrt_opt is false AND j <= length(environments)
-    # Stop the loop once the LRT is significant
-    while (!lrt_sig & j <= length(environments)) {
-      # Get a vector of environments to be clustered
-      clust_env <- environments[1:j]
-      
-      # Assign the environment(s) to a cluster
-      data_clust <- data %>% 
-        mutate(cluster = ifelse(env %in% clust_env, "train", "not_train"))
-      
-      ## Fit the model
-      fit_exp <- lmer(formula = form_exp, data = data_clust, control = control)
-      
-      ## Run the likelihood ratio test
-      lrt_out <- lr_test(model1 = fit_full, model2 = fit_exp)
-      lrt_list[[j]] <- cbind(n_env = j, lrt_out)
-      
-      # Is the LRT significant?
-      lrt_sig <- lrt_out$p_value <= alpha
-      
-      # Advance the counter
-      j <- j + 1
-    } # Close the while loop
-    
-    # Bind the rows of the lrt data
-    lrt_df <- bind_rows(lrt_list)
-    
-    # Determine the number of environments to take
-    n_opt_env <- max(lrt_df$n_env)
-    
-    # Return those optimal environments
-    opt <- head(environments, n_opt_env)
-    
-  }
-  
-  return(opt)
-  
-}
-  
-  
 
 
 ## Function to calculate the mean in sliding window

@@ -8,16 +8,20 @@ Description
 
 Project repository for the spring two-row (**S2**) barley multi-environment trial (**MET**) project. This project will look at the impact of genotype-by-environment interaction when performing genomewide prediction. The project includes a panel of 183 training population lines, 50 validation population lines, and 9 repeated checks.
 
-### Objectives
+Script Order
+------------
 
-The objectives of the project are to:
+This is the order in which scripts should be executed to replicate the results. All scripts are located in the [Scripts](https://github.com/neyhartj/S2MET/tree/master/Scripts) directory.
 
-1.  Build a nationwide infrastructure for genomewide selection of two-row spring barley for new environments or growing regions
-2.  Test the use of environmental covariables for genomwide selection and for environmental clustering
-3.  Develop an `R` package for widespread use among breeders, including those outside of barley
+Phenotypic data
+1. `phenotype_data_adjustment.R` - Calculate genotypic means and calculate heritability in each environment.
+2. `phenotype_data_summary.R` - Summarize phenotypic data across all environments, including distributions and heritability.
 
-Methods and Materials
----------------------
+Environmental variables
+1. `collect_environmental_variables.R` - Collect environmental covariate data from NOAA and Soil Survey databases.
+2. `manipulate_analyze_environmental_variables.R` - Calculate summary variables, including growing degree days (GDD), accumulated GDD (AGDD), and photothermality.
+3. `model_environmental_variables.R` - Find the variables that are highly correlated with the environmental mean and create covariance and distance matrices.
 
-Trials in the `S2MET` will be performed in 21 environments over 3 years for a total of 43 environments.
-
+Clustering
+1. `environmental_clustering.R` - Calculate great circle distance and phenotypic distance, then create hierarchical clusters based on the distance objects.
+2. `cluster_heritability.R` -
