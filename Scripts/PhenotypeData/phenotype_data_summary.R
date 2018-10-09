@@ -3,18 +3,9 @@
 ## Author: Jeff Neyhart
 ## Last updated: May 2, 2018
 ## 
-## This notebook outlines procedures for calculating adjusted phenotypic means of
-## entries in trials that belong to the `S2MET` experiment.
-## 
 
 # Load libraries and directories
 
-
-## This notebook will provide some phenotyping data summaries for the S2MET project. 
-## It will include:
-## 1. Basic model for g + e + gxe
-## 2. Heritability estimates
-## 3. Trait correlations among environments
 
 library(tidyverse)
 library(broom)
@@ -149,10 +140,14 @@ reduced_forms <- combn(x = random_terms, m = length(random_terms) - 1, paste, si
 forms <- c(full = as.formula(str_c("value ~ ", str_c(random_terms, collapse = " + "))),
            reduced_forms)
 
+## Combine data
+S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), 
+                                  mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) 
+
 
 # Group by trait and fit the multi-environment model
 # Fit models in the TP and the TP + VP
-stage_two_fits_GE <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) %>%
+stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
   mutate_at(vars(location:line_name), as.factor) %>%
   group_by(trait, population) %>%
   do({
@@ -309,6 +304,114 @@ g_herit <- stage_two_fits_GE %>%
 
 ggsave(filename = "heritability.jpg", plot = g_herit, path = fig_dir, width = 4, height = 4, dpi = 1000)
 
+
+
+
+### Calculate the proportion of GxE that is due to environmental genetic variance
+### heterogeneity versus lack of environmental correlation
+
+control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+
+# For each environment, calculate the genetic variance via reml
+env_varG <- S2_MET_BLUEs_tomodel %>% 
+  group_by(population, trait, environment) %>%
+  do(varG = {
+    df <- .
+    wts <- df$std_error^2
+    
+    # If more than one trial is present, add trial as a fixed effect
+    if (n_distinct(df$trial) > 1) {
+      formula <- value ~ 1 + trial + (1|line_name)
+    } else {
+      formula <- value ~ 1 + (1|line_name)
+    }
+    
+    fit <- lmer(formula = formula, data = df, control = control, weights = wts)  
+    
+    as.data.frame(VarCorr(fit))[1,"vcov"]
+    
+  })
+
+# Calculate the heterogeneity
+env_varG_V <- env_varG %>% 
+  group_by(population, trait) %>% 
+  unnest() %>% 
+  summarize(V = var(sqrt(varG)))
+
+
+## Fit a model using all the data
+prop_varcomp <- S2_MET_BLUEs_tomodel %>%
+  group_by(population, trait) %>%
+  do({
+    df <- .
+    wts <- df$std_error^2
+    
+    formula <- value ~ 1 + (1|line_name) + environment + (1|line_name:environment)
+    fit <- lmer(formula = formula, data = df, control = control, weights = wts)  
+    
+    as.data.frame(VarCorr(fit))[,c("grp", "vcov")]
+    
+  })
+
+
+# Use the estimate of varGE across all environments to calculate L
+env_L <- left_join(env_varG_V, subset(prop_varcomp, grp == "line_name:environment",c(population, trait, vcov))) %>% 
+  mutate(L = vcov - V)
+
+# Use the estimate of genetic variance across all environments to calculate the 
+# genetic correlation
+env_r <- left_join(env_L, subset(prop_varcomp, grp == "line_name", c(population, trait, vcov)), by = c("population", "trait")) %>% 
+  mutate(r_G = vcov.y / (vcov.y + L))
+
+env_r %>% select(population, trait, r_G) %>% spread(population, r_G)
+# trait             all    tp
+# 1 GrainYield      0.262 0.273
+# 2 HeadingDate     0.614 0.703
+# 3 HeadingDateAGDD 0.614 0.697
+# 4 PlantHeight     0.343 0.342
+
+
+## What proportion do V and L make up of varGE?
+## This is from Li et al 2018 or Cooper and DeLacey 1994
+## Add to the variance component table
+varGE_components <- env_r %>% 
+  select(population, trait, varGE = vcov.x, V, L) %>% 
+  mutate_at(vars(V, L), funs(prop = . / varGE)) 
+
+
+varGE_components %>%
+  mutate(heterogeneity = str_c(round(V, 3), " (", round(V_prop, 2) * 100, "%)"), 
+         lackCorrelation = str_c(round(L, 3), " (", round(L_prop, 2) * 100, "%)")) %>% 
+  select(population, trait, heterogeneity, lackCorrelation) %>% 
+  gather(grp, value, -trait, -population) %>% 
+  spread(grp, value)
+
+
+# population trait           heterogeneity  lackCorrelation 
+# 1 all        GrainYield      28018.464 (9%) 276021.075 (91%)
+# 2 all        HeadingDate     0.98 (12%)     6.982 (88%)     
+# 3 all        HeadingDateAGDD 1110.434 (11%) 8749.777 (89%)  
+# 4 all        PlantHeight     1.975 (9%)     18.863 (91%)    
+# 5 tp         GrainYield      26800.803 (9%) 277236.683 (91%)
+# 6 tp         HeadingDate     1.214 (18%)    5.603 (82%)     
+# 7 tp         HeadingDateAGDD 1342.66 (16%)  7200.932 (84%)  
+# 8 tp         PlantHeight     2.018 (10%)    18.461 (90%) 
+
+
+# Plot
+g_varGE_comp <- varGE_components %>% 
+  select(population, trait, GeneticHeterogen = V_prop, LackCorrelation = L_prop) %>% 
+  gather(group, proportion, -population, -trait) %>% 
+  mutate(group = factor(group, levels = rev(unique(group)))) %>%
+  ggplot(data = ., aes(x = trait, y = proportion, fill = group)) + 
+  geom_col() +
+  geom_text(aes(y = proportion / 2, label = round(proportion, 2))) +
+  scale_fill_discrete(name = NULL) +
+  facet_grid(~ population) +
+  theme_acs() +
+  theme(legend.position = c(0.87, 0.75))
+
+ggsave(filename = "varGE_components.jpg", plot = g_varGE_comp, width = 6, height = 3, path = fig_dir, dpi = 1000)
 
 
 

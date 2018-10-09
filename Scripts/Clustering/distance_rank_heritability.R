@@ -1,7 +1,7 @@
 ## Heritability based on environmental distance
 ## 
 ## Author: Jeff Neyhart
-## Last Updated: August 11, 2018
+## Last Updated: October 9, 2018
 ## 
 ## This script will look at prediction accuracies from adding environments after
 ## ranking based on specific distance metrics
@@ -22,7 +22,8 @@ source(file.path(repo_dir, "source_MSI.R"))
 
 
 ## Number of cores
-n_core <- ifelse(Sys.info()["sysname"] == "Windows", 1, detectCores())
+n_core <- 16
+n_core <- detectCores()
 
 
 
@@ -68,7 +69,7 @@ clusters_to_model_split <- clusters_to_model %>%
 cluster_herit_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
   
   # ##
-  # i = 1
+  # i = 11
   # core_df <- clusters_to_model_split[[i]]
   # ##
   
@@ -91,7 +92,7 @@ cluster_herit_out <- mclapply(X = clusters_to_model_split, FUN = function(core_d
     fit_list <- train_data_list %>%
       map(~{
         wts <- .$std_error^2
-        fit <- lmer(value ~ (1|line_name) + environment + (1|line_name:environment), data = ., control = control, weights = wts)
+        fit <- lmer(value ~ (1|line_name) + (1|environment) + (1|line_name:environment), data = ., control = control, weights = wts)
         
         plot_table <- xtabs(formula = ~ line_name + environment, data = .)
         
