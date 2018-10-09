@@ -139,3 +139,15 @@ vp_only_env <- S2_MET_BLUEs %>%
   pull()
 
 
+
+## Sample environments for testing
+# First identify environments in which the TP and VP are phenotyped for all traits
+set.seed(1049)
+sample_envs <- S2_MET_BLUEs %>% 
+  group_by(environment) %>% 
+  filter(sum(tp_geno %in% line_name) > 0, sum(vp_geno %in% line_name) > 0, dplyr::n_distinct(trait) == length(unique(S2_MET_BLUEs$trait))) %>%
+  pull(environment) %>%
+  unique() %>%
+  sample(x = ., size = 5)
+
+

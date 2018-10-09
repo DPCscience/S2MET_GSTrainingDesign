@@ -1,7 +1,9 @@
 #!/bin/bash
 
-#PBS -l walltime=36:00:00,mem=62gb,nodes=1:ppn=8
-#PBS -N distance_rank_heritability
+# #PBS -l walltime=36:00:00,mem=62gb,nodes=1:ppn=8
+#PBS -l walltime=24:00:00,mem=22gb,nodes=1:ppn=8
+# #PBS -N distance_heritability
+#PBS -N distance_heritability_testing
 #PBS -M neyha001@umn.edu
 #PBS -m abe
 #PBS -r n
@@ -13,3 +15,6 @@ module load R/3.5.0
 
 # # Cluster heritability calculations
 Rscript distance_rank_heritability.R
+
+# Testing version
+Rscript distance_rank_heritability_TESTING.R
