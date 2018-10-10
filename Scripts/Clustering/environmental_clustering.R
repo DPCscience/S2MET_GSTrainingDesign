@@ -110,6 +110,24 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
     dist1[is.na(dist1)] <- mean(dist1, na.rm = T)
     dist1 })
 
+## Calculate correlation matrices
+env_cor_all <- S2_MET_BLUEs %>%
+  # Split by trait
+  split(.$trait) %>% 
+  map(~select(., line_name, environment, value) %>% 
+        spread(environment, value) %>% as.data.frame() %>% 
+        column_to_rownames("line_name") %>% 
+        cor(., use = "pairwise.complete.obs"))
+        
+env_cor_tp <- S2_MET_BLUEs %>%
+  filter(line_name %in% tp) %>%
+  # Split by trait
+  split(.$trait) %>% 
+  map(~select(., line_name, environment, value) %>% 
+        spread(environment, value) %>% as.data.frame() %>% 
+        column_to_rownames("line_name") %>% 
+        cor(., use = "pairwise.complete.obs"))
+
 
 # ## Distance based on SREG
 # Deprecated
@@ -351,7 +369,7 @@ multi_year_ec_dist1 <- multi_year_ec_dist %>%
 # Combine and add the other distance matrices
 dist_method_df_all <- bind_rows(
   data_frame(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list),
-  data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_all),
+  data_frame(trait = traits, model = "pheno_dist", dist = ge_mean_D_all, cov = env_cor_all),
   filter(one_year_ec_dist1, population == "all"),
   filter(multi_year_ec_dist1, population == "all")
 )
@@ -359,7 +377,7 @@ dist_method_df_all <- bind_rows(
 # Combine and add the other distance matrices
 dist_method_df_tp <- bind_rows(
   data_frame(trait = names(ge_mean_D_tp), model = "great_circle_dist", dist = great_circle_dist_list),
-  data_frame(trait = names(ge_mean_D_tp), model = "pheno_dist", dist = ge_mean_D_tp),
+  data_frame(trait = names(ge_mean_D_tp), model = "pheno_dist", dist = ge_mean_D_tp, cov = env_cor_tp),
   filter(one_year_ec_dist1, population == "tp"),
   filter(multi_year_ec_dist1, population == "tp")
 )
@@ -554,6 +572,7 @@ pred_env_dist_rank <- dist_method_df_rank %>%
 # Number of random samples
 n_sample <- 100
 
+set.seed(153)
 ## For each prediction environment, take the environments in one of the distance
 ## matrices and randomly sample it
 pred_env_rank_random <- pred_env_dist_rank %>%

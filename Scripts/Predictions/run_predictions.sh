@@ -5,7 +5,7 @@
 # #PBS -N S2_MET_environmental_distance_pred
 # #PBS -N S2_MET_environmental_distance_realistic
 # #PBS -N S2_MET_environmental_distance_pred_testing
-#PBS -N S2_MET_environmental_covariance predictions
+#PBS -N environmental_covariance predictions
 #PBS -M neyha001@umn.edu
 #PBS -m abe
 #PBS -r n
@@ -13,7 +13,7 @@
 # Change the working directory
 cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/Scripts/Predictions/
 
-module load R/3.2.0_intel_mkl
+module load R/3.5.0
 
 # Predictions by environmental rank
 # Rscript distance_rank_predictions.R
