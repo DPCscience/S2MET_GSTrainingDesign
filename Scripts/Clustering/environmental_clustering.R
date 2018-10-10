@@ -20,14 +20,6 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 
-## We will test 6 different distance measurements:
-## 
-## 1. Great Circle Distance using lat/long
-## 2. The environment distance metric (as described in Bernardo2010)
-## 4. 4 - 1 year environmental covariables
-## 5. 4- 10 year environmental covariables
-## 
-
 
 ## Load the environment covariable distance matrices
 load(file.path(result_dir, "environmental_covariable_distance_mat.RData"))
@@ -120,6 +112,7 @@ ge_mean_D_tp <- S2_MET_BLUEs %>%
 
 
 # ## Distance based on SREG
+# Deprecated
 # 
 # ## Iterate over the pairs of environments
 # # Fit the SREG model, then calculate the residual sum of squares

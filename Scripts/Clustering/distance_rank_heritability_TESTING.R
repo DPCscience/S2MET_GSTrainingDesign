@@ -47,22 +47,27 @@ S2_MET_BLUEs_tp <- S2_MET_BLUEs %>%
 ### Testing Version ###
 
 
+# Maximum number of training environments to test
+max_env <- 15
+
+
 ## What is the heritability of each "training cluster" of environments as you add increasingly distant environments?
 
 # First use the TP clusters
 clusters_model <- pred_env_dist_rank$tp %>%
   filter(environment %in% sample_envs) %>%
-  mutate(environments = map(env_rank, names)) %>%
+  mutate(pred_environment = map(env_rank, names)) %>%
   select(-env_rank)
 
 # Combine with the random clusters - only 25 of them
 clusters_rand <- pred_env_rank_random$tp %>%
   filter(model %in% paste0("sample", 1:25),
          environment %in% sample_envs) %>%
-  mutate(environments = map(env_rank, names)) %>%
+  mutate(pred_environment = map(env_rank, names)) %>%
   select(-env_rank)
 
-clusters_to_model <- bind_rows(clusters_model, clusters_rand)
+clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
+  mutate(pred_environment = map(pred_environment, ~head(., max_env)))
 
 
 
@@ -92,13 +97,14 @@ cluster_herit_out <- mclapply(X = clusters_to_model_split, FUN = function(core_d
   for (i in seq(nrow(core_df))) {
     
     # Vector of training environments, passed to an accumulation function
-    envs <- core_df$environments[[i]] %>%
+    envs <- core_df$pred_environment[[i]] %>%
       accumulate(., c)
     tr <- core_df$trait[i]
     
     # Create a list of training data
     # Remove the first (only one environment)
-    train_data_list <- envs[-1] %>% map(~filter(S2_MET_BLUEs_tp, trait == tr, environment %in% .))
+    train_data_list <- envs[-1] %>% 
+      map(~filter(S2_MET_BLUEs_tp, trait == tr, environment %in% .))
     
     # Iterate over the list and fit a model
     fit_list <- train_data_list %>%
