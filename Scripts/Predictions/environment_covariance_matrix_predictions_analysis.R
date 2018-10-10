@@ -2,7 +2,7 @@
 ##
 ##
 ## Author: Jeff Neyhart
-## Last updated: August 12, 2018
+## Last updated: October 10, 2018
 ##
 
 # # Run the source script
@@ -10,7 +10,9 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 # Load the results
-load(file.path(result_dir, "/env_cov_mat_predictions.RData"))
+load(file.path(result_dir, "env_cov_mat_predictions.RData"))
+
+
 
 
 ## Summarize predictive ability
