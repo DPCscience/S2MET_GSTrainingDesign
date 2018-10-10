@@ -131,7 +131,7 @@ cluster_herit_out <- mclapply(X = clusters_to_model_split, FUN = function(core_d
   # Add the results list to the core_df and return
   core_df %>% 
     mutate(out = results_out) %>% 
-    select(-environments, -core)
+    select(-pred_environment, -core)
   
 })
 

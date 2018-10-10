@@ -14,7 +14,7 @@ cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/Scripts/Clusteri
 module load R/3.5.0
 
 # # Cluster heritability calculations
-Rscript distance_rank_heritability.R
+# Rscript distance_rank_heritability.R
 
 # Testing version
 Rscript distance_rank_heritability_TESTING.R
