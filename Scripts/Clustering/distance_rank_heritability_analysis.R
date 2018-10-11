@@ -19,7 +19,8 @@ alpha <- 0.05
 
 
 # Read in the results
-load(file.path(result_dir, "cluster_heritability_tp_TESTING.RData"))
+# load(file.path(result_dir, "cluster_heritability_tp_TESTING.RData"))
+load(file.path(result_dir, "cluster_heritability_tp.RData"))
 
 # Summarize the heritability
 cluster_herit1 <- cluster_herit_out %>% 
@@ -28,7 +29,7 @@ cluster_herit1 <- cluster_herit_out %>%
 
 ## Summarize the random samples as a baseline
 cluster_herit_random <- cluster_herit1 %>%
-  filter(str_detect(model, "sample")) %>% 
+  filter(model %in% str_c("sample", 1:25)) %>% 
   group_by(environment, trait, n_e) %>% 
   summarize_at(vars(heritability), funs(mean, sd, n())) %>% 
   mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), 
@@ -44,9 +45,6 @@ cluster_herit_model <- cluster_herit1 %>%
 
 
 
-
-
-
 # Plot
 cluster_herit_model %>% 
   ggplot(aes(x = n_e, y = mean, color = model, fill = model)) +
@@ -59,9 +57,17 @@ cluster_herit_model %>%
   theme_acs()
 
 
+# Calculate the range in the heritability when using the maximum number of environments
+# For the random samples
+
+
+
+
+
 
 ### Calculate heritability as relative to using all environments
 cluster_herit_stand <- cluster_herit1 %>% 
+  filter(n_e < max(cluster_herit1$n_e)) %>%
   group_by(environment, trait, model) %>% 
   mutate(rel_heritability = heritability - heritability[n()])
 
@@ -98,7 +104,7 @@ g_cluster_herit_stand <- cluster_herit_stand_summ %>%
   xlab("Number of environments") +
   theme_acs()
  
-ggsave(filename = "distance_rank_heritability.jpg", plot = g_cluster_herit_stand, path = fig_dir, width = 5, height = 7, dpi = 1000)
+ggsave(filename = "distance_rank_heritability.jpg", plot = g_cluster_herit_stand, path = fig_dir, width = 4, height = 6, dpi = 1000)
 
 
 

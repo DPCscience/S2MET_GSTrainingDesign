@@ -568,9 +568,9 @@ pred_env_dist_rank <- dist_method_df_rank %>%
 
 
 
-## Randomly sample environments as a control
+## Randomly order non-prediction environments
 # Number of random samples
-n_sample <- 100
+n_sample <- 10
 
 set.seed(153)
 ## For each prediction environment, take the environments in one of the distance
@@ -581,6 +581,27 @@ pred_env_rank_random <- pred_env_dist_rank %>%
           df <- .
           smpls <- rerun(.n = n_sample, sample(df$env_rank[[1]]))
           data_frame(environment = df$environment[1], trait = df$trait[1],
+                     population = df$population[1], model = str_c("rank_sample", seq_along(smpls)), 
+                     env_rank = smpls)
+          
+          # # Combine
+          # bind_rows(df, sample_df)
+          
+        }) %>%
+        ungroup() )
+
+
+# Now generate 100 samples using all environments
+set.seed(1004)
+
+n_sample <- 100
+pred_env_random <- pred_env_dist_rank %>%
+  map(~group_by(., trait) %>%
+        do({
+          df <- .
+          envs <- df$env_rank %>% map(names) %>% reduce(union)
+          smpls <- rerun(.n = n_sample, sample(envs))
+          data_frame(environment = NA, trait = df$trait[1],
                      population = df$population[1], model = str_c("sample", seq_along(smpls)), 
                      env_rank = smpls)
           
@@ -596,6 +617,6 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 
 # Save this
 save_file <- file.path(result_dir, "distance_method_results.RData")
-save("clust_method_df", "pred_env_dist_rank","pred_env_rank_random", file = save_file)
+save("clust_method_df", "pred_env_dist_rank","pred_env_rank_random", "pred_env_random", file = save_file)
 
 

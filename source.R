@@ -148,6 +148,6 @@ sample_envs <- S2_MET_BLUEs %>%
   filter(sum(tp_geno %in% line_name) > 0, sum(vp_geno %in% line_name) > 0, dplyr::n_distinct(trait) == length(unique(S2_MET_BLUEs$trait))) %>%
   pull(environment) %>%
   unique() %>%
-  sample(x = ., size = 5)
+  sample(x = ., size = 10)
 
 
