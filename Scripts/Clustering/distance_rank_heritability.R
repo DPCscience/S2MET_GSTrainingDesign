@@ -131,12 +131,83 @@ cluster_herit_out <- mclapply(X = clusters_to_model_split, FUN = function(core_d
 
 cluster_herit_out <- bind_rows(cluster_herit_out)
 
+
+
+#### Window-based calculation ####
+
+# Window size
+env_window <- 5 
+
+
+# Parallelize
+cluster_herit_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
+  
+  # ##
+  # i = 1
+  # core_df <- clusters_to_model_split[[i]]
+  # ##
+  
+  # Results list
+  results_out <- vector("list", nrow(core_df))
+  
+  # Iterate over rows
+  for (i in seq(nrow(core_df))) {
+    
+    # Vector of training environments, passed to an accumulation function
+    envs <- core_df$pred_environment[[i]]
+    envs <- seq(env_window, length(envs)) %>% 
+      seq_along() %>% 
+      map(~. + seq(env_window) - 1) %>%
+      map(~envs[.])
+    
+    
+    tr <- core_df$trait[i]
+    
+    # Create a list of training data
+    # Remove the first (only one environment)
+    train_data_list <- envs %>% 
+      map(~filter(S2_MET_BLUEs_tp, trait == tr, environment %in% .))
+    
+    # Iterate over the list and fit a model
+    fit_list <- train_data_list %>%
+      map(~{
+        wts <- .$std_error^2
+        fit <- lmer(value ~ (1|line_name) + (1|environment) + (1|line_name:environment), data = ., control = control, weights = wts)
+        
+        plot_table <- xtabs(formula = ~ line_name + environment, data = .)
+        
+        harm_env <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+          ifelse(. > 1, 1, .) %>%
+          rowSums() %>% 
+          harm_mean()
+        
+        list(fit = fit, n_e = harm_env)
+      })
+    
+    # Calculate heritability
+    results_out[[i]] <- fit_list %>%
+      map(~herit(object = .$fit, exp = herit_exp, n_e = .$n_e, n_r = 1))
+    
+  }
+  
+  # Add the results list to the core_df and return
+  core_df %>% 
+    mutate(out = results_out) %>% 
+    select(-pred_environment, -core)
+  
+})
+
+
+cluster_herit_out_window <- bind_rows(cluster_herit_out_window)
+
+
+
+
+
+
 # Save
 save_file <- file.path(result_dir, "cluster_heritability_tp_TESTING.RData")
-save("cluster_herit_out", file = save_file)
-
-
-# # Save
 # save_file <- file.path(result_dir, "cluster_heritability_tp.RData")
-# save("cluster_herit_out", file = save_file)
+save("cluster_herit_out", "cluster_herit_out_window", file = save_file)
+
 

@@ -19,18 +19,39 @@ alpha <- 0.05
 
 
 # Read in the results
-# load(file.path(result_dir, "cluster_heritability_tp_TESTING.RData"))
-load(file.path(result_dir, "cluster_heritability_tp.RData"))
+load(file.path(result_dir, "cluster_heritability_tp_TESTING.RData"))
+# load(file.path(result_dir, "cluster_heritability_tp.RData"))
+
+
+# Get the unique distance models, then assign new names
+models <- sort(unique(subset(cluster_herit_out, !str_detect(model, "sample"), model, drop = T))) 
+models_rename <- setNames(c("GCD", "MYEC_All", "MYEC_Cor1", "MYEC_F1", "MYEC_Cor5", "MYEC_F5", "OYEC_All", "OYEC_Cor1", "OYEC_F1", "OYEC_Cor5", "OYEC_F5", "PD"), models) %>%
+  # Order
+  .[c(length(.), seq(length(.) - 1))] %>%
+  c(., "random" = "Random")
+
+# Vector of colors
+colors1 <- umn_palette(3)[-1:-2]
+colors2 <- umn_palette(2)[-1:-2]
+colors3 <- umn_palette(4)[-1:-2]
+
+colors <- c(umn_palette(2)[1:2], colors1[c(1,6)], colors2[c(1,6)], colors3[1], colors1[c(2,7)], colors2[c(2,7)], colors3[2], "grey75") %>%
+  setNames(nm = c(models_rename))
+
 
 # Summarize the heritability
 cluster_herit1 <- cluster_herit_out %>% 
   mutate(out = map(out, ~{data_frame(n_e = seq_along(.) + 1, heritability = map_dbl(., "heritability"))})) %>% 
   unnest()
 
+## First check for normality among the samples
+
+
+
 ## Summarize the random samples as a baseline
 cluster_herit_random <- cluster_herit1 %>%
-  filter(model %in% str_c("sample", 1:25)) %>% 
-  group_by(environment, trait, n_e) %>% 
+  filter(str_detect(model, "sample")) %>%
+  group_by(trait, n_e) %>% 
   summarize_at(vars(heritability), funs(mean, sd, n())) %>% 
   mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), 
          lower = mean - stat, upper = mean + stat) %>% 
@@ -57,19 +78,18 @@ cluster_herit_model %>%
   theme_acs()
 
 
-# Calculate the range in the heritability when using the maximum number of environments
-# For the random samples
-
-
-
 
 
 
 ### Calculate heritability as relative to using all environments
 cluster_herit_stand <- cluster_herit1 %>% 
-  filter(n_e < max(cluster_herit1$n_e)) %>%
+  # filter(n_e < max(cluster_herit1$n_e)) %>%
   group_by(environment, trait, model) %>% 
   mutate(rel_heritability = heritability - heritability[n()])
+
+## Check the distribution to ensure normality
+
+
 
 # First average over environments
 cluster_herit_stand_summ <- cluster_herit_stand %>% 
@@ -79,24 +99,28 @@ cluster_herit_stand_summ <- cluster_herit_stand %>%
   ungroup() %>%
   mutate(model = ifelse(str_detect(model, "sample"), "random", model)) %>%
   group_by(trait, model, n_e) %>%
-  summarize_at(vars(herit), funs(mean, sd, n())) %>% 
-  mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), 
-         lower = mean - stat, upper = mean + stat) %>% 
-  select(-se, -stat) %>%
-  ungroup()
+  summarize_at(vars(herit), funs(mean, sd, lower = quantile1(.)[1], upper = quantile1(.)[2], n())) %>% 
+  # Use the empirical quantiles to calculate a confidence interval
+  mutate_at(vars(lower, upper), funs(ifelse(model == "random", ., NA))) %>%
+  mutate(se = sd / sqrt(n), lower = mean - (se * abs(lower)), upper = mean + (se * abs(upper))) %>%
+  ungroup() %>%
+  # Rename the models
+  mutate(model = factor(str_replace_all(model, models_rename), levels = models_rename))
 
 
-# Vector of colors
-colors <- setNames(c(RColorBrewer::brewer.pal(length(unique(cluster_herit_model$model)), name = "Set3"), "grey75"), 
-                     nm = c(unique(cluster_herit_model$model), "random"))
+
+
 
 
 # Plot
-g_cluster_herit_stand <- cluster_herit_stand_summ %>% 
+g_cluster_herit_stand <- cluster_herit_stand_summ %>%
+  mutate(model1 = model) %>%
+  filter(str_detect(model, "EC")) %>%
   ggplot(aes(x = n_e, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
-  geom_ribbon(alpha = 0.25) + 
   geom_line() + 
-  facet_grid(trait ~ ., scales = "free_y", switch = "y") +
+  geom_line(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) +
+  geom_ribbon(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) + 
+  facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
   scale_color_manual(values = colors, name = "Distance\nmeasure") +
   scale_fill_manual(values = colors, name = "Distance\nmeasure") +
   scale_x_continuous(breaks = pretty) +
@@ -104,14 +128,14 @@ g_cluster_herit_stand <- cluster_herit_stand_summ %>%
   xlab("Number of environments") +
   theme_acs()
  
-ggsave(filename = "distance_rank_heritability.jpg", plot = g_cluster_herit_stand, path = fig_dir, width = 4, height = 6, dpi = 1000)
+ggsave(filename = "distance_rank_heritability.jpg", plot = g_cluster_herit_stand, path = fig_dir, width = 10, height = 5, dpi = 1000)
 
 
 
 ## What models outperform random?
 cluster_herit_stand_compare <- cluster_herit_stand_summ %>%
-  filter(model != "random") %>% 
-  left_join(., filter(cluster_herit_stand_summ, model == "random"), c("trait", "n_e")) %>% 
+  filter(model != "Random") %>% 
+  left_join(., filter(cluster_herit_stand_summ, model == "Random"), c("trait", "n_e")) %>% 
   select(trait, model = model.x, n_e, mean = mean.x, random_mean = mean.y, lower = lower.y, upper = upper.y)
 
 # For each model and trait, what is the lower n_e value that is significantly different than random?
@@ -132,16 +156,17 @@ common_models <- cluster_herit_stand_compare_model %>%
   map("model") %>%
   reduce(intersect) %>%
   # Make sure pheno dist and GCD are included
-  union(., c("great_circle_dist", "pheno_dist", "random"))
+  union(., c("GCD", "PD", "Random"))
 
-
-## Plot only those models
-g_cluster_herit_stand_subset <- cluster_herit_stand_summ %>% 
-  filter(model %in% common_models) %>%
+  
+g_cluster_herit_stand_subset <- cluster_herit_stand_summ %>%
+  mutate(model1 = model) %>%
+  filter(model %in% common_models, str_detect(model, "EC")) %>%
   ggplot(aes(x = n_e, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
-  geom_ribbon(alpha = 0.25) + 
   geom_line() + 
-  facet_grid(trait ~ ., scales = "free_y", switch = "y") +
+  geom_line(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) +
+  geom_ribbon(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) + 
+  facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
   scale_color_manual(values = colors, name = "Distance\nmeasure") +
   scale_fill_manual(values = colors, name = "Distance\nmeasure") +
   scale_x_continuous(breaks = pretty) +
@@ -149,13 +174,61 @@ g_cluster_herit_stand_subset <- cluster_herit_stand_summ %>%
   xlab("Number of environments") +
   theme_acs()
 
-ggsave(filename = "distance_rank_heritability_common.jpg", plot = g_cluster_herit_stand_subset, path = fig_dir, width = 5, height = 7, dpi = 1000)
+ggsave(filename = "distance_rank_heritability_common.jpg", plot = g_cluster_herit_stand_subset, path = fig_dir, width = 5, height = 5, dpi = 1000)
 
 
 
 
 
+### Analyze the contribution of GxE to total phenotypic variance
+cluster_gxe <- cluster_herit_out %>% 
+  mutate(out = map(out, ~{data_frame(n_e = seq_along(.) + 1, var_comp = map(., "var_comp"))})) %>% 
+  unnest() %>%
+  unnest() %>%
+  filter(source != "environment") %>%
+  group_by(environment, trait, model, n_e) %>%
+  mutate(variance = variance / sum(variance)) %>%
+  filter(str_detect(source, "line_name")) %>%
+  summarize(GxE_to_G = variance[1] / variance[2])
+  
 
+
+## Summarize the random samples as a baseline
+cluster_gxe_random <- cluster_gxe %>%
+  filter(str_detect(model, "sample")) %>%
+  group_by(trait, n_e) %>% 
+  summarize_at(vars(GxE_to_G), funs(mean, sd, n())) %>% 
+  mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), 
+         lower = mean - stat, upper = mean + stat) %>% 
+  select(-se, -stat) %>%
+  ungroup() %>%
+  mutate(model = "random")
+
+# Subset the non-random models
+cluster_gxe_model <- cluster_gxe %>% 
+  filter(!str_detect(model, "sample")) %>%
+  rename(mean = GxE_to_G)
+
+# Plot
+# Just random first
+cluster_gxe_random %>%
+  filter(n_e != 2) %>%
+  ggplot(aes(x = n_e, y = mean, color = model, fill = model, ymin = lower, ymax = upper)) +
+  geom_ribbon() + 
+  geom_line() + 
+  facet_grid(trait ~ ., scales = "free_y")
+
+
+cluster_gxe_model %>% 
+  filter(n_e != 2) %>%
+  ggplot(aes(x = n_e, y = mean, color = model, fill = model)) +
+  geom_ribbon(data = filter(cluster_gxe_random, n_e != 2), aes(ymin = lower, ymax = upper), alpha = 0.25, fill = "grey75", color = "grey75") + 
+  geom_line(data = filter(cluster_gxe_random, n_e != 2), color = "grey75") + 
+  geom_line() + 
+  facet_grid(trait ~ environment, scales = "free_y") +
+  # scale_color_manual(values = c("Random" = "grey75"), name = "Model") + 
+  # scale_fill_manual(values = c("Random" = "grey75"), name = "Model") + 
+  theme_acs()
 
 
 

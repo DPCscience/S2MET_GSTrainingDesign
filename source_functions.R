@@ -447,7 +447,11 @@ window_mean <- function(x, y, window = 8) {
 
 
 
-
+## Return the quantiles of a random sample at level alpha
+quantile1 <- function(x, alpha = 0.05) {
+  qs <- quantile(x, probs = c(alpha / 2, 1 - (alpha / 2)))
+  `names<-`(qs, c("lower", "upper"))
+}
 
 
 
