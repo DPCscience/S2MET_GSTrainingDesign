@@ -5,7 +5,7 @@
 # #PBS -N S2_MET_environmental_distance_pred
 # #PBS -N S2_MET_environmental_distance_realistic
 # #PBS -N S2_MET_environmental_distance_pred_testing
-#PBS -N environmental_covariance predictions
+#PBS -N environmental_covariance_predictions
 #PBS -M neyha001@umn.edu
 #PBS -m abe
 #PBS -r n
@@ -23,8 +23,3 @@ module load R/3.5.0
 
 Rscript environment_covariance_matrix_predictions.R
 
-# Heritability by environmental rank
-# Rscript distance_rank_heritability.R
-
-# Predictions by environmental rank in a realistic breeding scenario
-# Rscript realistic_predictions.R
