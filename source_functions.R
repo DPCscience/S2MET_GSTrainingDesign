@@ -376,7 +376,7 @@ calc_variance <- function(data, random_effect = c("line_name", "environment", "l
 
 ## A generic prediction function that takes training and test data and returns
 ## PGVs and accuracy
-gblup <- function(K, train, test, bootreps = NULL) {
+gblup <- function(K, train, test, fun = c("rrblup", "sommer"), bootreps = NULL) {
   
   # Create a model.frame
   mf <- model.frame(value ~ line_name + env, weights = std_error, data = train)
@@ -384,20 +384,36 @@ gblup <- function(K, train, test, bootreps = NULL) {
   # Verify that the number of levels of 'line_name' is equal to the dimensions of K
   stopifnot(all(nlevels(mf$line_name) == dim(K)))
   
+  fun <- match.arg(fun)
+  
   
   
   # Vectors and matrices
   y <- model.response(mf)
-  X <- model.matrix(~ -1 + env, mf)
-  # Remove columns with all zero
-  X <- X[,colSums(X) != 0, drop = FALSE]
+  X <- if (nlevels(mf$env) == 1) model.matrix(~ 1, mf) else model.matrix(~ 1 + env, mf)
+  Z <- `colnames<-`(model.matrix(~ -1 + line_name, mf), colnames(K))
   
-  Z <- model.matrix(~ -1 + line_name, mf)
+  # Split on function
+  if (fun == "rrblup") {
+    
+    fit <- mixed.solve(y = y, Z = Z, K = K, X = X)
+    
+    # Extract PGVs
+    pgv <- fit$u %>% 
+      data.frame(line_name = names(.), pred_value = ., row.names = NULL, stringsAsFactors = FALSE)
+    
+    
+  } else if (fun == "sommer") {
+    
+    R <- solve(diag(mf$`(weights)`^2))
+    fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Z, K = K)), R = list(res = R), silent = TRUE)
   
-  fit <- mixed.solve(y = y, Z = Z, K = K, X = X)
-  # Extract PGVs
-  pgv <- fit$u %>% 
-    data.frame(line_name = names(.), pred_value = ., row.names = NULL, stringsAsFactors = FALSE)
+    # Extract PGVs
+    pgv <- fit$u.hat$g
+    pgv <- data.frame(line_name = row.names(pgv), pred_value = pgv[,1], row.names = NULL, stringsAsFactors = FALSE)
+    
+  }
+  
   
   # If test is missing, just return the predictions
   if (missing(test)) {
