@@ -101,8 +101,7 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
     
     
     # Iterate over the list and predict
-    pred_list <- train_data_list %>%
-      map(~gblup(K = K, train = ., test = test_data))
+    pred_list <- train_data_list %>% map(~gblup(K = K, train = ., test = test_data))
     
     # Add to the results
     results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list, "accuracy"))
@@ -144,6 +143,7 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
     
     # Vector of training environments, passed to an accumulation function
     envs <- core_df$pred_environment[[i]]
+    val_env <- core_df$environment[i]
     envs <- seq(env_window, length(envs)) %>% 
       seq_along() %>% 
       map(~. + seq(env_window) - 1) %>%
