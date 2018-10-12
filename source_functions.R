@@ -390,7 +390,11 @@ gblup <- function(K, train, test, fun = c("rrblup", "sommer"), bootreps = NULL) 
   
   # Vectors and matrices
   y <- model.response(mf)
-  X <- if (nlevels(mf$env) == 1) model.matrix(~ 1, mf) else model.matrix(~ 1 + env, mf)
+  if (nlevels(mf$env) == 1) {
+    X <- model.matrix(~ 1, mf) 
+  } else {
+    X <- model.matrix(~ 1 + env, mf)
+  }
   Z <- `colnames<-`(model.matrix(~ -1 + line_name, mf), colnames(K))
   
   # Split on function
