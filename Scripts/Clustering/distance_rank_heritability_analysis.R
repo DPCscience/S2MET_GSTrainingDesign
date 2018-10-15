@@ -102,7 +102,8 @@ cluster_herit_stand_summ <- cluster_herit_stand %>%
   summarize_at(vars(herit), funs(mean, sd, lower = quantile1(.)[1], upper = quantile1(.)[2], n())) %>% 
   # Use the empirical quantiles to calculate a confidence interval
   mutate_at(vars(lower, upper), funs(ifelse(model == "random", ., NA))) %>%
-  mutate(se = sd / sqrt(n), lower = mean - (se * abs(lower)), upper = mean + (se * abs(upper))) %>%
+  # mutate(se = sd / sqrt(n), lower = mean - (se * abs(lower)), upper = mean + (se * abs(upper))) %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(1 - (alpha / 2), n - 1), lower = mean - stat, upper = mean + stat) %>%
   ungroup() %>%
   # Rename the models
   mutate(model = factor(str_replace_all(model, models_rename), levels = models_rename))
@@ -115,11 +116,11 @@ cluster_herit_stand_summ <- cluster_herit_stand %>%
 # Plot
 g_cluster_herit_stand <- cluster_herit_stand_summ %>%
   mutate(model1 = model) %>%
-  filter(str_detect(model, "EC")) %>%
+  filter(model != "Random") %>%
   ggplot(aes(x = n_e, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
+  geom_ribbon(data = filter(cluster_herit_stand_summ, model == "Random"), alpha = 0.25) + 
   geom_line() + 
-  geom_line(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) +
-  geom_ribbon(data = filter(cluster_herit_stand_summ, !str_detect(model, "EC"))) + 
+  geom_line(data = filter(cluster_herit_stand_summ, model == "Random")) +
   facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
   scale_color_manual(values = colors, name = "Distance\nmeasure") +
   scale_fill_manual(values = colors, name = "Distance\nmeasure") +
@@ -129,6 +130,47 @@ g_cluster_herit_stand <- cluster_herit_stand_summ %>%
   theme_acs()
  
 ggsave(filename = "distance_rank_heritability.jpg", plot = g_cluster_herit_stand, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+cluster_herit_stand_summ %>% 
+  filter(trait == trait[1], model == model[1]) %>% 
+  ggplot(aes(x = n_e, y = mean)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2))
+
+## Fit models
+cluster_herit_stand_models <- cluster_herit_stand_summ %>% 
+  group_by(trait, model) %>% 
+  do({
+    fit_linear <- lm(mean ~ n_e, data = .)
+    fit_poly <- lm(mean ~ poly(n_e, 2), data = .)
+    data_frame(type = c("linear", "polynomial"), fit = list(fit_linear, fit_poly))
+  }) %>%
+  # Extract r.squared and AIC
+  ungroup() %>% 
+  mutate(r_squared = map_dbl(fit, ~summary(.)$r.squared), AIC = map_dbl(fit, AIC))
+
+## Plot models
+g_cluster_herit_stand_smooth <- cluster_herit_stand_summ %>%
+  mutate(model1 = model) %>%
+  filter(model != "Random") %>%
+  ggplot(aes(x = n_e, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
+  geom_smooth(data = filter(cluster_herit_stand_summ, model == "Random"), method = "lm", formula = y ~ poly(x, 2), lwd = 0.5) + 
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE, lwd = 0.5) + 
+  geom_point(size = 0.5) +
+  facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
+  scale_color_manual(values = colors, name = "Distance\nmeasure") +
+  scale_fill_manual(values = colors, name = "Distance\nmeasure") +
+  scale_x_continuous(breaks = pretty) +
+  ylab("Relative heritability") +
+  xlab("Number of environments") +
+  theme_acs()
+
+ggsave(filename = "distance_rank_heritability_smooth.jpg", plot = g_cluster_herit_stand_smooth, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+
+
+
+
 
 
 
@@ -229,6 +271,162 @@ cluster_gxe_model %>%
   # scale_color_manual(values = c("Random" = "grey75"), name = "Model") + 
   # scale_fill_manual(values = c("Random" = "grey75"), name = "Model") + 
   theme_acs()
+
+
+
+
+
+
+### Analyze the sliding window results ###
+
+# Summarize the heritability
+cluster_herit_window1 <- cluster_herit_out_window %>% 
+  mutate(out = map(out, ~{data_frame(window_number = seq_along(.), heritability = map_dbl(., "heritability"))})) %>% 
+  unnest()
+
+
+## Summarize the random samples as a baseline
+cluster_herit_window_random <- cluster_herit_window1 %>%
+  filter(str_detect(model, "sample")) %>%
+  group_by(trait, window_number) %>% 
+  summarize_at(vars(heritability), funs(mean, sd, n())) %>% 
+  mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), 
+         lower = mean - stat, upper = mean + stat) %>% 
+  select(-se, -stat) %>%
+  ungroup() %>%
+  mutate(model = "random")
+
+# Subset the non-random models
+cluster_herit_window_model <- cluster_herit_window1 %>% 
+  filter(!str_detect(model, "sample")) %>%
+  rename(mean = heritability)
+
+
+
+# Plot
+cluster_herit_window_model %>% 
+  ggplot(aes(x = window_number, y = mean, color = model, fill = model)) +
+  geom_ribbon(data = cluster_herit_window_random, aes(ymin = lower, ymax = upper), alpha = 0.25, fill = "grey75", color = "grey75") + 
+  geom_line(data = cluster_herit_window_random, color = "grey75") + 
+  geom_line() + 
+  facet_grid(trait ~ environment, scales = "free_y") +
+  # scale_color_manual(values = c("Random" = "grey75"), name = "Model") + 
+  # scale_fill_manual(values = c("Random" = "grey75"), name = "Model") + 
+  theme_acs()
+
+
+
+
+
+### Calculate heritability as relative to using all environments
+cluster_herit_window_stand <- cluster_herit_window1 %>% 
+  left_join(., group_by(cluster_herit1, environment, trait, model) %>% filter(n_e == max(n_e)) %>% rename(max_heritability = heritability)) %>%
+  mutate(rel_heritability = heritability - max_heritability)
+
+
+
+# First average over environments
+cluster_herit_window_stand_summ <- cluster_herit_window_stand %>% 
+  group_by(trait, model, window_number) %>% 
+  summarize(herit = mean(rel_heritability)) %>%
+  # Summarize over replicates
+  ungroup() %>%
+  mutate(model = ifelse(str_detect(model, "sample"), "random", model)) %>%
+  group_by(trait, model, window_number) %>%
+  summarize_at(vars(herit), funs(mean, sd, lower = quantile1(.)[1], upper = quantile1(.)[2], n())) %>% 
+  # Use the empirical quantiles to calculate a confidence interval
+  mutate_at(vars(lower, upper), funs(ifelse(model == "random", ., NA))) %>%
+  # mutate(se = sd / sqrt(n), lower = mean - (se * abs(lower)), upper = mean + (se * abs(upper))) %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(1 - (alpha / 2), n - 1), lower = mean - stat, upper = mean + stat) %>%
+  ungroup() %>%
+  # Rename the models
+  mutate(model = factor(str_replace_all(model, models_rename), levels = models_rename))
+
+
+
+
+# Plot
+g_cluster_herit_window_stand <- cluster_herit_window_stand_summ %>%
+  mutate(model1 = model) %>%
+  filter(str_detect(model, "EC")) %>%
+  ggplot(aes(x = window_number, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
+  geom_line() + 
+  geom_line(data = filter(cluster_herit_window_stand_summ, !str_detect(model, "EC"))) +
+  geom_ribbon(data = filter(cluster_herit_window_stand_summ, !str_detect(model, "EC")), alpha = 0.25) + 
+  facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
+  scale_color_manual(values = colors, name = "Distance\nmeasure") +
+  scale_fill_manual(values = colors, name = "Distance\nmeasure") +
+  scale_x_continuous(breaks = pretty) +
+  ylab("Relative heritability") +
+  xlab("Sliding window number") +
+  theme_acs()
+
+ggsave(filename = "distance_rank_heritability_window.jpg", plot = g_cluster_herit_window_stand, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+## Plot using smoothing
+g_cluster_herit_window_stand <- cluster_herit_window_stand_summ %>%
+  mutate(model1 = model) %>%
+  filter(model != "Random") %>%
+  ggplot(aes(x = window_number, y = mean, ymin = lower, ymax = upper, color = model, fill = model)) +
+  geom_smooth(data = filter(cluster_herit_window_stand_summ, model == "Random"), method = "lm") +
+  geom_smooth(method = "lm") + 
+  geom_point(size = 1) +
+  facet_grid(trait ~ model1, scales = "free_y", switch = "y") +
+  scale_color_manual(values = colors, name = "Distance\nmeasure") +
+  scale_fill_manual(values = colors, name = "Distance\nmeasure") +
+  scale_x_continuous(breaks = pretty) +
+  ylab("Relative heritability") +
+  xlab("Sliding window number") +
+  theme_acs()
+
+ggsave(filename = "distance_rank_heritability_window_smooth.jpg", plot = g_cluster_herit_window_stand, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+
+## Fit a model
+cluster_herit_window_models <- cluster_herit_window_stand_summ %>% 
+  group_by(trait, model) %>%
+  do({
+    fit <- lm(mean ~ window_number, data = .)
+    out <- broom::tidy(fit)
+    ci <- `colnames<-`(confint(fit), c("lower", "upper"))
+    cbind(out, ci)
+  }) %>%
+  ungroup() %>%
+  mutate(term = ifelse(term == "(Intercept)", "intercept", term))
+
+# Rearrange
+cluster_herit_window_models_compare <- cluster_herit_window_models %>%
+  filter(model != "Random") %>%
+  left_join(cluster_herit_window_models %>% filter(model == "Random") %>% 
+              rename_at(vars(estimate, std.error, lower, upper), ~str_c("random_", .)) %>% select(-model, -statistic, -p.value),
+            by = c("trait", "term"))
+
+# Filter for models where the intercept is significantly greater than random and the slope is significant and negative
+cluster_herit_window_models_intercept <- cluster_herit_window_models_compare %>% 
+  filter(term == "intercept") %>% 
+  filter(estimate > random_upper) %>%
+  select(trait, model)
+
+cluster_herit_window_models_slope <- cluster_herit_window_models_compare %>% 
+  filter(term == "window_number") %>% 
+  filter(estimate < 0) %>%
+  select(trait, model)
+
+# Intersect and find models that were significant for at least 3 traits
+intersect(cluster_herit_window_models_intercept, cluster_herit_window_models_slope) %>%
+  group_by(model) %>%
+  filter(n() >= 3)
+
+# trait           model   
+# 1 GrainYield      MYEC_All
+# 2 HeadingDate     PD      
+# 3 HeadingDate     MYEC_All
+# 4 HeadingDateAGDD PD      
+# 5 HeadingDateAGDD MYEC_All
+# 6 PlantHeight     PD
+
+
+
 
 
 
