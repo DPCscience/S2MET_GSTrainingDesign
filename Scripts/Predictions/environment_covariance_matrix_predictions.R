@@ -37,6 +37,7 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 ## Construct different covariance matrices using distance, covariates, or phenotypic correlation
 env_cov_mats <- clust_method_df %>% 
   filter(population == "tp", !map_lgl(cov, is.null)) %>% 
+  filter(!str_detect(model, "Cor|Fstat")) %>% # For now, just focus on phenotypic distance and all covariates
   select(trait, model, env_cov_mat = cov) %>%
   arrange(trait, model)
 
