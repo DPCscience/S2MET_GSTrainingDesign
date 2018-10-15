@@ -54,7 +54,8 @@ clusters_model <- pred_env_dist_rank$tp %>%
 
 # Combine with the random clusters - only 25 of them
 clusters_rand <- pred_env_rank_random$tp %>%
-  rename(pred_environment = env_rank)
+  rename(pred_environment = env_rank) %>%
+  mutate(pred_environment = map(pred_environment, names))
 
 clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
   mutate(pred_environment = map(pred_environment, ~head(., max_env))) %>%
@@ -65,9 +66,6 @@ clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
 clusters_to_model_split <- clusters_to_model %>%
   assign_cores(n_core = n_core) %>%
   split(.$core)
-
-# Lmer control
-control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
 
 
 # Parallelize
