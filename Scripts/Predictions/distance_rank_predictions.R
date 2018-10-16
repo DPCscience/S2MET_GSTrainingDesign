@@ -49,10 +49,12 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
 # First use the TP clusters
 clusters_model <- pred_env_dist_rank$tp %>%
   filter(environment %in% sample_envs) %>%
+  # Remove some covariate models
+  filter(!str_detect(model, "Fstat|Top1")) %>%
   mutate(pred_environment = map(env_rank, names)) %>%
   select(-env_rank)
 
-# Combine with the random clusters - only 25 of them
+# Combine with the random clusters
 clusters_rand <- pred_env_rank_random$tp %>%
   rename(pred_environment = env_rank) %>%
   mutate(pred_environment = map(pred_environment, names))
