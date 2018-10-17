@@ -61,6 +61,7 @@ clusters_rand <- pred_env_rank_random$tp %>%
 
 clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
   mutate(pred_environment = map(pred_environment, ~head(., max_env))) %>%
+  filter(!str_detect(model, "sample")) %>%
   tbl_df()
 
 
