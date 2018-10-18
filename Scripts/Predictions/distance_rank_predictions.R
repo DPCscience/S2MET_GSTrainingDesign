@@ -37,6 +37,7 @@ load(file.path(result_dir, "distance_method_results.RData"))
 
 # Maximum number of training environments to test
 max_env <- 15
+max_env <- Inf # Use all available environments
 
 ## Prepare the BLUEs for modeling
 S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
@@ -63,6 +64,9 @@ clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
   mutate(pred_environment = map(pred_environment, ~head(., max_env))) %>%
   filter(!str_detect(model, "sample")) %>%
   tbl_df()
+
+## Create empty lists
+cluster_pred_out <- cluster_pred_out_window <- list()
 
 
 # Split by cores
@@ -121,65 +125,65 @@ cluster_pred_out <- bind_rows(cluster_pred_out)
 
 
 
-#### Window-based calculation ####
-
-# Window size
-env_window <- 5 
-
-
-
-# Parallelize
-cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
-  
-  # ##
-  # i = 1
-  # core_df <- clusters_to_model_split[[i]]
-  # ##
-  
-  # Results list
-  results_out <- vector("list", nrow(core_df))
-  
-  # Iterate over rows
-  for (i in seq(nrow(core_df))) {
-    
-    # Vector of training environments, passed to an accumulation function
-    envs <- core_df$pred_environment[[i]]
-    val_env <- core_df$environment[i]
-    envs <- seq(env_window, length(envs)) %>% 
-      seq_along() %>% 
-      map(~. + seq(env_window) - 1) %>%
-      map(~envs[.])
-    
-    
-    tr <- core_df$trait[i]
-    
-    # Create a list of training data
-    train_data_list <- envs %>% 
-      map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
-      map(~mutate(., env = as.factor(environment)))
-    
-    test_data <- S2_MET_BLUEs_tomodel %>%
-      filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
-      mutate(line_name = as.character(line_name))
-    
-    # Iterate over the list and predict
-    pred_list <- train_data_list %>%
-      map(~gblup(K = K, train = ., test = test_data))
-    
-    # Add to the results
-    results_out[[i]] <- data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list, "accuracy"))
-    
-  }
-  
-  # Add the results list to the core_df and return
-  core_df %>% 
-    mutate(out = results_out) %>% 
-    select(-pred_environment, -core)
-  
-})
-
-
-cluster_pred_out_window <- bind_rows(cluster_pred_out_window)
+# #### Window-based calculation ####
+# 
+# # Window size
+# env_window <- 5 
+# 
+# 
+# 
+# # Parallelize
+# cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
+#   
+#   # ##
+#   # i = 1
+#   # core_df <- clusters_to_model_split[[i]]
+#   # ##
+#   
+#   # Results list
+#   results_out <- vector("list", nrow(core_df))
+#   
+#   # Iterate over rows
+#   for (i in seq(nrow(core_df))) {
+#     
+#     # Vector of training environments, passed to an accumulation function
+#     envs <- core_df$pred_environment[[i]]
+#     val_env <- core_df$environment[i]
+#     envs <- seq(env_window, length(envs)) %>% 
+#       seq_along() %>% 
+#       map(~. + seq(env_window) - 1) %>%
+#       map(~envs[.])
+#     
+#     
+#     tr <- core_df$trait[i]
+#     
+#     # Create a list of training data
+#     train_data_list <- envs %>% 
+#       map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
+#       map(~mutate(., env = as.factor(environment)))
+#     
+#     test_data <- S2_MET_BLUEs_tomodel %>%
+#       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
+#       mutate(line_name = as.character(line_name))
+#     
+#     # Iterate over the list and predict
+#     pred_list <- train_data_list %>%
+#       map(~gblup(K = K, train = ., test = test_data))
+#     
+#     # Add to the results
+#     results_out[[i]] <- data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list, "accuracy"))
+#     
+#   }
+#   
+#   # Add the results list to the core_df and return
+#   core_df %>% 
+#     mutate(out = results_out) %>% 
+#     select(-pred_environment, -core)
+#   
+# })
+# 
+# 
+# cluster_pred_out_window <- bind_rows(cluster_pred_out_window)
 
 
 # Save the results
