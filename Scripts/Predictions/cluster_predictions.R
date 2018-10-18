@@ -17,6 +17,8 @@ source(file.path(repo_dir, "source_MSI.R"))
 # ## Run on a local machine
 # repo_dir <- getwd()
 # source(file.path(repo_dir, "source.R"))
+# library(modelr)
+
 
 
 ## Number of cores
@@ -30,44 +32,61 @@ load(file.path(result_dir, "distance_method_results.RData"))
 
 ## Prepare the BLUEs for modeling
 S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
-  filter(line_name %in% c(tp_geno, vp_geno)) %>%
+  filter(line_name %in% c(tp_geno, vp_geno),
+         environment %in% tp_vp_env) %>% # Only use environments in which both the TP and VP were grown
   mutate(line_name = as.factor(line_name))
+
+
 
 # Define clusters for each distance method
 # Cut the tree to obtain the maximum number of clusters with at least 3 environments in each cluster (arbitrary)
-min_env <- 3
+min_env <- c(3, 5, 10)
 
 clusters <- clust_method_df %>% 
   filter(population == "tp") %>%
-  group_by(trait, model) %>%
+  crossing(., min_env) %>%
+  group_by(trait, model, min_env) %>%
   do({
     clus <- .$cluster[[1]]
+    minE <- .$min_env
     
     # Find K
     k <- map(seq_along(clus$labels), ~cutree(clus, k = .)) %>% 
       map(table) %>% 
-      map_lgl(~all(. >= min_env)) %>% 
+      map_lgl(~all(. >= minE)) %>% 
       which() %>% 
       max()
     
     # Cut the tree
     cluster_df <- cutree(clus, k = k) %>%
-      {data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE, row.names = NULL)}
+      {data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE, row.names = NULL)} %>%
+      # Remove unwanted environments
+      filter(environment %in% tp_vp_env)
     
     data_frame(env_cluster = list(cluster_df), k = k)
     
   }) %>% ungroup()
 
 
-## Merge with the BLUEs and assign clusters
+
+
+## Split the clusters for parallelization
+clusters_split <- clusters %>%
+  assign_cores(df = ., n_core = n_core) %>%
+  split(.$core)
 
 
 ## Iterate over trait and model combinations
-cluster_predictions <- clusters %>%
-  group_by(trait, model) %>%
-  do({
-    clus <- .$env_cluster[[1]]
-    tr <- unique(.$trait)
+cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+  
+  results_out <- vector("list", nrow(core_df))
+  
+  ## Iterate over rows
+  for (r in seq_along(results_out)) {
+    
+    row <- core_df[r,]
+    clus <- row$env_cluster[[1]]
+    tr <- unique(row$trait)
     
     # Attach the BLUEs and split by cluster
     data_tomodel <- clus %>% 
@@ -106,51 +125,26 @@ cluster_predictions <- clusters %>%
       pred_out[[i]] <- data.frame(environment = pred_envs, accuracy = pred_acc, row.names = NULL, stringsAsFactors = FALSE)
       
     }
-
+    
     # Bind the rows of the pred_out list and combine with the cluster df
     # then return
-    left_join(clus, bind_rows(pred_out), by = "environment")
+    results_out[[r]] <- left_join(clus, bind_rows(pred_out), by = "environment")
     
-  })
+  } # Close the row loop
+  
+  core_df %>%
+    mutate(out = results_out) %>%
+    select(-core)
+  
+}, mc.cores = n_core) # Close the parallel operation
+
+cluster_predictions <- bind_rows(cluster_predictions)
+
+
 
 ## Save this
 save("cluster_predictions", file = file.path(result_dir, "cluster_predictions.RData"))
 
-
-# Get the unique distance models, then assign new names
-models <- sort(unique(cluster_predictions$model))
-models_rename <- setNames(c("GCD", "MYEC_All", "MYEC_Cor1", "MYEC_F1", "MYEC_Cor5", "MYEC_F5", "OYEC_All", "OYEC_Cor1", "OYEC_F1", "OYEC_Cor5", "OYEC_F5", "PD"), models) %>%
-  # Order
-  .[c(length(.), seq(length(.) - 1))] %>%
-  c(., "random" = "Random")
-
-## Calculate the average accuracy
-cluster_predictions_summ <- cluster_predictions %>% 
-  ungroup() %>% 
-  mutate(model = str_replace_all(model, models_rename)) %>%
-  group_by(trait, model) %>%
-  # group_by(trait, model, cluster) %>%
-  # summarize(accuracy = mean(accuracy, na.rm = T)) %>% 
-  summarize(accuracy = mean(accuracy, na.rm = T)) 
-
-
-# Plot
-cluster_predictions_summ %>% 
-  ggplot(aes(x = trait, y = accuracy, fill = model)) +
-  geom_col(position = "dodge") +
-  facet_wrap(~trait, ncol = 2, scales = "free_x")
-
-
-# Model
-fits <- cluster_predictions %>% 
-  ungroup() %>% 
-  mutate(model = str_replace_all(model, models_rename)) %>%
-  mutate_at(vars(model, environment, cluster), as.factor) %>%
-  split(.$trait) %>%
-  map(~lm(accuracy ~ environment + model, data = .))
-
-effects <- fits %>%
-  map(~effects::allEffects(.))
 
 
 
