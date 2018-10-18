@@ -24,6 +24,8 @@ library(ggridges)
 
 load(file.path(result_dir, "environmental_distance_predictions_TESTING.RData"))
 
+load(file.path(result_dir, "distance_method_results.RData"))
+
 
 ## Bind the list elements together and unnest
 cumulative_pred_results <- env_dist_predictions_out %>% 
@@ -36,12 +38,9 @@ dist_method_unique <- cumulative_pred_results$dist_method %>%
   unique() %>% 
   .[!str_detect(., "sample")] 
 
-dist_method_replace <- dist_method_unique %>%
-  str_replace_all("_", " ") %>% 
-  str_to_title() %>% 
-  str_replace_all(" ", "") %>%
-  set_names(., dist_method_unique)
-  
+dist_method_replace <- setNames(c("Great Circle Distance", "Phenotypic Distance", "One Year ECs", "One Year EC Cor", "Ten Year ECs", "Ten Year EC Cor"),
+         dist_method_unique)
+
 
 dist_colors <- c(setNames(umn_palette(3, length(dist_method_replace)), dist_method_replace), "Random" = "grey75")
 
@@ -229,6 +228,22 @@ cumulative_pred_toplot_Nenv <- cumulative_pred_toplot %>%
 ##### Plotting ######
 
 
+## Plot the distance over number of environments
+g_cumulative_example <- cumulative_pred_adj %>%
+  filter(environment == "MWI17", trait == "GrainYield") %>% 
+  filter(!str_detect(dist_method, "sample"), dist_method != "great_circle_dist") %>%
+  filter(dist_method %in% c("pheno_dist", "MYEC_all_ec")) %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace)) %>%
+  ggplot(aes(x = n_train_env, y = accuracy, color = dist_method)) + 
+  geom_point() + 
+  geom_line() +
+  scale_color_brewer(name = "Distance measure", palette = "Set1") +
+  scale_x_continuous(breaks = pretty) + 
+  labs(title = "Predicting grain yield in Madison 2017", x = "Number of training environments", y = "Prediction accuracy") +
+  theme_minimal() +
+  theme(legend.position = c(0.75, 0.25), legend.background = element_rect(fill = "white", linetype = 0))
+
+ggsave(filename = "cumulative_prediction_example.jpg", path = fig_dir, width = 5, height = 4, dpi = 1000)
 
 
 

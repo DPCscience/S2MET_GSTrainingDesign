@@ -50,8 +50,7 @@ env_cov_mats_use <- env_cov_mats %>%
 
 
 ## Run different proportions of training environments
-# prop_train_env <- c(0.25, 0.5, 0.75)
-prop_train_env <- 0.5
+prop_train_env <- c(0.25, 0.5, 0.75)
 n_iter <- 10
 
 # Generate training and test sets
@@ -76,7 +75,7 @@ environment_mc_samples <- S2_MET_BLUEs_use %>%
     # Generate the samples
     samples %>% 
       mutate(train = map(envSample, ~left_join(., df1, by = "environment") %>% filter(line_name %in% tp_geno)), 
-             test = map(train, ~setdiff(df1, .) %>% filter(line_name %in% vp_geno))) %>% 
+             test = map(envSample, ~anti_join(df1, ., by = "environment") %>% filter(line_name %in% vp_geno))) %>% 
       mutate_at(vars(train, test), ~map(., ~pull(., row) %>% resample(data = df1, .)))
     
   }) %>% ungroup()
