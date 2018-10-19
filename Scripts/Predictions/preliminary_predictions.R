@@ -8,19 +8,13 @@
 ## based on heritability.
 ## 
 
-# Load packages and the source script
-library(tidyverse)
-library(broom)
-library(readxl)
-library(modelr)
-library(pbr)
-library(rrBLUP)
-library(ggforce)
-
-# The head directory
+## Run on a local machine
 repo_dir <- getwd()
-
 source(file.path(repo_dir, "source.R"))
+library(modelr)
+
+
+
 
 
 
@@ -256,6 +250,10 @@ save_file <- file.path(fig_dir, "intra_environment_predictions_sorted.jpg")
 ggsave(filename = save_file, plot = g_plot, width = 10, height = 6, dpi = 1000)
 
 
+
+
+
+
 ### Question 3 - what is the relationship between the intra-environment prediction
 ### accuracy and the environment heritability?
 # subset the heritability information
@@ -292,6 +290,77 @@ g_acc_herit <- env_measures %>%
 # Save
 save_file <- file.path(fig_dir, "accuracy_and_heritability.jpg")
 ggsave(filename = save_file, plot = g_acc_herit, width = 6, height = 6, dpi = 1000)
+
+
+
+## What is the accuracy to predict each environment using data from all other environments (i.e. leave-one-env-out)?
+## 
+## 
+
+
+# Modify the BLUEs for predictions
+S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+  filter(line_name %in% c(tp_geno, vp_geno),
+         environment %in% tp_vp_env) %>%
+  mutate_at(vars(environment:line_name), as.factor)
+
+
+### Leave-one-environment-out
+# Generate training and test sets
+environment_loeo_samples <- S2_MET_BLUEs_use %>%
+  filter(environment %in% tp_vp_env) %>%
+  group_by(trait) %>%
+  do({
+    df <- .
+    # Number the rows
+    df1 <- mutate(df, row = seq(nrow(df))) %>%
+      droplevels()
+    envs <- as.character(unique(df1$environment))
+
+    # Generate environment samples
+    samples <- data_frame(testEnv = envs) %>%
+      mutate(train = map(testEnv, ~filter(df1, environment != ., line_name %in% tp_geno)),
+             test = map(testEnv, ~filter(df1, environment == ., line_name %in% vp_geno))) %>%
+      mutate_at(vars(train, test), ~map(., ~pull(., row) %>% resample(data = df1, .)))
+
+
+  }) %>% ungroup()
+
+
+
+# Use mclapply to parallelize
+environment_loeo_predictions_mean  <- environment_loeo_samples %>%
+  group_by(trait, testEnv) %>%
+  do(predictions = {
+    
+    train <- .$train[[1]]
+    test <- .$test[[1]]
+
+    # Create model matrices
+    mf <- model.frame(value ~ line_name + environment, train)
+    y <- model.response(mf)
+    Z <- model.matrix(~ -1 + line_name, mf)
+    X <- model.matrix(~ 1 + environment, droplevels(mf))
+
+
+    ## Predict just using the mean
+    mixed.solve(y = y, Z = Z, X = X, K = K)$u %>%
+      data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+      left_join(as.data.frame(test), ., by = c("line_name")) %>%
+      select(trait, environment, line_name, value, pgv)
+    
+  })
+
+environment_loeo_predictions_mean <- ungroup(environment_loeo_predictions_mean)
+
+
+## Save
+save_file <- file.path(result_dir, "all_data_environmental_predictions.RData")
+save("environment_loeo_predictions_mean", file = save_file)
+
+
+
+
 
 
 

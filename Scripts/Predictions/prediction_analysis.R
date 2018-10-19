@@ -19,6 +19,8 @@ library(gridExtra)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
+# Load the LOEO prediction results
+load(file.path(result_dir, "all_data_environmental_predictions.RData"))
 
 ## Significant level
 alpha <- 0.05
@@ -33,35 +35,66 @@ colors <- umn_palette(3)
 dist_colors <- c(setNames(colors[c(1:2, 3, 8, 4, 9)], dist_method_abbr), "Random" = "grey75")
 
 
+#### Leave-one-environment-out predictions ####
+
+# Calculate accuracy
+loeo_accuracy <- environment_loeo_predictions_mean %>% 
+  unnest() %>%
+  group_by(trait, environment) %>%
+  do(bootstrap(x = .$value, y = .$pgv, fun = "cor", alpha = alpha)) %>%
+  ungroup()
+
+# Calculate the mean per trait
+loeo_accuracy %>% 
+  group_by(trait) %>% 
+  summarize(accuracy = mean(base))
+
+# Plot per trait
+g_loeo <- loeo_accuracy %>% 
+  ggplot(aes(x = trait, y = base, fill = trait, color = trait)) +
+  geom_boxplot(alpha = 0.5) + 
+  geom_jitter(width = 0.25) + 
+  ylab("Prediction accuracy") +
+  xlab("Trait") +
+  scale_y_continuous(breaks = pretty) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggsave(filename = "loeo_predictions.jpg", plot = g_loeo, path = fig_dir, width = 5, height = 4, dpi = 1000)
+
+
 
 #### Environmental distance predictions ####
-
 
 # Load data
 load(file.path(result_dir, "cluster_predictions_tp.RData"))
 
 
+## Cumulative predictions
+
+
 # Rename the distance methods
-# Then find the accuracy when using all of the data
-cumulative_pred_results1 <- cumulative_pred_results %>%
+cumulative_pred_results <- cluster_pred_out %>% 
+  unnest() %>%
+  rename(dist_method = model) %>%
   mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
          dist_method_abbr = factor(abbreviate(dist_method), levels = dist_method_abbr)) %>%
-  group_by(trait, environment) %>% 
-  mutate(max_accuracy = mean(accuracy[n_e == max(n_e)])) %>%
-  ungroup()
+  left_join(., select(loeo_accuracy, trait, environment, max_accuracy = base), by = c("environment", "trait"))
 
 # Split by trait
-cumulative_pred_results_split <- cumulative_pred_results1 %>% 
+cumulative_pred_results_split <- cumulative_pred_results %>% 
   split(.$trait) %>% 
   map(~mutate(., environment = factor(environment, levels = unique(.$environment[order(.$max_accuracy, decreasing = TRUE)]))))
 
 # Plot
 g_plotlist <- cumulative_pred_results_split %>%
   map(~ggplot(data = ., aes(x = n_e, y = accuracy, color = dist_method_abbr)) + 
+        geom_hline(aes(yintercept = max_accuracy, lty = "Accuracy\nUsing\nAll Data")) +
         # geom_point() + 
         geom_line() + 
         scale_color_manual(values = dist_colors, name = "Distance\nmeasure") +
         scale_x_continuous(breaks = pretty) +
+        scale_linetype_manual(values = c("Accuracy\nUsing\nAll Data" = 2), name = NULL) +
         facet_wrap(~ environment, ncol = 5) + 
         xlab("Number of training environments") +
         ylab("Prediction accuracy") +
@@ -78,7 +111,7 @@ for (i in seq_along(g_plotlist)) {
 ## For each trait and environment, calculate the difference between the accuracy
 ## using the nth training environment and the max accuracy
 ## Then summarize for each trait
-cumulative_pred_diff <- cumulative_pred_results1 %>% 
+cumulative_pred_diff <- cumulative_pred_results %>% 
   mutate(diff_accuracy = accuracy - max_accuracy) %>%
   group_by(trait, dist_method_abbr, n_e) %>% 
   summarize_at(vars(diff_accuracy), funs(mean, sd, n())) %>%
@@ -88,10 +121,12 @@ cumulative_pred_diff <- cumulative_pred_results1 %>%
 # Plot - no random lines
 g_diff_accuracy_norandom <- cumulative_pred_diff %>% 
   ggplot(aes(x = n_e, y = mean, color = dist_method_abbr)) + 
+  geom_hline(aes(yintercept = 0, lty = "Accuracy\nUsing\nAll Data")) +
   geom_line() + 
   # geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method_abbr), alpha = 0.15) +
   scale_color_manual(values = dist_colors, name = "Distance\nmeasure") +
   scale_fill_manual(values = dist_colors, name = "Distance\nmeasure") +
+  scale_linetype_manual(values = c("Accuracy\nUsing\nAll Data" = 2), name = NULL) +
   scale_x_continuous(breaks = pretty) +
   scale_y_continuous(breaks = pretty) +
   facet_grid(trait ~ ., switch = "y", scales = "free_y") + 
@@ -123,11 +158,74 @@ ggsave(filename = "cumulative_environment_prediction_example.jpg", plot = t_cumu
 
 
 
+## Window predictions
+
+
+# Rename the distance methods
+window_pred_results <- cluster_pred_out_window %>% 
+  unnest() %>%
+  rename(dist_method = model) %>%
+  mutate(dist_method = str_replace_all(dist_method, dist_method_replace),
+         dist_method_abbr = factor(abbreviate(dist_method), levels = dist_method_abbr)) %>%
+  left_join(., select(loeo_accuracy, trait, environment, max_accuracy = base), by = c("environment", "trait"))
+
+# Split by trait
+window_pred_results_split <- window_pred_results %>% 
+  split(.$trait) %>% 
+  map(~mutate(., environment = factor(environment, levels = unique(.$environment[order(.$max_accuracy, decreasing = TRUE)]))))
+
+# Plot
+g_plotlist <- window_pred_results_split %>%
+  map(~ggplot(data = ., aes(x = window, y = accuracy, color = dist_method_abbr)) + 
+        geom_hline(aes(yintercept = max_accuracy, lty = "Accuracy\nUsing\nAll Data")) +
+        # geom_point() + 
+        geom_line() + 
+        scale_color_manual(values = dist_colors, name = "Distance\nmeasure") +
+        scale_x_continuous(breaks = pretty) +
+        scale_linetype_manual(values = c("Accuracy\nUsing\nAll Data" = 2), name = NULL) +
+        facet_wrap(~ environment, ncol = 5) + 
+        xlab("Sliding window number") +
+        ylab("Prediction accuracy") +
+        theme_minimal() )
+
+# Save
+for (i in seq_along(g_plotlist)) {
+  ggsave(filename = paste0("window_environment_prediction_", names(g_plotlist)[i], ".jpg"), plot = g_plotlist[[i]],
+         height = 4, width = 8, dpi = 1000, path = fig_dir)
+}
 
 
 
+# For each trait and environment, calculate the difference between the accuracy
+## using the nth training environment and the max accuracy
+## Then summarize for each trait
+window_pred_diff <- window_pred_results %>% 
+  mutate(diff_accuracy = accuracy - max_accuracy) %>%
+  group_by(trait, dist_method_abbr, window) %>% 
+  summarize_at(vars(diff_accuracy), funs(mean, sd, n())) %>%
+  ungroup() %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), lower = mean - stat, upper = mean + stat)
 
+# Plot - no random lines
+g_diff_accuracy_norandom <- window_pred_diff %>% 
+  ggplot(aes(x = window, y = mean, color = dist_method_abbr)) + 
+  geom_hline(aes(yintercept = 0, lty = "Accuracy\nUsing\nAll Data")) +
+  geom_line() +
+  # geom_point(size = 0.5) + geom_smooth(method = "lm", se = FALSE, lwd = 0.5) +
+  # geom_ribbon(aes(ymin = lower, ymax = upper, fill = dist_method_abbr), alpha = 0.15) +
+  scale_color_manual(values = dist_colors, name = "Distance\nmeasure") +
+  scale_fill_manual(values = dist_colors, name = "Distance\nmeasure") +
+  scale_linetype_manual(values = c("Accuracy\nUsing\nAll Data" = 2), name = NULL) +
+  scale_x_continuous(breaks = pretty) +
+  scale_y_continuous(breaks = pretty) +
+  facet_grid(trait ~ ., switch = "y", scales = "free_y") + 
+  xlab("Sliding window number") +
+  ylab("Prediction accuracy (relative to using all data)") +
+  theme_minimal()
 
+# Save
+ggsave(filename = "window_environment_prediction_relative_norandom.jpg", plot = g_diff_accuracy_norandom,
+       height = 6, width = 4, dpi = 1000, path = fig_dir)
 
 
 

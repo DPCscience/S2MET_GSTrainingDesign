@@ -47,7 +47,14 @@ clusters <- clust_method_df %>%
   crossing(., min_env) %>%
   group_by(trait, model, min_env) %>%
   do({
-    clus <- .$cluster[[1]]
+    
+    # Convert the distance object to a matrix - subset the relevant environments
+    dist_mat <- as.matrix(.$dist[[1]])
+    dist_mat1 <- dist_mat %>% 
+      subset(row.names(.) %in% tp_vp_env, colnames(.) %in% tp_vp_env) %>%
+      as.dist()
+    
+    clus <- hclust(d = dist_mat1, method = "ward.D")
     minE <- .$min_env
     
     # Find K
@@ -59,9 +66,8 @@ clusters <- clust_method_df %>%
     
     # Cut the tree
     cluster_df <- cutree(clus, k = k) %>%
-      {data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE, row.names = NULL)} %>%
-      # Remove unwanted environments
-      filter(environment %in% tp_vp_env)
+      {data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE, row.names = NULL)}
+    
     
     data_frame(env_cluster = list(cluster_df), k = k)
     
@@ -78,6 +84,12 @@ clusters_split <- clusters %>%
 
 ## Iterate over trait and model combinations
 cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+  
+  # #
+  # r = 16
+  # core_df <- clusters_split[[r]]
+  # #
+  
   
   results_out <- vector("list", nrow(core_df))
   
