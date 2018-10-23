@@ -6,7 +6,9 @@ Environmental_Variables/*
 Figures/*
 Summaries/*
 Results/*
-Data/S2_MET_BLUEs.RData
+Scripts/Other/*
+Data/RData
+Data/*RData
 Data/environmental_data_compiled.RData
 Data/Climate_Data/*
 Data/Soil_Data/*
