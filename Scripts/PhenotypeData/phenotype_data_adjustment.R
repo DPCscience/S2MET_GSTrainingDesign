@@ -36,11 +36,13 @@ load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterP
 
 # Subset the traits and relevant trials
 S2_MET_tidy <- s2_tidy_pheno %>%
-  filter(trait %in% c("GrainYield", "HeadingDate", "PlantHeight"),
-         year %in% 2015:2017,
-         !str_detect(trial, "FHB|PVV")) %>%
+  filter(year %in% 2015:2017, !str_detect(trial, "FHB|PVV")) %>%
   mutate(location = ifelse(location == "CNY", "HNY", location),
-         environment = ifelse(environment == "CNY15", "HNY15", environment))
+         environment = ifelse(environment == "CNY15", "HNY15", environment)) %>%
+  group_by(trait) %>%
+  filter(n_distinct(environment) > 35) %>%
+  # filter(dplyr::n_distinct(environment) >= 4, !trait %in% c("Moisture", "BarleyColor", "ThinGrains", "LodgingDegree", "MaturityDate", "KernelWeight")) %>%
+  ungroup()
 
 
 
@@ -245,10 +247,14 @@ g_herit_se <- stage_one_data %>%
 
 
 # Save
-save_file <- file.path(data_dir, "S2_MET_BLUEs.RData") 
+save_file <- file.path(data_dir, "S2_MET_BLUEs.RData")
 save("S2_MET_BLUEs_all", "S2_MET_BLUEs", "stage_one_data", file = save_file)
 
 
+# # Save
+# save_file <- file.path(data_dir, "S2_MET_BLUEs_malt_quality.RData") 
+# save("S2_MET_BLUEs_all", "S2_MET_BLUEs", "stage_one_data", file = save_file)
+# 
 
 
 

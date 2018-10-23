@@ -293,6 +293,10 @@ ggsave(filename = save_file, plot = g_acc_herit, width = 6, height = 6, dpi = 10
 
 
 
+
+
+
+
 ## What is the accuracy to predict each environment using data from all other environments (i.e. leave-one-env-out)?
 ## 
 ## 
@@ -302,7 +306,9 @@ ggsave(filename = save_file, plot = g_acc_herit, width = 6, height = 6, dpi = 10
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   filter(line_name %in% c(tp_geno, vp_geno),
          environment %in% tp_vp_env) %>%
-  mutate_at(vars(environment:line_name), as.factor)
+  mutate_at(vars(environment:line_name), as.factor) %>%
+  group_by(trait, environment) %>%
+  mutate(value = scale(value))
 
 
 ### Leave-one-environment-out
@@ -314,7 +320,8 @@ environment_loeo_samples <- S2_MET_BLUEs_use %>%
     df <- .
     # Number the rows
     df1 <- mutate(df, row = seq(nrow(df))) %>%
-      droplevels()
+      droplevels() 
+    
     envs <- as.character(unique(df1$environment))
 
     # Generate environment samples
@@ -340,11 +347,16 @@ environment_loeo_predictions_mean  <- environment_loeo_samples %>%
     mf <- model.frame(value ~ line_name + environment, train)
     y <- model.response(mf)
     Z <- model.matrix(~ -1 + line_name, mf)
-    X <- model.matrix(~ 1 + environment, droplevels(mf))
+    # X <- model.matrix(~ 1 + environment, droplevels(mf))
+    X <- model.matrix(~ 1, droplevels(mf))
+    
 
+    
+    # Fit
+    fit <- mixed.solve(y = y, X = X, Z = Z, K = K)
 
     ## Predict just using the mean
-    mixed.solve(y = y, Z = Z, X = X, K = K)$u %>%
+    fit$u %>%
       data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
       left_join(as.data.frame(test), ., by = c("line_name")) %>%
       select(trait, environment, line_name, value, pgv)

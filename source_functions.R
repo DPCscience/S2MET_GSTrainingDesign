@@ -376,10 +376,12 @@ calc_variance <- function(data, random_effect = c("line_name", "environment", "l
 
 ## A generic prediction function that takes training and test data and returns
 ## PGVs and accuracy
-gblup <- function(K, train, test, fun = c("rrblup", "sommer"), bootreps = NULL) {
+gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL) {
+  
+  if (missing(formula)) formula <- value ~ line_name + env
   
   # Create a model.frame
-  mf <- model.frame(value ~ line_name + env, weights = std_error, data = train)
+  mf <- model.frame(formula, weights = std_error, data = train)
   
   # Verify that the number of levels of 'line_name' is equal to the dimensions of K
   stopifnot(all(nlevels(mf$line_name) == dim(K)))
@@ -390,7 +392,7 @@ gblup <- function(K, train, test, fun = c("rrblup", "sommer"), bootreps = NULL) 
   
   # Vectors and matrices
   y <- model.response(mf)
-  if (nlevels(mf$env) == 1) {
+  if (nlevels(mf$env) <= 1 | fit.env) {
     X <- model.matrix(~ 1, mf) 
   } else {
     X <- model.matrix(~ 1 + env, mf)
@@ -433,7 +435,7 @@ gblup <- function(K, train, test, fun = c("rrblup", "sommer"), bootreps = NULL) 
     
     # Bootstrap if replicates are provided
     if (!is.null(bootreps)) {
-      boot <- boot_cor(x = comb$value, y = comb$pred_value, boot.reps = bootreps)
+      boot <- bootstrap(x = comb$value, y = comb$pred_value, fun = "cor", boot.reps = bootreps)
     } else {
       boot <- NA
     }
