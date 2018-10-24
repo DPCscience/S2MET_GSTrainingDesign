@@ -448,40 +448,39 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
 
 
 
-## Function to calculate the mean in sliding window
-window_mean <- function(x, y, window = 8) {
+## Calculate fixed effects
+geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
   
-  # Size of window on either side
-  side_window <- ceiling(window / 2)
-  # Get the min and max
-  min_x <- min(x)
-  max_x <- max(x)
+  ## Get the terms in the model
+  terms <- terms(formula)
+  term_labels <- attr(terms, "term.labels")
   
-  # Create a list of indices
-  x_use <- map(x, ~seq(. - side_window, . + side_window) %>% .[between(., min_x, max_x)]) %>%
-    map(~match(x = ., table = x))
+  # Check the levels of these terms
+  terms_levels <- sapply(data[term_labels], n_distinct)
   
-  # Calculate the mean y within that x
-  map_dbl(x_use, ~mean(y[.], na.rm = TRUE))
+  ## Drop terms that only have 1 level
+  terms_drop <- which(terms_levels <= 1)
+  
+  if (length(terms_drop) > 0) {
+    formula_use <- formula(drop.terms(terms, terms_drop, keep.response = TRUE))
+  } else {
+    formula_use <- formula
+  }
+  
+  ## Fit
+  # Contrasts list
+  term_labels <- attr(terms(formula_use), "term.labels")
+  contrasts <- setNames(object = replicate(length(term_labels), "contr.sum", simplify = FALSE), nm = term_labels)
+  
+  fit <- lm(formula = formula_use, data = data, contrasts = contrasts)
+  
+  # Extract the blues
+  coef(fit) %>%
+  data_frame(line_name = names(.), value = .) %>%
+    filter(str_detect(line_name, "line_name")) %>%
+    mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
+           env = "mean", std_error = 0)
   
 }
-
-
-
-
-## Return the quantiles of a random sample at level alpha
-quantile1 <- function(x, alpha = 0.05) {
-  qs <- quantile(x, probs = c(alpha / 2, 1 - (alpha / 2)))
-  `names<-`(qs, c("lower", "upper"))
-}
-
-
-
-
-
-
-
-
-
-
-
+  
+  

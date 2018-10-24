@@ -9,9 +9,10 @@
 ## 
 
 ## Run on a local machine
+library(modelr)
 repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
-library(modelr)
+
 
 
 
@@ -307,8 +308,9 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   filter(line_name %in% c(tp_geno, vp_geno),
          environment %in% tp_vp_env) %>%
   mutate_at(vars(environment:line_name), as.factor) %>%
-  group_by(trait, environment) %>%
-  mutate(value = scale(value))
+  # group_by(trait, environment) %>%
+  # mutate(value = scale(value)) %>%
+  ungroup()
 
 
 ### Leave-one-environment-out
@@ -335,40 +337,52 @@ environment_loeo_samples <- S2_MET_BLUEs_use %>%
 
 
 
-# Use mclapply to parallelize
+# Run predictions
 environment_loeo_predictions_mean  <- environment_loeo_samples %>%
   group_by(trait, testEnv) %>%
   do(predictions = {
     
-    train <- .$train[[1]]
-    test <- .$test[[1]]
-
-    # Create model matrices
-    mf <- model.frame(value ~ line_name + environment, train)
-    y <- model.response(mf)
-    Z <- model.matrix(~ -1 + line_name, mf)
-    # X <- model.matrix(~ 1 + environment, droplevels(mf))
-    X <- model.matrix(~ 1, droplevels(mf))
+    df <- .
     
-
+    ## Calculate genotype means
+    train <- df$train[[1]] %>% 
+      as.data.frame() %>% 
+      geno_means(data = .) %>%
+      mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))
     
-    # Fit
-    fit <- mixed.solve(y = y, X = X, Z = Z, K = K)
-
-    ## Predict just using the mean
-    fit$u %>%
-      data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
-      left_join(as.data.frame(test), ., by = c("line_name")) %>%
-      select(trait, environment, line_name, value, pgv)
+    test <- df$test[[1]] %>% as.data.frame()
     
-  })
+    gblup(K = K, train = train, test = test, fit.env = FALSE, bootreps = 1000)
+    
+    # 
+    # 
+    # # Create model matrices
+    # mf <- model.frame(value ~ line_name + environment, train)
+    # y <- model.response(mf)
+    # Z <- model.matrix(~ -1 + line_name, mf)
+    # # X <- model.matrix(~ 1 + environment, droplevels(mf))
+    # X <- model.matrix(~ 1, droplevels(mf))
+    # 
+    # 
+    # 
+    # # Fit
+    # fit <- mixed.solve(y = y, X = X, Z = Z, K = K)
+    # 
+    # ## Predict just using the mean
+    # fit$u %>%
+    #   data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+    #   left_join(as.data.frame(test), ., by = c("line_name")) %>%
+    #   select(trait, environment, line_name, value, pgv)
+    # 
+  }) %>% ungroup()
 
-environment_loeo_predictions_mean <- ungroup(environment_loeo_predictions_mean)
+## When using BLUEs before prediction
+environment_loeo_predictions_geno_means <- environment_loeo_predictions_mean
 
 
 ## Save
 save_file <- file.path(result_dir, "all_data_environmental_predictions.RData")
-save("environment_loeo_predictions_mean", file = save_file)
+save("environment_loeo_predictions_mean", "environment_loeo_predictions_geno_means", file = save_file)
 
 
 
