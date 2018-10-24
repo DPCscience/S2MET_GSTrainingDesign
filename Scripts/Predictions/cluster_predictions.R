@@ -82,23 +82,34 @@ clusters_split <- clusters %>%
   split(.$core)
 
 
-## Iterate over trait and model combinations
-cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
-  
-  # #
-  # r = 16
-  # core_df <- clusters_split[[r]]
-  # #
-  
-  
-  results_out <- vector("list", nrow(core_df))
-  
-  ## Iterate over rows
-  for (r in seq_along(results_out)) {
+# ## Iterate over trait and model combinations
+# cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+#   
+#   # #
+#   # r = 16
+#   # core_df <- clusters_split[[r]]
+#   # #
+#   
+#   results_out <- vector("list", nrow(core_df))
+#   
+#       
+  # ## Iterate over rows
+  # for (r in seq_along(results_out)) {
+  # 
+  #   row <- core_df[r,]
+
+
+## Run on a local machine  
+
+cluster_predictions <- clusters %>% 
+  group_by(trait, model, min_env) %>%
+  do({
+    row <- .
     
-    row <- core_df[r,]
+
     clus <- row$env_cluster[[1]]
     tr <- unique(row$trait)
+    
     
     # Attach the BLUEs and split by cluster
     data_tomodel <- clus %>% 
@@ -116,15 +127,23 @@ cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
         map_df(~data_frame(train = list(resample(data = df_tomodel, idx = filter(df_tomodel, environment != ., line_name %in% tp_geno)$row)), 
                            test = list(resample(data = df_tomodel, idx = filter(df_tomodel, environment == ., line_name %in% vp_geno)$row))))
       
+      ## Using the training set, calculate BLUEs over environments
+      train_test <- train_test %>%
+        mutate(train = map(train, ~as.data.frame(.) %>% geno_means(data = .) %>% mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))))
+      
+      
       # Make predictions using the training set
       pgvs <- train_test$train %>% 
         map(~{
-          mf <- model.frame(value ~ line_name + environment, .)
+          mf <- model.frame(value ~ line_name, .)
+          # mf <- model.frame(value ~ line_name + environment, .)
           # mf <- model.frame(value ~ line_name + environment, train_test$train[[1]])
           
           y <- model.response(mf)
-          X <- model.matrix(value ~ 1 + environment, droplevels(mf))
-          Z <- model.matrix(value ~ -1 + line_name, mf)
+          # X <- model.matrix(~ 1 + environment, mf)
+          X <- model.matrix(~ 1, mf)
+          
+          Z <- model.matrix(~ -1 + line_name, mf)
           
           fit <- mixed.solve(y = y, Z = Z, K = K, X = X)
           fit$u %>% {data.frame(line_name = names(.), pred_value = ., row.names = NULL, stringsAsFactors = FALSE)}
@@ -140,18 +159,21 @@ cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
     
     # Bind the rows of the pred_out list and combine with the cluster df
     # then return
-    results_out[[r]] <- left_join(clus, bind_rows(pred_out), by = "environment")
+    left_join(clus, bind_rows(pred_out), by = "environment")
+    # results_out[[r]] <- left_join(clus, bind_rows(pred_out), by = "environment")
     
-  } # Close the row loop
-  
-  core_df %>%
-    mutate(out = results_out) %>%
-    select(-core)
-  
-}, mc.cores = n_core) # Close the parallel operation
-
-cluster_predictions <- bind_rows(cluster_predictions)
-
+  }) %>% ungroup()
+    
+#   } # Close the row loop
+#   
+#   core_df %>%
+#     mutate(out = results_out) %>%
+#     select(-core)
+#   
+# }, mc.cores = n_core) # Close the parallel operation
+# 
+# cluster_predictions <- bind_rows(cluster_predictions)
+# 
 
 
 ## Save this

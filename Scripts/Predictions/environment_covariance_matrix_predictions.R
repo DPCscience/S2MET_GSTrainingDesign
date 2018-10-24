@@ -91,107 +91,8 @@ prediction_model_split <- environment_mc_samples %>%
 
 
 
-# Use mclapply to parallelize
-environment_mc_predictions  <- mclapply(X = prediction_model_split, FUN = function(core_df) {
-  
-  # # For local machine
-  # i <- 7
-  # core_df <- prediction_model_split[[i]]
-  # #
-  
-  results_out <- vector("list", nrow(core_df))
-  
-  
-  # Iterate over rows
-  for (i in seq_along(results_out)) {
-    
-    # Extract the covariance matrix
-    K_mats <- env_cov_mats_use %>%
-      filter(trait == core_df$trait[i]) %>%
-      pull(env_cov_mat)
-    
-    # Create model matrices
-    mf <- model.frame(value ~ line_name + environment, core_df$train[[i]])
-    y <- model.response(mf)
-    Z <- model.matrix(~ -1 + line_name:environment, mf)
-    X <- model.matrix(~ 1 + environment, droplevels(mf))
-    
-    # Fit the model
-    pgvs <- K_mats %>%
-      map(~mixed.solve(y = y, Z = Z, X = X, K = .)) %>%
-      map("u") %>%
-      # Combine the PGVs with the observations
-      map(~data.frame(term = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
-            separate(term, c("environment", "line_name"), sep = ":") %>% 
-            left_join(as.data.frame(core_df$test[[i]]), ., by = c("environment", "line_name")) %>%
-            select(trait, environment, line_name, value, pgv))
-    
-    K_mat_pgv <- env_cov_mats_use %>% 
-      filter(trait == core_df$trait[i]) %>% 
-      mutate(predictions = pgvs) %>% 
-      select(-env_cov_mat)
-    
-    
-    
-    ## Predict just using the mean
-    Zg <- model.matrix(~ -1 + line_name, mf)
-    pgv_mean <- mixed.solve(y = y, Z = Zg, X = X, K = K)$u %>% 
-      data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>% 
-      left_join(as.data.frame(core_df$test[[i]]), ., by = c("line_name")) %>%
-      select(trait, environment, line_name, value, pgv)
-    
-    # Add to the K_mat df
-
-    # Add to the K list
-    results_out[[i]] <- K_mat_pgv %>% 
-      add_row(trait = unique(.$trait), model = "mean", predictions = list(pgv_mean))
-    
-  } 
-  
-  core_df %>%
-    mutate(out = results_out) %>%
-    select(trait, pTrainEnv, iter, out)
-  
-})
-    
-environment_mc_predictions <- bind_rows(environment_mc_predictions)
-
-
-
-
-
-
-# ### Leave-one-environment-out
-# # Generate training and test sets
-# environment_loeo_samples <- S2_MET_BLUEs_use %>%
-#   filter(environment %in% tp_vp_env) %>%
-#   group_by(trait) %>%
-#   do({
-#     df <- .
-#     # Number the rows
-#     df1 <- mutate(df, row = seq(nrow(df))) %>%
-#       droplevels()
-#     envs <- as.character(unique(df1$environment))
-#     
-#     # Generate environment samples
-#     samples <- data_frame(testEnv = envs) %>%
-#       mutate(train = map(testEnv, ~filter(df1, environment != ., line_name %in% tp_geno)),
-#              test = map(testEnv, ~filter(df1, environment == ., line_name %in% vp_geno))) %>%
-#       mutate_at(vars(train, test), ~map(., ~pull(., row) %>% resample(data = df1, .)))
-# 
-#     
-#   }) %>% ungroup()
-# 
-# 
-# 
-# 
-# ## Run predictions
-# prediction_model_split <- environment_loeo_samples %>%
-#   assign_cores(n_core) %>%
-#   split(.$core)
-# 
 # # Use mclapply to parallelize
-# environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = function(core_df) {
+# environment_mc_predictions  <- mclapply(X = prediction_model_split, FUN = function(core_df) {
 #   
 #   # # For local machine
 #   # i <- 7
@@ -240,7 +141,7 @@ environment_mc_predictions <- bind_rows(environment_mc_predictions)
 #       select(trait, environment, line_name, value, pgv)
 #     
 #     # Add to the K_mat df
-#     
+# 
 #     # Add to the K list
 #     results_out[[i]] <- K_mat_pgv %>% 
 #       add_row(trait = unique(.$trait), model = "mean", predictions = list(pgv_mean))
@@ -252,15 +153,105 @@ environment_mc_predictions <- bind_rows(environment_mc_predictions)
 #     select(trait, pTrainEnv, iter, out)
 #   
 # })
+#     
+# environment_mc_predictions <- bind_rows(environment_mc_predictions)
 # 
-# environment_loeo_predictions <- bind_rows(environment_loeo_predictions)
+# # Save
+# save_file <- file.path(result_dir, "env_cov_mat_mc_predictions.RData")
+# save("environment_mc_predictions", file = save_file)
 
-environment_loeo_predictions <- NULL
+
+
+
+
+
+### Leave-one-environment-out
+# Generate training and test sets
+environment_loeo_samples <- S2_MET_BLUEs_use %>%
+  filter(environment %in% tp_vp_env) %>%
+  group_by(trait) %>%
+  do({
+    df <- .
+    # Number the rows
+    df1 <- mutate(df, row = seq(nrow(df))) %>%
+      droplevels()
+    envs <- as.character(unique(df1$environment))
+
+    # Generate environment samples
+    samples <- data_frame(testEnv = envs) %>%
+      mutate(train = map(testEnv, ~filter(df1, environment != ., line_name %in% tp_geno)),
+             test = map(testEnv, ~filter(df1, environment == ., line_name %in% vp_geno))) %>%
+      mutate_at(vars(train, test), ~map(., ~pull(., row) %>% resample(data = df1, .)))
+
+
+  }) %>% ungroup()
+
+
+
+
+## Run predictions
+prediction_model_split <- environment_loeo_samples %>%
+  assign_cores(n_core) %>%
+  split(.$core)
+
+# Use mclapply to parallelize
+environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = function(core_df) {
+
+  # # For local machine
+  # i <- 7
+  # core_df <- prediction_model_split[[i]]
+  # #
+
+  results_out <- vector("list", nrow(core_df))
+
+
+  # Iterate over rows
+  for (i in seq_along(results_out)) {
+
+    # Extract the covariance matrix
+    K_mats <- env_cov_mats_use %>%
+      filter(trait == core_df$trait[i]) %>%
+      pull(env_cov_mat)
+
+    # Create model matrices
+    mf <- model.frame(value ~ line_name + environment, core_df$train[[i]])
+    y <- model.response(mf)
+    Z <- model.matrix(~ -1 + line_name:environment, mf)
+    X <- model.matrix(~ 1 + environment, droplevels(mf))
+
+    # Fit the model
+    pgvs <- K_mats[1] %>%
+      map(~mixed.solve(y = y, Z = Z, X = X, K = .)) %>%
+      map("u") %>%
+      # Combine the PGVs with the observations
+      map(~data.frame(term = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+            separate(term, c("environment", "line_name"), sep = ":") %>%
+            left_join(as.data.frame(core_df$test[[i]]), ., by = c("environment", "line_name")) %>%
+            select(trait, environment, line_name, value, pgv))
+
+    K_mat_pgv <- env_cov_mats_use %>%
+      filter(trait == core_df$trait[i]) %>%
+      mutate(predictions = pgvs) %>%
+      select(-env_cov_mat)
+
+    # Add to the K list
+    results_out[[i]] <- K_mat_pgv
+
+  }
+
+  core_df %>%
+    mutate(out = results_out) %>%
+    select(trait, pTrainEnv, iter, out)
+
+})
+
+environment_loeo_predictions <- bind_rows(environment_loeo_predictions)
+
 
 
 # Save
 save_file <- file.path(result_dir, "env_cov_mat_predictions.RData")
-save("environment_loeo_predictions", "environment_mc_predictions", file = save_file)
+save("environment_covmat_loeo_predictions", "environment_mc_predictions", file = save_file)
 
 
 
