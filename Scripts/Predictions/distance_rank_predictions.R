@@ -10,9 +10,9 @@
 
 ### Run for MSI
 
-# # Run the source script
-# repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
-# source(file.path(repo_dir, "source_MSI.R"))
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
+source(file.path(repo_dir, "source_MSI.R"))
 
 
 

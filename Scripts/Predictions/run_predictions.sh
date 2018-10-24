@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=16
-# #PBS -l walltime=24:00:00,mem=22gb,nodes=1:ppn=8
+# #PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=16
+#PBS -l walltime=24:00:00,mem=22gb,nodes=1:ppn=8
 #PBS -N environmental_distance_pred
 # #PBS -N environmental_covariance_predictions
 # #PBS -N cluster_predictions
