@@ -37,7 +37,7 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 ## Construct different covariance matrices using distance, covariates, or phenotypic correlation
 env_cov_mats <- clust_method_df %>% 
   filter(population == "tp", !map_lgl(cov, is.null)) %>% 
-  filter(!str_detect(model, "Cor|Fstat")) %>% # For now, just focus on phenotypic distance and all covariates
+  filter(!str_detect(model, "Fstat")) %>% # For now, just focus on phenotypic distance and all covariates
   select(trait, model, env_cov_mat = cov) %>%
   arrange(trait, model)
 
@@ -245,13 +245,13 @@ environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = func
 
 })
 
-environment_loeo_predictions <- bind_rows(environment_loeo_predictions)
+environment_covmat_loeo_predictions <- bind_rows(environment_loeo_predictions)
 
 
 
 # Save
 save_file <- file.path(result_dir, "env_cov_mat_predictions.RData")
-save("environment_covmat_loeo_predictions", "environment_mc_predictions", file = save_file)
+save("environment_covmat_loeo_predictions", file = save_file)
 
 
 
