@@ -376,7 +376,7 @@ calc_variance <- function(data, random_effect = c("line_name", "environment", "l
 
 ## A generic prediction function that takes training and test data and returns
 ## PGVs and accuracy
-gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL) {
+gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL, add.mu = FALSE) {
   
   if (missing(formula)) formula <- value ~ line_name + env
   
@@ -408,6 +408,8 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
     pgv <- fit$u %>% 
       data.frame(line_name = names(.), pred_value = ., row.names = NULL, stringsAsFactors = FALSE)
     
+    beta <- fit$beta[1]
+    
     
   } else if (fun == "sommer") {
     
@@ -418,8 +420,11 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
     pgv <- fit$u.hat$g
     pgv <- data.frame(line_name = row.names(pgv), pred_value = pgv[,1], row.names = NULL, stringsAsFactors = FALSE)
     
+    beta <- fit$beta.hat[1]
+    
   }
   
+  if (add.mu) pgv$pred_value <- pgv$pred_value + beta
   
   # If test is missing, just return the predictions
   if (missing(test)) {

@@ -241,7 +241,7 @@ environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = func
 
   core_df %>%
     mutate(out = results_out) %>%
-    select(trait, pTrainEnv, iter, out)
+    select(trait, testEnv, iter, out)
 
 })
 
