@@ -236,12 +236,12 @@ environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = func
 
     # Add to the K list
     results_out[[i]] <- K_mat_pgv
-
   }
+
 
   core_df %>%
     mutate(out = results_out) %>%
-    select(trait, testEnv, iter, out)
+    select(trait, testEnv, out)
 
 })
 
