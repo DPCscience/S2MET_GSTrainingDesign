@@ -46,23 +46,20 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
   mutate(line_name = as.factor(line_name))
 
 
-# First use the TP clusters
-clusters_model <- pred_env_dist_rank$tp %>%
+# Use the clusters based on the TP-only data
+clusters_model <- pred_env_dist_rank %>%
   # filter(environment %in% sample_envs) %>%
   # Remove some covariate models
-  filter(!str_detect(model, "Fstat|Top1")) %>%
-  mutate(pred_environment = map(env_rank, names)) %>%
-  select(-env_rank)
+  mutate(training_environment = rank) %>%
+  select(-rank)
 
 # Combine with the random clusters
-clusters_rand <- pred_env_rank_random$tp %>%
-  rename(pred_environment = env_rank) %>%
-  mutate(pred_environment = map(pred_environment, names))
+clusters_rand <- pred_env_rank_random %>%
+  mutate(training_environment = rank) %>%
+  select(-rank)
 
 clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
-  mutate(pred_environment = map(pred_environment, ~head(., max_env))) %>%
-  # filter(!str_detect(model, "sample")) %>%
-  tbl_df()
+  mutate(training_environment = map(training_environment, ~head(., max_env))) # %>%  filter(!str_detect(model, "sample"))
 
 # Split by cores
 clusters_to_model_split <- clusters_to_model %>%
@@ -129,25 +126,28 @@ clusters_to_model_split <- clusters_to_model %>%
 
 
 # ## Local machine
+# ## 
 # cluster_pred_out <- clusters_to_model %>%
-#   group_by(environment, trait, model) %>%
+#   group_by(set, trait, validation_environment, model) %>%
 #   do({
-#     # df <- clusters_to_model %>% filter_at(vars(environment, trait, model), all_vars(. == .[1]))
+#     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
 #     df <- .
     
 # Parallelize
 cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
   # core_df <- clusters_to_model_split[[1]]
-  
+
   results_out <- vector("list", nrow(core_df))
-  
+
   for (i in seq_along(results_out)) {
-    
+
     df <- core_df[i,]
 
+    ### Comment above here for local machine
+    
     # Vector of training environments, passed to an accumulation function
-    envs <- df$pred_environment[[1]] %>% accumulate(., c)
-    val_env <- df$environment
+    envs <- df$training_environment[[1]] %>% accumulate(., c)
+    val_env <- df$validation_environment
     tr <- df$trait
 
     # Create a list of training data
@@ -175,18 +175,18 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
     pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
     
     # Return results
-    # data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    # results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
 
     
-  # })
+  # }) %>% ungroup()
     
   }
-  
+
   core_df %>%
     mutate(out = results_out) %>%
     select(-core)
-  
+
 }, mc.cores = n_core)
 
 
@@ -261,23 +261,24 @@ env_window <- 5
 
 # ## Local machine
 # cluster_pred_out_window <- clusters_to_model %>%
-#   group_by(environment, trait, model) %>%
+#   group_by(set, trait, validation_environment, model) %>%
 #   do({
+#     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
 #     df <- .
 
 # Parallelize
 cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
   # core_df <- clusters_to_model_split[[1]]
-  
+
   results_out <- vector("list", nrow(core_df))
-  
+
   for (i in seq_along(results_out)) {
-    
+
     df <- core_df[i,]
     
     # Vector of training environments, passed to an accumulation function
-    envs <- df$pred_environment[[1]]
-    val_env <- df$environment
+    envs <- df$training_environment[[1]]
+    val_env <- df$validation_environment
     envs <- seq(env_window, length(envs)) %>%
       seq_along() %>%
       map(~. + seq(env_window) - 1) %>%
@@ -310,18 +311,18 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
     pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
     
     # Return results
-    # data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    # results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
     
     
-    # })
+    # }) %>% ungroup()
     
   }
-  
+
   core_df %>%
     mutate(out = results_out) %>%
     select(-core)
-  
+
 }, mc.cores = n_core)
     
     
@@ -330,7 +331,7 @@ cluster_pred_out_window <- bind_rows(cluster_pred_out_window)
 
 
 # Save the results
-save_file <- file.path(result_dir, "cluster_predictions_tp.RData")
+save_file <- file.path(result_dir, "distance_rank_predictions.RData")
 save("cluster_pred_out_window", "cluster_pred_out", file = save_file)
 
 

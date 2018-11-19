@@ -41,10 +41,9 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
 # Cut the tree to obtain the maximum number of clusters with at least 3 environments in each cluster (arbitrary)
 min_env <- c(3, 5, 10)
 
-clusters <- clust_method_df %>% 
-  filter(population == "tp") %>%
+clusters <- env_rank_df %>% 
   crossing(., min_env) %>%
-  group_by(trait, model, min_env) %>%
+  group_by(set, trait, model, min_env) %>%
   do({
     
     # Convert the distance object to a matrix - subset the relevant environments
@@ -68,7 +67,7 @@ clusters <- clust_method_df %>%
       {data.frame(environment = names(.), cluster = ., stringsAsFactors = FALSE, row.names = NULL)}
     
     
-    data_frame(env_cluster = list(cluster_df), k = k)
+    data_frame(env_cluster = list(cluster_df), nClust = k)
     
   }) %>% ungroup()
 
@@ -101,7 +100,7 @@ clusters_split <- clusters %>%
 ## Run on a local machine  
 
 cluster_predictions <- clusters %>% 
-  group_by(trait, model, min_env) %>%
+  group_by(set, trait, model, min_env) %>%
   do({
     row <- .
     
@@ -187,4 +186,6 @@ save("cluster_predictions", file = file.path(result_dir, "cluster_predictions.RD
 
 
 
->>>>>>> 922fa00da0e397a5ac87f51f524db7a7cd78a299
+
+
+

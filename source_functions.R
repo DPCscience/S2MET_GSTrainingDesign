@@ -487,5 +487,31 @@ geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
            env = "mean", std_error = 0)
   
 }
+
+
+
+## Function to calculate the mean in sliding window
+window_mean <- function(x, y, window = 8) {
+  
+  # Size of window on either side
+  side_window <- ceiling(window / 2)
+  # Get the min and max
+  min_x <- min(x)
+  max_x <- max(x)
+  
+  # Create a list of indices
+  x_use <- map(x, ~seq(. - side_window, . + side_window) %>% .[between(., min_x, max_x)]) %>%
+    map(~match(x = ., table = x))
+  
+  # Calculate the mean y within that x
+  map_dbl(x_use, ~mean(y[.], na.rm = TRUE))
+  
+}
+
+
+## Fisher's z transformation and back-transformation
+ztrans <- function(x) 0.5 * (log((1 + x) / (1 - x)))
+zexp <- function(x) (exp(2 * x) - 1) / (exp(2 * x) + 1)
+
   
   

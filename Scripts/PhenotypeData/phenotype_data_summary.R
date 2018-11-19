@@ -1,14 +1,17 @@
 ## S2MET Phenotypic Data Summary
 ## 
 ## Author: Jeff Neyhart
-## Last updated: May 2, 2018
+## Last updated: November 15, 2018
 ## 
 
+
+
+# The head directory
+repo_dir <- getwd()
+source(file.path(repo_dir, "source.R"))
+
 # Load libraries and directories
-library(tidyverse)
 library(broom)
-library(stringr)
-library(readxl)
 library(modelr)
 library(pbr)
 library(rrBLUP)
@@ -17,13 +20,12 @@ library(ggridges)
 library(optimx)
 library(lme4qtl)
 
-# The head directory
-repo_dir <- getwd()
-
-source(file.path(repo_dir, "source.R"))
-
 # Load the distance matrices
 load(file.path(result_dir, "distance_method_results.RData"))
+
+
+## significance level
+alpha <- 0.05
 
 
 ## Basic Summaries
@@ -36,41 +38,51 @@ load(file.path(result_dir, "distance_method_results.RData"))
 ## included in these calculations
 (prob_observed <- S2_MET_BLUEs %>% 
     distinct(trait, environment, line_name) %>%
-    group_by(trait) %>%
-    mutate(observed = TRUE) %>% 
-    complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
-    group_by(trait) %>%
-    summarize(prop_obs = mean(observed)))
+    mutate_at(vars(line_name, environment), as.factor) %>%
+    mutate(observed = TRUE) %>%
+    split(.$trait) %>%
+    map_df(~{
+      droplevels(.) %>%
+        complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
+        summarize(trait = unique(trait), prop_obs = mean(observed))
+    }))
+
+# trait           prop_obs
+# 1 GrainYield         0.866
+# 2 HeadingDate        0.901
+# 3 HeadingDateAGDD    0.901
+# 4 PlantHeight        0.910
 
 
+## Find the proportion of unbalance in the dataset for the TP (tp and tp_geno)
+(prob_observed <- list(tp = tp, tp_geno = tp_geno) %>% 
+    map(~{
+       filter(S2_MET_BLUEs, line_name %in% .) %>%
+        distinct(trait, environment, line_name) %>%
+        mutate_at(vars(line_name, environment), as.factor) %>%
+        mutate(observed = TRUE) %>%
+        split(.$trait) %>%
+        map_df(~{
+          droplevels(.) %>%
+            complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
+            summarize(trait = unique(trait), prop_obs = mean(observed))
+        })
+    }))
 
-## Find the proportion of unbalance in the dataset
-## Do this for the TP, then for the VP, then for both
 
-# Group by trait and complete the observations,
-# then group by class and measure the completeness
-S2_MET_BLUEs_completeness <- S2_MET_BLUEs %>%
-  mutate(observed = TRUE) %>%
-  select(line_name, environment, trait, observed) %>% 
-  group_by(trait) %>% 
-  complete(line_name, environment, fill = list(observed = FALSE)) %>%
-  left_join(., select(entry_list, line_name = Line, class = Class)) %>%
-  group_by(trait, class) %>%
-  summarize(completeness = mean(observed))
-
-
-# trait           class completeness
-# 1 GrainYield      S2C1R        0.964
-# 2 GrainYield      S2TP         0.840
-# 3 HeadingDate     S2C1R        0.932
-# 4 HeadingDate     S2TP         0.893
-# 5 HeadingDateAGDD S2C1R        0.932
-# 6 HeadingDateAGDD S2TP         0.893
-# 7 PlantHeight     S2C1R        0.964
-# 8 PlantHeight     S2TP         0.895
-
-# The VP data appears to be more balanced, but this is probably because there are more
-# environments in which only the VP was grown than environments in which only the TP was grown
+# $tp
+# trait           prop_obs
+# 1 GrainYield         0.984
+# 2 HeadingDate        0.988
+# 3 HeadingDateAGDD    0.988
+# 4 PlantHeight        0.988
+# 
+# $tp_geno
+# trait           prop_obs
+# 1 GrainYield         0.985
+# 2 HeadingDate        0.989
+# 3 HeadingDateAGDD    0.989
+# 4 PlantHeight        0.988
 
 
 
@@ -551,10 +563,15 @@ ggsave(filename = "heritability_decompose_env.jpg", plot = g_herit, path = fig_d
 
     
 
+
+
+
+
+
 ## Environmental Correlations
 
 ## Estimate genetic correlations using the BLUEs from each environment
-## First estimate using only the TP
+## First estimate using only the TP with genotypes
 tp_BLUEs <- S2_MET_BLUEs %>%
   filter(line_name %in% tp_geno)
 
@@ -589,11 +606,11 @@ g_env_cor <- env_cor_df %>%
                        guide = guide_colorbar(title = "Genetic Correlation")) +
   ylab("Environment 2") +
   xlab("Environment 1") +
-  facet_wrap(~ trait, nrow = 2, ncol = 2) +
+  facet_wrap(~ trait, nrow = 2, ncol = 2, ) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
         axis.text.y = element_text(size = 6),
-        legend.position = c(0.75, 0.25),
+        legend.position = "bottom",
         legend.direction = "horizontal")
 
 # Save this plot
@@ -604,13 +621,330 @@ ggsave(filename = save_file, plot = g_env_cor, height = 8, width = 8)
 
 
 ## Save the correlation matrices for further use
-
 save_file <- file.path(result_dir, "environmental_genetic_correlations.RData")
 save("env_cor_tp", "env_cor_all", file = save_file)
 
 
 
 
+## Create a two-way table of genotypes and environments
+## 
+## We will fill in the missing TP geno points using the kronecker
+## product of the realized relationship matrix and the environmental
+## correlation matrix
+## 
+
+# split the TP blues by trait
+tp_BLUEs_split <- tp_BLUEs %>%
+  split(.$trait) %>%
+  map(~mutate_at(., vars(line_name, environment), as.factor))
+
+# Subset the K matrix
+G <- K[tp_geno, tp_geno]
+
+
+# Iterate and fit models
+tp_twoway_fit <- map2(.x = tp_BLUEs_split, .y = env_cor_tp, ~{
+  phenos <- .x
+  E <- .y
+  
+  # Create the kronecker product
+  Kge <- kronecker(E, G, make.dimnames = TRUE)
+  
+  # Fix the contrasts for environments and genotypes
+  contrasts(phenos$environment) <- contr.sum(n = levels(phenos$environment)) %>% `colnames<-`(., head(levels(phenos$environment), -1))
+  contrasts(phenos$line_name) <- contr.sum(n = levels(phenos$line_name)) %>% `colnames<-`(., head(levels(phenos$line_name), -1))
+  
+  
+  # Model frame
+  mf <- model.frame(value ~ line_name + environment, data = phenos)
+  y <- model.response(mf)
+  # # Try just the mean as the fixed effect - NO
+  # X <- model.matrix(~ 1, data = mf)
+  
+  # Fixed effects of environments
+  X <- model.matrix(~ 1 + environment + line_name, data = mf)
+  Z <- model.matrix(~ -1 + line_name:environment, data = mf)
+  
+  # Fit
+  fit <- mixed.solve(y = y, Z = Z, K = Kge, X = X)
+  
+  # Extract the BLUEs and calculate all effects of environments
+  env_eff <- fit$beta[2:n_distinct(mf$environment)]
+  env_eff_df <- env_eff %>% 
+    data_frame(environment = names(.), effect = .) %>% 
+    mutate(environment = str_remove(environment, "environment")) %>% 
+    add_row(environment = tail(levels(mf$environment), 1), effect = -sum(env_eff))
+  
+  # Do the same for genotype effects
+  gen_eff <- fit$beta[(n_distinct(mf$environment)+1):length(fit$beta)]
+  gen_eff_df <- gen_eff %>% 
+    data_frame(line_name = names(.), effect = .) %>% 
+    mutate(line_name = str_remove(line_name, "line_name")) %>% 
+    add_row(line_name = tail(levels(mf$line_name), 1), effect = -sum(gen_eff))
+  
+  
+  # Extract BLUPs
+  blups <- fit$u %>% 
+    data_frame(term = names(.), value = .) %>% 
+    separate(term, c("environment", "line_name"), sep = ":")
+
+  # Add the environmental effect and the grand mean  
+  predictions <- blups %>% 
+    left_join(., env_eff_df, by = "environment") %>%
+    left_join(., gen_eff_df, by = "line_name")  %>%
+    mutate(value = value + effect.x + effect.y + as.numeric(fit$beta[1])) %>%
+    select(-contains("effect"))
+  
+  # Return the predictions and the GxE BLUPs
+  list(predictions = predictions, ge = blups, varE = fit$Ve)
+  
+})
+
+
+
+## Create two datasets - one using all environments and one without 2017
+training_sets_twoway <- bind_rows(
+  distinct(tp_BLUEs, environment) %>% mutate(set = "complete"),
+  filter(tp_BLUEs, year < 2017) %>% distinct(environment) %>% mutate(set = "realistic")
+) %>%
+  left_join(., tp_twoway_fit %>% list(., names(.)) %>% pmap_df(~mutate(.x$predictions, trait = .y))) %>%
+  group_by(set, trait) %>%
+  nest() %>%
+  left_join(., tp_twoway_fit %>% map("varE") %>% list(., names(.)) %>% pmap_df(~data_frame(trait = .y, varE = .x)))
+
+
+
+## Perform the AMMI analysis
+# Create a two-way matrix
+ammi_out <- training_sets_twoway %>%
+  group_by(set, trait) %>%
+  do(ammi = {
+    df <- .$data[[1]]
+    varE <- .$varE
+    
+    ## Fit a model
+    fit <- aov(value ~ line_name + environment, data = df)
+    # Get the effects
+    effects <- model.tables(fit)
+    effects_df <- effects$tables %>% 
+      map(~as.matrix(.) %>% fix_data_frame(newnames = "effect"))
+    
+    # Add the residuals (GxE effects) to the df
+    df1 <- add_residuals(df, fit, var = "ge")
+    
+    # Create a two-way table
+    ge <- xtabs(ge ~ line_name + environment, df1)
+    
+    ## SVD
+    ge_svd <- svd(ge)
+    # Get the d values for each factor
+    dm <- svd(ge)$d
+    
+    ## Calculate sums of squares for each factor
+    SSd <- dm^2
+    # Calculate the proportion of variance explained by each factor
+    varprop <- SSd / sum(SSd)
+    # Cumulative proportion
+    cumprop <- cumsum(varprop)
+    
+    # Calculate the degrees of freedom for each factor
+    J <- nrow(ge)
+    K <- ncol(ge)
+    df_d <- (J + K - 1 - (2 * seq_along(SSd)))
+    
+    # Calculate the mean squares
+    MSd <- SSd / df_d
+    
+    ## Use the residual variance from the previous model as the expected mean squares of the residuals
+    ## Calculate an F statistic
+    stat <- MSd / varE
+    
+    # Calculate p-values
+    p_value_Ftest <- pf(q = stat, df1 = df_d, df2 = (J * K), lower.tail = FALSE)
+    
+
+    
+    # ## Use resampling to determine the null distribution of MSf / MSe
+    # # First fit a main effects model, then simulate from that model to calculate ge terms
+    # fit <- aov(value ~ line_name + environment, df)
+    # mf <- model.frame(fit)
+    # 
+    # # Simulate from the model
+    # sims <- simulate(fit, nsim = 1000)
+    # # Update the model
+    # fit_sims <- apply(X = sims, MARGIN = 2, FUN = function(data) {
+    #   mf$value <- data
+    #   fit1 <- lm(value ~ line_name + environment, mf)
+    #   
+    #   # Get the residuals / GE
+    #   ge1 <- matrix(data = residuals(fit1), nrow = J, ncol = K)
+    #   svd(ge1)$d
+    # })
+    # 
+    # ## Use the matrix to determine the significance of each factor
+    # SS_sims <- fit_sims^2
+    # p_value_sim <- map_dbl(seq_along(SSd), ~mean(SS_sims[.,] >= SSd[.]))
+
+    p_value_sim <- rep(NA, length(SSd))
+    
+    # Create a table of sums of squares
+    out <- data.frame(term = c("ge", str_c("PC", seq_along(SSd)), "Residuals"),
+               sum_squares = c(sum(ge^2), SSd, varE * (J * K)),
+               prop_var = c(NA, varprop, NA),
+               cumprop = c(NA, cumprop, NA),
+               F_value = c(NA, stat, NA),
+               p_value_F = c(NA, p_value_Ftest, NA),
+               p_value_sim = c(NA, p_value_sim, NA))
+    
+    ## Select the significant environmental scores based on the F-test
+    which_scores <- which(p_value_Ftest < alpha)
+    
+    escores <- ge_svd$v[,which_scores, drop = FALSE]
+    dimnames(escores) <- list(colnames(ge), paste0("PC", seq(ncol(escores))))
+    
+    escores_df <- effects_df$environment %>%
+      rename(environment = term) %>%
+      left_join(., fix_data_frame(escores, newcol = "environment"), by = "environment") %>%
+      gather(PC, eigen, -environment, -effect) %>%
+      left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
+      mutate(score = eigen * sqrt(d)) %>%
+      select(-d)
+    
+    gscores <- ge_svd$u[,which_scores, drop = FALSE]
+    dimnames(gscores) <- list(rownames(ge), paste0("PC", seq(ncol(gscores))))
+    
+    gscores_df <- effects_df$line_name %>%
+      rename(line_name = term) %>%
+      left_join(., fix_data_frame(gscores, newcol = "line_name"), by = "line_name") %>%
+      gather(PC, eigen, -line_name, -effect) %>%
+      left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
+      mutate(score = eigen * sqrt(d)) %>%
+      select(-d)
+    
+    # Return
+    list(results = out, escores = escores_df, gscores = gscores_df) %>% map(as_data_frame)
+    
+  }) %>% ungroup()
+ 
+
+## What total proportion of variation do the AMMI axes explain?
+ammi_out %>% 
+  mutate(results = map(ammi, "results")) %>% 
+  unnest(results) %>%
+  filter(p_value_F < alpha) %>% 
+  group_by(set, trait) %>% 
+  do(tail(., 1)) %>% 
+  select(term, cumprop)
+
+# set       trait           term  cumprop
+# 1 complete  GrainYield      PC2     0.619
+# 2 complete  HeadingDate     PC6     0.772
+# 3 complete  HeadingDateAGDD PC6     0.768
+# 4 complete  PlantHeight     PC1     0.534
+# 5 realistic GrainYield      PC1     0.478
+# 6 realistic HeadingDate     PC5     0.778
+# 7 realistic HeadingDateAGDD PC5     0.771
+# 8 realistic PlantHeight     PC1     0.586
+
+## What proportion of variation do the first IPCA scores explain?
+ammi_out %>% 
+  mutate(results = map(ammi, "results")) %>% 
+  unnest(results) %>%
+  filter(p_value_F < alpha) %>% 
+  group_by(set, trait) %>% 
+  slice(1) %>% 
+  select(term, cumprop)
+
+# set       trait           term  cumprop
+# 1 complete  GrainYield      PC1     0.464
+# 2 complete  HeadingDate     PC1     0.212
+# 3 complete  HeadingDateAGDD PC1     0.224
+# 4 complete  PlantHeight     PC1     0.534
+# 5 realistic GrainYield      PC1     0.478
+# 6 realistic HeadingDate     PC1     0.257
+# 7 realistic HeadingDateAGDD PC1     0.265
+# 8 realistic PlantHeight     PC1     0.586
+
+
+## ggrepel
+library(ggrepel)
+
+year_levels <- c(unique(tp_BLUEs$year), "Genotype")
+
+## Plot the AMMI axes and the proportion of variance explained
+g_ammi <- ammi_out %>%
+  # filter(set == "complete") %>%
+  group_by(set, trait) %>%
+  do(plot = {
+    df <- .
+  
+    out <- df$ammi[[1]]
+    trait <- df$trait
+    
+    ## Combine the g and e scores into one DF
+    scores_df <- map_df(out[-1], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
+    
+    # Create a renaming vector
+    propvar_rename <- setNames(paste0(out$results$term, " (", round(out$results$prop_var, 2) * 100, "%)"), as.character(out$results$term))
+    # Renaming function
+    label_rename <- function(x) str_replace_all(x, propvar_rename)
+    
+    scores_toplot <- scores_df %>%
+      select(-eigen) %>%
+      spread(PC, score) %>%
+      # Add year
+      mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
+             trait = trait)
+    
+    ## Year color scheme
+    year_color <- setNames( c(neyhart_palette("umn1", 5)[3:5], "grey"), year_levels)
+    
+    
+    # Plot
+    scores_toplot %>% 
+      ggplot(aes(x = effect, y = PC1, color = year)) + 
+      geom_point() +
+      geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term)) +
+      scale_color_manual(values = year_color, name = "Year") + 
+      ylab(propvar_rename[2]) +
+      xlab("Effect") +
+      facet_grid(~ trait) + 
+      theme_presentation2() +
+      theme(legend.position = "bottom")
+    
+  })
+
+library(cowplot)
+
+# Plot in a grid
+plot_list <- filter(g_ammi, set == "complete")$plot
+ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 2)
+# Add legend
+ammi_grid1 <- plot_grid(ammi_grid, get_legend(plot_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+
+# Save
+ggsave(filename = "ammi_biplots.jpg", plot = ammi_grid1, path = fig_dir, height = 10, width = 10, dpi = 1000)
+  
+
+## Realistic
+# Plot in a grid
+plot_list <- filter(g_ammi, set == "realistic")$plot
+ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 2)
+# Add legend
+ammi_grid1 <- plot_grid(ammi_grid, get_legend(plot_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+
+# Save
+ggsave(filename = "ammi_biplots_realistic.jpg", plot = ammi_grid1, path = fig_dir, height = 10, width = 10, dpi = 1000)
+
+    
+
+
+## Save all of this
+save_file <- file.path(result_dir, "genotype_environment_ammi_analysis.RData")
+save("training_sets_twoway", "ammi_out", file = save_file)
+
+    
 
 
 
