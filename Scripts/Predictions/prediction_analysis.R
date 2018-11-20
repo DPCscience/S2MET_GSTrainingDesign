@@ -96,12 +96,18 @@ ggsave(filename = "loeo_predictions.jpg", plot = g_loeo, path = fig_dir, width =
 ## Predictions when adding one environment at a time
 
 # Convert the accuracies to z scores
+# Adjust the names of the distance models
 cluster_pred_out1 <- cluster_pred_out %>%
+  unnest(out) %>% # Comment this if the data was generated on a local machine
   mutate(zscore = ztrans(accuracy),
          nEnv = as.factor(n_e),
          environment = as.factor(validation_environment),
+         model = ifelse(str_detect(model, "sample"), "sample", model),
          model = abbreviate(str_replace_all(model, dist_method_replace)),
-         model = factor(model, levels = dist_method_abbr))
+         model = factor(model, levels = dist_method_abbr)) %>%
+  group_by(trait, set, environment, model, nEnv, n_e) %>% 
+  summarize(zscore = mean(zscore)) %>%
+  ungroup()
 
 ## Fit a model per triat
 ## The accuracy is a function of:
@@ -111,6 +117,7 @@ cluster_pred_out1 <- cluster_pred_out %>%
 ## 4. Interactions
 
 cluster_pred_fit <- cluster_pred_out1 %>%
+  # filter(model != "Rndm") %>%
   group_by(set, trait) %>% 
   filter(n_e < max(n_e)) %>% droplevels() %>% # Remove the result when using all data, since no difference will exist among models
   do(fit = lm(zscore ~ environment + model + nEnv + environment:model + environment:nEnv + model:nEnv, data = .)) %>%
@@ -121,6 +128,7 @@ cluster_pred_fit <- cluster_pred_out1 %>%
          model_nEnv_effects = map(fit, ~Effect(focal.predictors = c("model", "nEnv"), .)),
          model_environment_effects = map(fit, ~Effect(focal.predictors = c("model", "environment"), .)))
      
+
 # Quick anova scan
 cluster_pred_fit$fit %>% map(anova)
 
@@ -134,22 +142,14 @@ cluster_pred_fit %>%
   spread(term, varprop)
 
 
-# set       trait           environment `environment:model` `environment:nEnv`   model `model:nEnv`     nEnv Residuals
-# 1 complete  GrainYield            0.912             0.0172              0.0231 0.00165      0.00148 0.00396     0.0401
-# 2 complete  HeadingDate           0.953             0.00944             0.0115 0.00151      0.00226 0.000948    0.0218
-# 3 complete  HeadingDateAGDD       0.956             0.00858             0.0117 0.00106      0.00205 0.000827    0.0197
-# 4 complete  PlantHeight           0.861             0.0240              0.0309 0.00304      0.00283 0.0332      0.0449
-# 5 realistic GrainYield            0.807             0.0330              0.0489 0.00141      0.00573 0.0336      0.0706
-# 6 realistic HeadingDate           0.937             0.00792             0.0255 0.00472      0.00240 0.00543     0.0171
-# 7 realistic HeadingDateAGDD       0.944             0.00613             0.0282 0.00292      0.00134 0.00504     0.0127
-# 8 realistic PlantHeight           0.853             0.0207              0.0641 0.00507      0.00464 0.0164      0.0360
-
-
-
 ## Collect the effects
 cluster_pred_fit_effects <- cluster_pred_fit %>% 
   filter(! str_detect(trait, "AGDD")) %>%
   mutate_at(vars(contains("effects")), ~map(., as.data.frame))
+
+
+
+
 
 
 ## Fit a model when using data from all environments
@@ -159,7 +159,7 @@ cluster_pred_fit_effects_all <- cluster_pred_out1 %>%
   do(fit = lm(zscore ~ environment, data = ., contrasts = list(environment = "contr.sum"))) %>%
   ungroup() %>%
   mutate(environment_effects = map(fit, ~Effect(focal.predictors = "environment", .) %>% as.data.frame),
-         mean_effects = map_dbl(fit, ~coef(.)[1]))
+         mean_effects = zexp(map_dbl(fit, ~coef(.)[1])))
 
 
 
@@ -219,7 +219,8 @@ ggsave(filename = "cumulative_pred_model_effect_envselect.jpg", plot = g_model_e
 ## Plot the effect of number of environment
 g_nenv_effect <- cluster_pred_fit_effects %>% 
   filter(set == "complete") %>%
-  unnest(nEnv_effects) %>% 
+  unnest(nEnv_effects) %>%
+  filter(trait == "PlantHeight") %>%
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
   mutate(nEnv = parse_number(nEnv)) %>%
   ggplot(aes(x = nEnv, y = fit, ymin = lower, ymax = upper)) + 
@@ -244,7 +245,9 @@ g_model_nenv_effect <- cluster_pred_fit_effects %>%
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
   mutate(nEnv = parse_number(nEnv),
          model = factor(model, levels = dist_method_abbr)) %>%
+  left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>%
   ggplot(aes(x = nEnv, y = fit, ymin = lower, ymax = upper, color = model, fill = model)) + 
+  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data")) +
   geom_point() + 
   geom_line() +
   # geom_errorbar(width = 0.5) +
@@ -253,6 +256,7 @@ g_model_nenv_effect <- cluster_pred_fit_effects %>%
   scale_color_manual(values = dist_colors, name = "Model") +
   scale_fill_manual(values = dist_colors, name = "Model") +
   scale_y_continuous(breaks = pretty) +
+  scale_linetype_manual(values = 2, name = NULL) +
   ylab("Accuracy") +
   xlab("Number of training environments") +
   theme_presentation2() +
@@ -274,7 +278,9 @@ g_model_effect <- cluster_pred_fit_effects %>%
   unnest(model_effects) %>% 
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
   mutate(model = factor(model, levels = dist_method_abbr)) %>%
+  # left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>% # Add the accuracy when adding using all environments
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
+  # geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
   geom_point() + 
   geom_errorbar(width = 0.5) +
   facet_wrap(~trait) +
@@ -352,7 +358,7 @@ g_model_nenv_effect <- cluster_pred_fit_effects %>%
   geom_line() +
   # geom_errorbar(width = 0.5) +
   # geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_wrap(~trait, scales = "free") +
+  facet_wrap(~trait) +
   scale_color_manual(values = dist_colors, name = "Model") +
   scale_fill_manual(values = dist_colors, name = "Model") +
   scale_y_continuous(breaks = pretty) +
@@ -404,11 +410,17 @@ ggsave(filename = "cumulative_pred_model_environment_effect_realistic.jpg", plot
 
 # Convert the accuracies to z scores
 cluster_pred_out_window1 <- cluster_pred_out_window %>% 
-  mutate(zscore = ztrans(accuracy),
+  unnest(out) %>%
+  group_by(trait, set, validation_environment, model) %>% mutate(window = seq(n())) %>% ungroup() %>%
+  mutate(model = ifelse(str_detect(model, "sample"), "sample", model),
+         zscore = ztrans(accuracy),
          # window = as.factor(window), # As a numeric, estimate a regression slope
          environment = as.factor(validation_environment),
          model = abbreviate(str_replace_all(model, dist_method_replace)),
-         model = factor(model, levels = dist_method_abbr))
+         model = factor(model, levels = dist_method_abbr)) %>%
+  group_by(trait, set, environment, model, window) %>%
+  summarize(zscore = mean(zscore)) %>%
+  ungroup()
 
 ## Fit a model per triat
 ## The accuracy is a function of:
@@ -518,9 +530,9 @@ cluster_pred_window_fit_effects %>%
 
 
 # trait       acc_per_change
-# 1 GrainYield          0.173 
-# 2 HeadingDate         0.0340
-# 3 PlantHeight         0.0904
+# 1 GrainYield          0.156 
+# 2 HeadingDate         0.0314
+# 3 PlantHeight         0.0820
 
 
 ## Plot the interaction effect of model and number of environment
@@ -568,7 +580,7 @@ cluster_pred_window_fit_effects %>%
 
 
 
-
+#### Realistic results
 
 
 ## Plot the effect of model at an early number of training environments
@@ -626,9 +638,9 @@ cluster_pred_window_fit_effects %>%
 
 
 # trait       acc_per_change
-# 1 GrainYield          0.174 
-# 2 HeadingDate         0.0310
-# 3 PlantHeight         0.292
+# 1 GrainYield          0.136 
+# 2 HeadingDate         0.0295
+# 3 PlantHeight         0.259 
 
 
 ## Plot the interaction effect of model and number of environment
