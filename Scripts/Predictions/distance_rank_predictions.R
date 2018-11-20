@@ -175,8 +175,8 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
     pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
     
     # Return results
-    data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-    # results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    # data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
 
     
   # }) %>% ungroup()
@@ -311,8 +311,8 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
     pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
     
     # Return results
-    data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-    # results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    # data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
     
     
     # }) %>% ungroup()

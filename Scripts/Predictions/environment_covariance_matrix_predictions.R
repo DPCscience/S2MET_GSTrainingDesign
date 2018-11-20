@@ -35,14 +35,13 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 
 
 ## Construct different covariance matrices using distance, covariates, or phenotypic correlation
-env_cov_mats <- clust_method_df %>% 
-  filter(population == "tp", !map_lgl(cov, is.null)) %>% 
-  filter(!str_detect(model, "Fstat")) %>% # For now, just focus on phenotypic distance and all covariates
-  select(trait, model, env_cov_mat = cov) %>%
+env_cov_mats <- env_rank_df %>% 
+  select(set, trait, model, env_cov_mat = cov) %>%
   arrange(trait, model)
 
 ## Subset the matrices for environments in which both the TP and VP were phenotyped
 env_cov_mats_use <- env_cov_mats %>%
+  filter(model != "great_circle_dist") %>%
   mutate(env_cov_mat = map(env_cov_mat, ~.[row.names(.) %in% tp_vp_env, colnames(.) %in% tp_vp_env]),
          # Create the GxE covariance matrices
          env_cov_mat = map(env_cov_mat, ~kronecker(., K, make.dimnames = T)))
@@ -50,6 +49,7 @@ env_cov_mats_use <- env_cov_mats %>%
 
 
 ## Run different proportions of training environments
+## This will use all data
 prop_train_env <- c(0.25, 0.5, 0.75)
 n_iter <- 10
 
@@ -220,7 +220,7 @@ environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = func
     X <- model.matrix(~ 1 + environment, droplevels(mf))
 
     # Fit the model
-    pgvs <- K_mats[1] %>%
+    pgvs <- K_mats %>%
       map(~mixed.solve(y = y, Z = Z, X = X, K = .)) %>%
       map("u") %>%
       # Combine the PGVs with the observations
@@ -246,6 +246,88 @@ environment_loeo_predictions  <- mclapply(X = prediction_model_split, FUN = func
 })
 
 environment_covmat_loeo_predictions <- bind_rows(environment_loeo_predictions)
+
+
+
+
+### Realistic predictions
+# Generate training and test sets
+environment_loeo_samples_realistic <- S2_MET_BLUEs_use %>%
+  filter(environment %in% tp_vp_env) %>%
+  group_by(trait) %>%
+  do({
+    df <- .
+    # Number the rows
+    df1 <- mutate(df, row = seq(nrow(df))) %>%
+      droplevels()
+    testEnvs <- df1 %>% filter(year == 2017) %>% distinct(environment) %>% pull() %>% as.character()
+    trainEnvs <- df1 %>% filter(year != 2017) %>% distinct(environment) %>% pull() %>% as.character()
+    
+    
+    ## Pull df rows for resampling
+    testRows <- df1 %>% 
+      filter(environment %in% testEnvs, line_name %in% vp_geno) %>% 
+      pull(row)
+    
+    trainRows <- df1 %>% 
+      filter(environment %in% trainEnvs, line_name %in% tp_geno) %>% 
+      pull(row)
+    
+    # Create samples
+    data_frame(test = list(resample(df1, testRows)), train = list(resample(df1, trainRows)))
+    
+  }) %>% ungroup()
+
+
+
+
+## Run predictions
+prediction_model_split <- environment_loeo_samples_realistic %>%
+  split(.$trait)
+
+# Use mclapply to parallelize
+environment_loeo_realistic_predictions  <- environment_loeo_samples_realistic %>%
+  mutate(predictions = list(NULL)) %>%
+  select(-test, -train)
+  
+for (i in seq(nrow(environment_loeo_predictions))) {
+
+  # Extract the covariance matrix
+  K_mats <- env_cov_mats_use %>%
+    filter(set == "realistic", trait == environment_loeo_realistic_predictions$trait[i]) %>%
+    pull(env_cov_mat)
+  
+  # Create model matrices
+  mf <- model.frame(value ~ line_name + environment, environment_loeo_realistic_predictions$train[[i]])
+  y <- model.response(mf)
+  Z <- model.matrix(~ -1 + line_name:environment, mf)
+  X <- model.matrix(~ 1 + environment, droplevels(mf))
+  
+  # Fit the model
+  pgvs <- K_mats %>%
+    map(~mixed.solve(y = y, Z = Z, X = X, K = .)) %>%
+    map("u") %>%
+    # Combine the PGVs with the observations
+    map(~data.frame(term = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
+          separate(term, c("environment", "line_name"), sep = ":") %>%
+          left_join(as.data.frame(environment_loeo_realistic_predictions$test[[i]]), ., by = c("environment", "line_name")) %>%
+          select(trait, environment, line_name, value, pgv))
+  
+  environment_loeo_realistic_predictions$predictions[[i]] <- env_cov_mats_use %>%
+    filter(set == "realistic", trait == environment_loeo_realistic_predictions$trait[i]) %>%
+    mutate(predictions = pgvs) %>%
+    select(-env_cov_mat)
+  
+}
+
+environment_loeo_realistic_predictions <- bind_rows(environment_loeo_realistic_predictions)
+
+
+
+
+
+
+
 
 
 
