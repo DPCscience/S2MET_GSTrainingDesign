@@ -59,7 +59,7 @@ clusters_rand <- pred_env_rank_random %>%
   select(-rank)
 
 clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
-  mutate(training_environment = map(training_environment, ~head(., max_env))) # %>%  filter(!str_detect(model, "sample"))
+  mutate(training_environment = map(training_environment, ~head(., max_env))) %>%  filter(!str_detect(model, "sample"))
 
 # Split by cores
 clusters_to_model_split <- clusters_to_model %>%
@@ -126,9 +126,9 @@ clusters_to_model_split <- clusters_to_model %>%
 
 
 # ## Local machine
-# ## 
+# ##
 # cluster_pred_out <- clusters_to_model %>%
-#   group_by(set, trait, validation_environment, model) %>%
+#   group_by(mat_set, set, trait, validation_environment, model) %>%
 #   do({
 #     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
 #     df <- .

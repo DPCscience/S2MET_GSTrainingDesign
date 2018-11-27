@@ -689,6 +689,13 @@ cluster_pred_window_fit_effects %>%
 
 
 
+
+
+
+
+
+
+
 #### Environmental cluster predictions ####
 
 # Load the cluster results
@@ -697,8 +704,18 @@ load(file.path(result_dir, "cluster_predictions.RData"))
 
 ## Unnest and tidy
 cluster_predictions_out <- cluster_predictions %>% 
-  # unnest(out) %>%
-  filter(model %in% names(dist_method_replace)) %>%
+  unnest(out)
+  
+# Extract the random results
+cluster_predictions_random <- cluster_predictions_out %>% 
+  select(-environment, -accuracy) %>%
+  unnest() %>% 
+  mutate(model = "sample") %>% 
+  select(-sample)
+  
+cluster_predictions_out1 <- cluster_predictions_out %>%
+  select(-random_accuracy) %>%
+  bind_rows(., cluster_predictions_random) %>%
   filter(trait %in% traits) %>%
   mutate(dist_method = str_replace_all(model, dist_method_replace),
          model = factor(abbreviate(dist_method), levels = dist_method_abbr),
@@ -719,7 +736,7 @@ cluster_predictions_out <- cluster_predictions %>%
 ## 
 
 # Fit a model per trait
-cluster_predictions_model <- distinct(cluster_predictions_out, set, trait) %>%
+cluster_predictions_model <- distinct(cluster_predictions_out1, set, trait) %>%
   mutate(out = list(NULL))
   
 for (i in seq(nrow(cluster_predictions_model))) {
@@ -727,7 +744,7 @@ for (i in seq(nrow(cluster_predictions_model))) {
   st <- cluster_predictions_model$set[i]
   
   fit <- lmer(formula = zscore ~ model + min_env + model:min_env + (1|environment) + (1|environment:cluster) + (1|model:cluster), 
-              data = cluster_predictions_out, subset = trait == tr & set == st)
+              data = cluster_predictions_out1, subset = trait == tr & set == st)
   
   out <- data_frame(fitted = list(fit),
                     model_effects = list(Effect("model", fit)),
@@ -787,7 +804,7 @@ g_cluster_model_effect1 <- cluster_predictions_model1 %>%
   left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>%
   unnest(model_min_env_effects) %>%
   mutate(model = factor(model, levels = dist_method_abbr),
-         min_env = factor(min_env, levels = levels(cluster_predictions_out$min_env))) %>%
+         min_env = factor(min_env, levels = levels(cluster_predictions_out1$min_env))) %>%
   mutate_at(vars(fit, lower, upper), zexp) %>%
   ## Plot
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
@@ -846,7 +863,7 @@ g_cluster_model_effect1 <- cluster_predictions_model1 %>%
   left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>%
   unnest(model_min_env_effects) %>%
   mutate(model = factor(model, levels = dist_method_abbr),
-         min_env = factor(min_env, levels = levels(cluster_predictions_out$min_env))) %>%
+         min_env = factor(min_env, levels = levels(cluster_predictions_out1$min_env))) %>%
   mutate_at(vars(fit, lower, upper), zexp) %>%
   ## Plot
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +

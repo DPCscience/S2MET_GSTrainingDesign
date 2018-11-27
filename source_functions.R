@@ -513,5 +513,27 @@ window_mean <- function(x, y, window = 8) {
 ztrans <- function(x) 0.5 * (log((1 + x) / (1 - x)))
 zexp <- function(x) (exp(2 * x) - 1) / (exp(2 * x) + 1)
 
+
+## Function to create training and testing sets
+resample_prediction <- function(data, train.exp, test.exp) {
+  
+  # Add row numbers to the data
+  data1 <- droplevels(mutate(data, rows = seq(nrow(data))))
+  
+  # Convert to expressions
+  train.exp1 <- parse(text = train.exp)
+  test.exp1 <- parse(text = test.exp)
+  
+  # Create the train and test resamples
+  train_rows <- subset(data1, eval(train.exp1), rows, drop = T)
+  test_rows <- subset(data1, eval(test.exp1), rows, drop = T)
+  
+  data_frame(train = list(resample(data = data1, idx = train_rows)),
+             test = list(resample(data = data1, idx = test_rows)))
+  
+}
+  
+
+
   
   

@@ -136,13 +136,19 @@ gl_mean_D_realistic <- location_BLUEs %>%
 
 
 ## Combine the one-year and multi-year ECs
-# Use the Jarquin2014 similarity matrix formula
-ec_sim_mat_df1 <- sim_mat_df1 %>%
+# Create 3 different sets of matrices based on the distance calculations
+sim_mat_group <- bind_rows(
+  mutate(sim_mat_df, mat_set = "Malosetti"),
+  mutate(sim_mat_df1, mat_set = "Jarquin"),
+  mutate(sim_mat_df2, mat_set = "MalosettiStand")
+) %>% select(-mat)
+
+
+ec_sim_mat_df1 <- sim_mat_group %>%
   mutate(model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group),
-         nEC = map_dbl(mat, ncol),
          dist = map(sim_mat, dist)) %>%
-  select(set, model, trait, nEC, cov = sim_mat, dist)
+  select(mat_set, set, model, trait, cov = sim_mat, dist)
 
 
 ## Combine - scale such that greater values mean "closer" or more similar
@@ -328,7 +334,7 @@ set.seed(153)
 ## For each prediction environment, take the environments in one of the distance
 ## matrices and randomly sample it
 pred_env_rank_random <- pred_env_dist_rank %>%
-  group_by(set, trait, validation_environment) %>%
+  group_by(mat_set, set, trait, validation_environment) %>%
   do({
     df <- .
     smpls <- rerun(.n = n_sample, sample(df$rank[[1]]))
@@ -344,7 +350,7 @@ set.seed(1004)
 
 n_sample <- 100
 pred_env_random <- pred_env_dist_rank %>%
-  group_by(set, trait) %>%
+  group_by(mat_set, set, trait) %>%
   do({
     df <- .
     envs <- df$rank %>% reduce(union)
