@@ -59,7 +59,7 @@ clusters_rand <- pred_env_rank_random %>%
   select(-rank)
 
 clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
-  mutate(training_environment = map(training_environment, ~head(., max_env))) %>%  filter(!str_detect(model, "sample"))
+  mutate(training_environment = map(training_environment, ~head(., max_env))) # %>%  filter(!str_detect(model, "sample"))
 
 # Split by cores
 clusters_to_model_split <- clusters_to_model %>%
