@@ -392,7 +392,7 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
   
   # Vectors and matrices
   y <- model.response(mf)
-  if (nlevels(mf$env) <= 1 | fit.env) {
+  if (nlevels(mf$env) <= 1 | !fit.env) {
     X <- model.matrix(~ 1, mf) 
   } else {
     X <- model.matrix(~ 1 + env, mf)
