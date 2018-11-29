@@ -138,6 +138,35 @@ vp_only_env <- S2_MET_BLUEs %>%
   distinct(environment) %>% 
   pull()
 
+## Split these vectors based on traits
+tp_vp_env_trait <- S2_MET_BLUEs %>% 
+  group_by(environment, trait) %>%
+  filter(sum(line_name %in% tp_geno) > 1, sum(line_name %in% vp_geno) > 1) %>% 
+  split(.$trait) %>% 
+  map(~unique(.$environment))
+  
+tp_only_env_trait <- S2_MET_BLUEs %>% 
+  group_by(environment) %>%
+  filter(sum(line_name %in% tp_geno) > 1, sum(line_name %in% vp_geno) == 0) %>%
+  split(.$trait) %>% 
+  map(~unique(.$environment))
+  
+vp_only_env_trait <- S2_MET_BLUEs %>% 
+  group_by(environment) %>%
+  filter(sum(line_name %in% tp_geno) == 0, sum(line_name %in% vp_geno) > 1) %>% 
+  split(.$trait) %>% 
+  map(~unique(.$environment))
+
+
+## Create two list of environments - for complete or realistic training
+complete_train_env <- tp_vp_env_trait
+
+realistic_train_env <- tp_vp_env_trait %>%
+  map(~str_subset(., "15|16"))
+
+realistic_test_env <- tp_vp_env_trait %>%
+  map(~str_subset(., "17"))
+
 
 
 ## Sample environments for testing

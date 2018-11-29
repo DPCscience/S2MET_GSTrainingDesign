@@ -532,6 +532,62 @@ resample_prediction <- function(data, train.exp, test.exp) {
              test = list(resample(data = data1, idx = test_rows)))
   
 }
+
+
+
+## Function to perform model-based clustering
+env_mclust <- function(data, min_env = 2, test.env) {
+  
+  ## If test.env is present, remove them from the original dataset
+  if (!missing(test.env)) {
+    test_data <- data[test.env,,drop = FALSE]
+    train_env <- setdiff(row.names(data), test.env)
+    train_data <- data[train_env,,drop = FALSE]
+    
+    # Otherwise use all data
+  } else {
+    train_data <- data
+  }
+  
+  # Cluster
+  clusmod <- Mclust(data = train_data)
+  # K
+  k <- G <- clusmod$G
+  
+  # Do any clusters have less than the minimum number of environments?
+  while (any(table(clusmod$classification) < min_env)) {
+    # New G
+    G <- G - 1
+    # Recluster
+    clusmod <- Mclust(data = train_data, verbose = FALSE, G = seq(G))
+  }
+  
+  ## Get the classification of the environments
+  classif <- data_frame(environment = row.names(clusmod$data), cluster = clusmod$classification)
+  # Get the mean from each cluster
+  clusmean <- t(clusmod$parameters$mean) %>% 
+    `row.names<-`(., paste0("cluster", seq(nrow(.))))
+  
+  ## If test.env is present, use the data to determine the cluster assignment for each test environment
+  ## based on the means of the assigned clusters
+  if (!missing(test.env)) {
+    
+    # Calculate the distances for each environment
+    test_dist <- as.matrix(dist(rbind(clusmean, test_data)))
+    # Now figure out the minimum distance from each environment to each cluster
+    test_assignment <- apply(X = test_dist[row.names(test_data),row.names(clusmean), drop = FALSE], MARGIN = 1, FUN = which.min)
+    # Add this data to the classif
+    classif1 <- classif %>% add_row(environment = names(test_assignment), cluster = test_assignment)
+    
+  } else {
+    classif1 <- classif
+    
+  }
+  
+  # Return the classification
+  return(classif1)
+  
+}
   
 
 

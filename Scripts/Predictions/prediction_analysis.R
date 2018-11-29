@@ -105,6 +105,7 @@ cluster_pred_out1 <- cluster_pred_out %>%
          model = ifelse(str_detect(model, "sample"), "sample", model),
          model = abbreviate(str_replace_all(model, dist_method_replace)),
          model = factor(model, levels = dist_method_abbr)) %>%
+  unite(model, model, mat_set, sep = "_") %>% mutate(model = as.factor(str_remove_all(model, "_NA"))) %>%
   group_by(trait, set, environment, model, nEnv, n_e) %>% 
   summarize(zscore = mean(zscore)) %>%
   ungroup()
@@ -169,12 +170,12 @@ g_model_effect <- cluster_pred_fit_effects %>%
   filter(set == "complete") %>%
   unnest(model_effects) %>% 
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
+  # mutate(model = factor(model, levels = dist_method_abbr)) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
   geom_point() + 
   geom_errorbar(width = 0.5) +
   facet_wrap(~trait, scales = "free") +
-  scale_color_manual(values = dist_colors) +
+  # scale_color_manual(values = dist_colors) +
   scale_y_continuous(breaks = pretty) +
   ylab("Accuracy") +
   theme_presentation2() +
