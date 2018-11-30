@@ -240,6 +240,8 @@ pld_mat_complete <- data_frame(set = "complete", model = "pheno_location_dist", 
 ec_mat_complete <- ec_mats %>% 
   filter(set == "complete", trait %in% traits) %>% 
   rename(data = mat) %>%
+  left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% 
+  mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,])) %>%
   mutate(cluster = map(data, ~env_mclust(data = ., min_env = min_env)),
          model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group)) %>%
@@ -267,6 +269,8 @@ pld_mat_realistic  <- data_frame(set = "realistic", model = "pheno_location_dist
 ec_mat_realistic  <- ec_mats %>% 
   filter(set == "realistic", trait %in% traits) %>% 
   rename(data = mat) %>%
+  left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% # filter out undesired environments
+  mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,, drop = FALSE])) %>%
   left_join(., map(complete_train_env[-3], ~str_subset(., "17")) %>% data_frame(trait = names(.), test_env = .)) %>%
   mutate(cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)),
          model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),

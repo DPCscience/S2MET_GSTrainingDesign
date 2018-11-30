@@ -90,41 +90,6 @@ dist_env <- function(x, gen.col = "gen", env.col = "env", pheno.col = "yield") {
 
 
 
-## Run a likelihood ratio test
-lr_test <- function(model1, model2) {
-  
-  stopifnot(class(model1) %in% c("lmerMod", "merModLmerTest"))
-  stopifnot(class(model2) %in% c("lmerMod", "merModLmerTest"))
-  
-  model_list <- list(model1 = model1, model2 = model2)
-  
-  # Degrees of freedom
-  df_list <- sapply(X = model_list, FUN = df.residual)
-  fuller_model <- names(which.min(df_list))
-  red_model <- names(which.max(df_list))
-  
-  ## Get the log-likelihoods and store as list
-  ll_list <- sapply(X = model_list, FUN = logLik)
-  
-  # Calculate the likelihood ratio
-  lr <- -2 * (ll_list[red_model] - ll_list[fuller_model])
-  # Calculate pvalue
-  df <- df_list[red_model] - df_list[fuller_model]
-  p_value <- pchisq(q = lr, df = df, lower.tail = FALSE)
-  
-  # Export a data.frame
-  data.frame(
-    fuller_model = fuller_model,
-    df = df,
-    statistic = lr,
-    p_value = p_value,
-    row.names = NULL,
-    stringsAsFactors = FALSE
-  )
-
-}
-
-
 
 # Function that generates regression values for a population against an environmental index
 # (i.e. stability), then performs an F test to test differences among the regression coefficients
@@ -378,7 +343,7 @@ calc_variance <- function(data, random_effect = c("line_name", "environment", "l
 ## PGVs and accuracy
 gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL, add.mu = FALSE) {
   
-  if (missing(formula)) formula <- value ~ line_name + env
+  if (missing(formula)) formula <- value ~ line_name + environment
   
   # Create a model.frame
   mf <- model.frame(formula, weights = std_error, data = train)
@@ -392,10 +357,10 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
   
   # Vectors and matrices
   y <- model.response(mf)
-  if (nlevels(mf$env) <= 1 | !fit.env) {
+  if (nlevels(mf$environment) <= 1 | !fit.env) {
     X <- model.matrix(~ 1, mf) 
   } else {
-    X <- model.matrix(~ 1 + env, mf)
+    X <- model.matrix(~ 1 + environment, mf)
   }
   Z <- `colnames<-`(model.matrix(~ -1 + line_name, mf), colnames(K))
   
