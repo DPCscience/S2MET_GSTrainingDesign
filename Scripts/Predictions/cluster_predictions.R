@@ -31,11 +31,17 @@ load(file.path(result_dir, "distance_method_results.RData"))
 
 ## Prepare the BLUEs for modeling
 S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
-  filter(line_name %in% c(tp_geno, vp_geno)) %>% # Only use environments in which both the TP and VP were grown
+  filter(line_name %in% c(tp_geno, vp_geno)) %>%
   mutate(line_name = as.factor(line_name))
 
 # Number of random cluster assignments
 n_random <- 25
+
+## Subset the modeling data to exclude the VP
+S2_MET_BLUEs_tomodel_train <- S2_MET_BLUEs_tomodel %>%
+  filter(line_name %in% tp_geno)
+
+
 
 ## Data.frame of test environments
 test_env_df <- bind_rows(
@@ -80,9 +86,9 @@ for (i in seq(nrow(cluster_train_test))) {
                             mutate(line_name = as.character(line_name)))) %>%
         mutate_at(vars(train, test), ~map(., ~select(., environment, line_name, value, std_error)))
       
-    })
+    }) %>% mutate(nTrainEnv = map_dbl(train, ~n_distinct(.$environment)))
   
-  cluster_train_test$train[[i]] <- left_join(x = clus_split, y = clus, by = c("val_environment" = "environment"))
+  cluster_train_test$data[[i]] <- left_join(x = clus_split, y = clus, by = c("val_environment" = "environment"))
   
 }
   
@@ -91,7 +97,7 @@ for (i in seq(nrow(cluster_train_test))) {
 
 ## Split the clusters for parallelization
 clusters_split <- cluster_train_test %>%
-  unnest(train) %>%
+  unnest(data) %>%
   assign_cores(df = ., n_core = n_core) %>%
   split(.$core)
 
@@ -107,18 +113,34 @@ cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
   results_out <- vector("list", nrow(core_df))
 
   ## Iterate over rows
-  for (r in seq_along(results_out)) {
-
-    row <- core_df[r,]
-
+  for (i in seq_along(results_out)) {
+    # Grab the data
+    row <- core_df[i,]
+    
+    ## Run the base predictions
+    base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
+    
+    
+    # Get the pool of possible training environments - excluding the current validation environment
+    possible_train_env <- setdiff(filter(cluster_train_test, set == row$set, model == row$model, trait == row$trait)$train_env[[1]], row$val_environment)
+    # Get the data for these possible trainin environments
+    possible_train_data <- subset(S2_MET_BLUEs_tomodel_train, trait == row$trait & environment %in% possible_train_env)
+    
+    ## Randomly sample the same number of environments from this pool
+    random_train_data <- replicate(n = n_random, sample(possible_train_env, size = row$nTrainEnv), simplify = FALSE) %>% 
+      map(~filter(possible_train_data, environment %in% .))
+    # Run predictions
+    random_pred <- random_train_data %>%
+      map_dbl(~gblup(K = K, train = ., test = row$test[[1]], fit.env = TRUE)$accuracy)
+    
+    
     # Add predictions to the list
-    results_out[[r]] <- gblup(K = K, train = rename(row$train[[1]], env = environment), test = row$test[[1]], fit.env = TRUE) 
+    results_out[[i]] <- list(base = base_pred, random = random_pred)
     
   }
 
   core_df %>%
-    mutate(out = results_out,
-           nTrainEnv = map_dbl(train, ~n_distinct(.$environment))) %>%
+    mutate(out = results_out) %>%
     select(-core, -train, -test)
 
 }, mc.cores = n_core) # Close the parallel operation

@@ -10,6 +10,7 @@
 
 ## Run on a local machine
 library(modelr)
+
 repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
@@ -306,83 +307,79 @@ ggsave(filename = save_file, plot = g_acc_herit, width = 6, height = 6, dpi = 10
 # Modify the BLUEs for predictions
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   filter(line_name %in% c(tp_geno, vp_geno),
-         environment %in% tp_vp_env) %>%
+         environment %in% tp_vp_env,
+         trait %in% traits) %>%
   mutate_at(vars(environment:line_name), as.factor) %>%
   # group_by(trait, environment) %>%
   # mutate(value = scale(value)) %>%
   ungroup()
 
 
-### Leave-one-environment-out
-# Generate training and test sets
-environment_loeo_samples <- S2_MET_BLUEs_use %>%
-  filter(environment %in% tp_vp_env) %>%
+## Create training and test sets
+## Complete data
+train_test_complete <- S2_MET_BLUEs_use %>%
   group_by(trait) %>%
   do({
-    df <- .
-    # Number the rows
-    df1 <- mutate(df, row = seq(nrow(df))) %>%
-      droplevels() 
+    df <- droplevels(.)
     
-    envs <- as.character(unique(df1$environment))
+    # Get a vector of testing environments
+    val_environment <- distinct(df, environment)
+    
+    # Create testing and training sets based on that environment
+    val_environment %>% 
+      mutate(train = map(environment, ~filter(df, environment != .) %>% droplevels() %>% filter(line_name %in% tp_geno)),
+             test = map(environment, ~filter(df, line_name %in% vp_geno, environment == .) %>% mutate(line_name = as.character(line_name))))
+    
+  }) %>% ungroup()
 
-    # Generate environment samples
-    samples <- data_frame(testEnv = envs) %>%
-      mutate(train = map(testEnv, ~filter(df1, environment != ., line_name %in% tp_geno)),
-             test = map(testEnv, ~filter(df1, environment == ., line_name %in% vp_geno))) %>%
-      mutate_at(vars(train, test), ~map(., ~pull(., row) %>% resample(data = df1, .)))
-
-
+# Realistic data
+train_test_realistic <- S2_MET_BLUEs_use %>%
+  group_by(trait) %>%
+  do({
+    df <- droplevels(.)
+    
+    val_environment <- distinct(df, environment) %>%
+      filter(str_detect(environment, "17"))
+    
+    # Get a vector of testing environments
+    all_val_environment <- as.character(val_environment$environment)
+      
+    # Create testing and training sets based on that environment
+    val_environment %>% 
+      mutate(train = map(environment, ~filter(df, environment %in% all_val_environment) %>% droplevels() %>% filter(line_name %in% tp_geno)),
+             test = map(environment, ~filter(df, line_name %in% vp_geno, environment == .) %>% mutate(line_name = as.character(line_name))))
+    
   }) %>% ungroup()
 
 
+## Combine
+train_test <- bind_rows(
+  mutate(train_test_complete, set = "complete"),
+  mutate(train_test_realistic, set = "realistic")
+)
+  
+  
 
-# Run predictions
-environment_loeo_predictions_mean  <- environment_loeo_samples %>%
-  group_by(trait, testEnv) %>%
-  do(predictions = {
-    
-    df <- .
-    
-    ## Calculate genotype means
-    train <- df$train[[1]] %>% 
-      as.data.frame() %>% 
-      geno_means(data = .) %>%
-      mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))
-    
-    test <- df$test[[1]] %>% as.data.frame()
-    
-    gblup(K = K, train = train, test = test, fit.env = FALSE, bootreps = 1000)
-    
-    # 
-    # 
-    # # Create model matrices
-    # mf <- model.frame(value ~ line_name + environment, train)
-    # y <- model.response(mf)
-    # Z <- model.matrix(~ -1 + line_name, mf)
-    # # X <- model.matrix(~ 1 + environment, droplevels(mf))
-    # X <- model.matrix(~ 1, droplevels(mf))
-    # 
-    # 
-    # 
-    # # Fit
-    # fit <- mixed.solve(y = y, X = X, Z = Z, K = K)
-    # 
-    # ## Predict just using the mean
-    # fit$u %>%
-    #   data.frame(line_name = names(.), pgv = ., row.names = NULL, stringsAsFactors = FALSE) %>%
-    #   left_join(as.data.frame(test), ., by = c("line_name")) %>%
-    #   select(trait, environment, line_name, value, pgv)
-    # 
-  }) %>% ungroup()
 
-## When using BLUEs before prediction
-environment_loeo_predictions_geno_means <- environment_loeo_predictions_mean
+### Leave-one-environment-out predictions using the genotype mean over training environments
+environment_loeo_predictions_geno_mean <- train_test %>%
+  group_by(set, trait, environment) %>%
+  do(predictions = gblup(K = K, train = .$train[[1]], test = .$test[[1]], fit.env = TRUE)) %>%
+  ungroup()
+
+
+## Add the number of training environments to the results
+environment_loeo_predictions_geno_mean <- environment_loeo_predictions_geno_mean %>% 
+  left_join(train_test) %>% 
+  mutate(nTrainEnv = map_dbl(train, ~n_distinct(.$environment))) %>% 
+  select(set, trait, environment, nTrainEnv, predictions)
+  
+
 
 
 ## Save
 save_file <- file.path(result_dir, "all_data_environmental_predictions.RData")
-save("environment_loeo_predictions_mean", "environment_loeo_predictions_geno_means", file = save_file)
+save("environment_loeo_predictions_geno_mean", file = save_file)
 
 
 
