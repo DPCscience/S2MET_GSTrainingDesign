@@ -30,6 +30,10 @@ load(file.path(result_dir, "distance_rank_predictions.RData"))
 ## Significant level
 alpha <- 0.05
 
+## Cutoff of prediction accuracy to remove an environment
+env_cutoff <- 0.1
+env_cutoff <- -Inf
+
 
 ## Unique models
 unique(cluster_pred_out$model)
@@ -60,6 +64,7 @@ dist_colors <- setNames(colors_use, dist_method_abbr)
 # Model accuracy for each trait and set
 environment_loeo_predictions_analysis <- environment_loeo_predictions_geno_mean %>%
   mutate(accuracy = map_dbl(predictions, "accuracy")) %>%
+  filter(accuracy >= env_cutoff) %>%
   group_by(set, trait) %>%
   summarize(accuracy = mean(accuracy))
   
@@ -78,6 +83,7 @@ environment_loeo_predictions_analysis2017 <- environment_loeo_predictions_geno_m
   filter(str_detect(environment, "17")) %>%
   mutate(accuracy = map_dbl(predictions, "accuracy"),
          set = ifelse(set == "complete", "complete2017", set)) %>%
+  filter(accuracy >= env_cutoff) %>%
   group_by(set, trait) %>%
   summarize(accuracy = mean(accuracy))
 
@@ -88,9 +94,13 @@ environment_loeo_predictions_analysis2017 <- environment_loeo_predictions_geno_m
 
 
 
+
+
+
+
+
+
 #### Environmental distance predictions ####
-
-
 
 ## Predictions when adding one environment at a time
 
@@ -104,17 +114,17 @@ cluster_pred_out1 <- cluster_pred_out %>%
          model = ifelse(str_detect(model, "sample"), "sample", model),
          model = abbreviate(str_replace_all(model, dist_method_replace)),
          model = factor(model, levels = dist_method_abbr)) %>%
-  unite(model, model, mat_set, sep = "_") %>% mutate(model = as.factor(str_remove_all(model, "_NA"))) %>%
+  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>% # Filter out the relationship matrices
+  # unite(model, model, mat_set, sep = "_") %>% 
+  mutate(model = as.factor(str_remove_all(model, "_NA"))) %>%
   group_by(trait, set, environment, model, nEnv, n_e) %>% 
   summarize(zscore = mean(zscore)) %>%
   ungroup()
 
-## Fit a model per triat
-## The accuracy is a function of:
-## 1. Environment
-## 2. Model
-## 3. Number of training environments
-## 4. Interactions
+
+
+## Fit a model per trait
+# accuracy ~ model + (1|environment) + 
 
 cluster_pred_fit <- cluster_pred_out1 %>%
   # filter(model != "Rndm") %>%
@@ -152,16 +162,6 @@ cluster_pred_fit_effects <- cluster_pred_fit %>%
 
 
 
-## Fit a model when using data from all environments
-cluster_pred_fit_effects_all <- cluster_pred_out1 %>%
-  group_by(set, trait) %>% 
-  filter(n_e == max(n_e)) %>% droplevels() %>% # Remove the result when using all data, since no difference will exist among models
-  do(fit = lm(zscore ~ environment, data = ., contrasts = list(environment = "contr.sum"))) %>%
-  ungroup() %>%
-  mutate(environment_effects = map(fit, ~Effect(focal.predictors = "environment", .) %>% as.data.frame),
-         mean_effects = zexp(map_dbl(fit, ~coef(.)[1])))
-
-
 
 
 ## Plot the effect of model
@@ -169,12 +169,13 @@ g_model_effect <- cluster_pred_fit_effects %>%
   filter(set == "complete") %>%
   unnest(model_effects) %>% 
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  # mutate(model = factor(model, levels = dist_method_abbr)) %>%
+  mutate(model = factor(model, levels = dist_method_abbr)) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
   geom_point() + 
   geom_errorbar(width = 0.5) +
-  facet_wrap(~trait, scales = "free") +
-  # scale_color_manual(values = dist_colors) +
+  # facet_wrap(~trait, scales = "free") +
+  facet_grid(~ trait) +
+  scale_color_manual(values = dist_colors) +
   scale_y_continuous(breaks = pretty) +
   ylab("Accuracy") +
   theme_presentation2() +
@@ -191,7 +192,7 @@ nEnv_select <- c("1", "5", "10")
   
 g_model_effect_nenv <-  cluster_pred_fit_effects %>% 
   filter(set == "complete") %>%
-  left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>% # Add the accuracy when adding using all environments
+  left_join(., rename(environment_loeo_predictions_analysis, mean_effects = accuracy)) %>% # Add the accuracy when adding using all environments
   unnest(model_nEnv_effects) %>% 
   filter(nEnv %in% nEnv_select) %>%
   mutate_at(vars(fit, se, lower, upper), zexp) %>%

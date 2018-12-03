@@ -146,7 +146,7 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
     ### Comment above here for local machine
     
     # Vector of training environments, passed to an accumulation function
-    envs <- df$training_environment[[1]] %>% accumulate(., c)
+    envs <- df$training_environment[[1]] %>% accumulate(., c) %>% head(-1) # Skip the last / all environments
     val_env <- df$validation_environment
     tr <- df$trait
 
@@ -159,20 +159,23 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
       mutate(line_name = as.character(line_name))
     
-    ## Calculate fixed effects, then predict
-    # list of formulae
-    form_list <- train_data_list %>%
-      map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
-
-    blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
-      map(coef) %>%
-      map(~data_frame(line_name = names(.), value = .) %>%
-            filter(str_detect(line_name, "line_name")) %>%
-            mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-                   env = "mean", std_error = 0))
+    # ## Calculate fixed effects, then predict
+    # # list of formulae
+    # form_list <- train_data_list %>%
+    #   map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
+    # 
+    # blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
+    #   map(coef) %>%
+    #   map(~data_frame(line_name = names(.), value = .) %>%
+    #         filter(str_detect(line_name, "line_name")) %>%
+    #         mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
+    #                env = "mean", std_error = 0))
+    
+    # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
+    blues_list <- train_data_list
 
     # Iterate over the list and predict
-    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
+    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = TRUE))
     
     # Return results
     # data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
@@ -295,20 +298,24 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
       mutate(line_name = as.character(line_name))
     
-    ## Calculate fixed effects, then predict
-    # list of formulae
-    form_list <- train_data_list %>%
-      map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
+    # ## Calculate fixed effects, then predict
+    # # list of formulae
+    # form_list <- train_data_list %>%
+    #   map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
+    # 
+    # blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
+    #   map(coef) %>%
+    #   map(~data_frame(line_name = names(.), value = .) %>%
+    #         filter(str_detect(line_name, "line_name")) %>%
+    #         mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
+    #                env = "mean", std_error = 0))
     
-    blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
-      map(coef) %>%
-      map(~data_frame(line_name = names(.), value = .) %>%
-            filter(str_detect(line_name, "line_name")) %>%
-            mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-                   env = "mean", std_error = 0))
+    
+    # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
+    blues_list <- train_data_list
     
     # Iterate over the list and predict
-    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = F))
+    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = TRUE))
     
     # Return results
     # data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list_fixed, "accuracy"))
