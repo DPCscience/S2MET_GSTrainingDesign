@@ -102,50 +102,75 @@ clusters_split <- cluster_train_test %>%
   split(.$core)
 
 
-## Iterate over trait, model, and validation environments
-cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+# ## Iterate over trait, model, and validation environments
+# cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+# 
+#   # #
+#   # r = 1
+#   # core_df <- clusters_split[[r]]
+#   # #
+# 
+#   results_out <- vector("list", nrow(core_df))
+# 
+#   ## Iterate over rows
+#   for (i in seq_along(results_out)) {
+#     
+#     # Grab the data
+#     row <- core_df[i,]
+    
+    ##
+    ##
 
-  # #
-  # r = 9
-  # core_df <- clusters_split[[r]]
-  # #
-
-  results_out <- vector("list", nrow(core_df))
-
-  ## Iterate over rows
-  for (i in seq_along(results_out)) {
-    # Grab the data
-    row <- core_df[i,]
+   
+cluster_predictions <- cluster_train_test %>%
+  unnest(data) %>%
+  group_by(set, model, trait, val_environment) %>%
+  do(out = {
+    
+    row <- .
+    
     
     ## Run the base predictions
     base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
-    
+
     
     # Get the pool of possible training environments - excluding the current validation environment
     possible_train_env <- setdiff(filter(cluster_train_test, set == row$set, model == row$model, trait == row$trait)$train_env[[1]], row$val_environment)
     # Get the data for these possible trainin environments
     possible_train_data <- subset(S2_MET_BLUEs_tomodel_train, trait == row$trait & environment %in% possible_train_env)
     
-    ## Randomly sample the same number of environments from this pool
-    random_train_data <- replicate(n = n_random, sample(possible_train_env, size = row$nTrainEnv), simplify = FALSE) %>% 
-      map(~filter(possible_train_data, environment %in% .))
-    # Run predictions
-    random_pred <- random_train_data %>%
-      map_dbl(~gblup(K = K, train = ., test = row$test[[1]], fit.env = TRUE)$accuracy)
+    ## If the number of possible training environments is equal to the number of intended training environments,
+    ## skip randomization, since the results will be the same
+    if (length(possible_train_env) == row$nTrainEnv) {
+      random_pred <- NA
+      
+    } else {
     
+      ## Randomly sample the same number of environments from this pool
+      random_train_data <- replicate(n = n_random, sample(possible_train_env, size = row$nTrainEnv), simplify = FALSE) %>% 
+        map(~filter(possible_train_data, environment %in% .))
+      # Run predictions
+      random_pred <- random_train_data %>%
+        map_dbl(~gblup(K = K, train = ., test = row$test[[1]], fit.env = TRUE)$accuracy)
+      
+    }
     
-    # Add predictions to the list
-    results_out[[i]] <- list(base = base_pred, random = random_pred)
+    list(base = base_pred, random = random_pred)
     
-  }
-
-  core_df %>%
-    mutate(out = results_out) %>%
-    select(-core, -train, -test)
-
-}, mc.cores = n_core) # Close the parallel operation
-
-cluster_predictions <- bind_rows(cluster_predictions)
+  }) %>% ungroup()
+    
+#     # Add predictions to the list
+#     results_out[[i]] <- list(base = base_pred, random = random_pred)
+#     
+#   }
+# 
+#   core_df %>%
+#     mutate(out = results_out) %>%
+#     select(-core, -train, -test)
+# 
+# }, mc.cores = n_core) # Close the parallel operation
+# 
+# cluster_predictions <- bind_rows(cluster_predictions)
 
 
 

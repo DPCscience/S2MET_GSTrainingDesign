@@ -740,21 +740,20 @@ cluster_predictions_analysis <- cluster_predictions_out1 %>%
   
 ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
 for (i in seq(nrow(cluster_predictions_analysis))) {
-  tr <- cluster_predictions_analysis$trait[i]
-  st <- cluster_predictions_analysis$set[i]
   df <- cluster_predictions_analysis$data[[i]] %>%
     droplevels()
   
-  fit <- lmer(formula = zscore ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster), data = df,
+  fit <- lmer(formula = zscore ~ 1 + model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster), data = df,
               contrasts = list(model = "contr.sum"))
   
   fit_summary <- data_frame(
         fitted = list(fit),
         mean_accuracy = fixef(fit)[1],
         model_effects = list(Effect("model", fit)),
+        nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
         fixef_test = list(tidy(anova(fit))),
         ranef_test = list(tidy(ranova(fit)))
-      ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.) %>% mutate(model = as.character(model))))
+      ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
 
   # Add the summary to the DF
   cluster_predictions_analysis$out[[i]] <- fit_summary
@@ -806,6 +805,19 @@ g_cluster_model_effect <- cluster_predictions_analysis %>%
 ggsave(filename = "cluster_model_effect.jpg", plot = g_cluster_model_effect, path = fig_dir, width = 6, height = 8, dpi = 1000)
 
 
+## Effect of n of training environments
+cluster_predictions_analysis %>% 
+  unnest(nTrainEnv_effects) %>%
+  ggplot(aes(x = nTrainEnv, y = fit, ymin = lower, ymax = upper)) +
+  geom_line() +
+  geom_ribbon(color = "grey", alpha = 0.2) +
+  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x") +
+  ylab("Prediction accuracy") + 
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "bottom", legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
 
 
 
