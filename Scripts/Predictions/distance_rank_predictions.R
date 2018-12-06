@@ -31,11 +31,6 @@ n_core <- detectCores()
 load(file.path(result_dir, "distance_method_results.RData"))
 
 
-
-
-### Testing Version ###
-
-
 # Maximum number of training environments to test
 max_env <- 15
 max_env <- Inf # Use all available environments
@@ -45,145 +40,112 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
   filter(line_name %in% c(tp_geno, vp_geno)) %>%
   mutate(line_name = as.factor(line_name))
 
-
+# Data_frame of possible environments
+possible_envs <- bind_rows(
+  complete_train_env %>% data_frame(trait = names(.), envs = .),
+  realistic_train_env %>% data_frame(trait = names(.), envs = .)
+) %>% mutate(set = c(rep("complete", length(complete_train_env)), rep("realistic", length(realistic_train_env))))
+  
+  
 # Use the clusters based on the TP-only data
-clusters_model <- pred_env_dist_rank %>%
+environment_rank_model <- pred_env_dist_rank %>%
+  # Make sure the pool of training environments is consistent with the environments that are available
+  left_join(., possible_envs) %>% mutate(rank = map2(.x = rank, .y = envs, ~intersect(.x, .y))) %>%
+  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>% # Filter out the relationship matrices
   # filter(environment %in% sample_envs) %>%
   # Remove some covariate models
-  mutate(training_environment = rank) %>%
-  select(-rank)
+  rename(training_environment = rank) %>%
+  select(-envs)
 
 # Combine with the random clusters
-clusters_rand <- pred_env_rank_random %>%
-  mutate(training_environment = rank) %>%
-  select(-rank)
+environment_rank_random <- pred_env_rank_random %>%
+  # Make sure the pool of training environments is consistent with the environments that are available
+  left_join(., possible_envs) %>% mutate(rank = map2(.x = rank, .y = envs, ~intersect(.x, .y))) %>%
+  rename(training_environment = rank) %>%
+  select(-envs)
 
-clusters_to_model <- bind_rows(clusters_model, clusters_rand) %>%
-  mutate(training_environment = map(training_environment, ~head(., max_env))) # %>%  filter(!str_detect(model, "sample"))
+environment_rank_tomodel <- bind_rows(environment_rank_model, environment_rank_random) %>%
+  mutate(training_environment = map(training_environment, ~head(., max_env))) %>%  filter(!str_detect(model, "sample"))
 
 # Split by cores
-clusters_to_model_split <- clusters_to_model %>%
+environment_rank_tomodel_split <- environment_rank_tomodel %>%
   assign_cores(n_core = n_core) %>%
   split(.$core)
 
 
-# # Parallelize
-# cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
-#   
-#   # ##
-#   i = 1
-#   core_df <- clusters_to_model_split[[i]]
-#   # ##
-#   
-#   # Results list
-#   results_out <- vector("list", nrow(core_df))
-#   
-#   # Iterate over rows
-#   for (i in seq(nrow(core_df))) {
-#     
-#     # Vector of training environments, passed to an accumulation function
-#     envs <- core_df$pred_environment[[i]] %>%
-#       accumulate(., c)
-#     val_env <- core_df$environment[i]
-#     tr <- core_df$trait[i]
-#     
-#     # Create a list of training data
-#     train_data_list <- envs %>% 
-#       map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
-#       map(~mutate(., env = as.factor(environment)))
-#     
-#     test_data <- S2_MET_BLUEs_tomodel %>%
-#       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
-#       mutate(line_name = as.character(line_name))
-#     
-#     blues_list <- train_data_list %>% map(~lm(value ~ -1 + line_name, data = .)) %>% 
-#       map(coef) %>% 
-#       map(~data_frame(line_name = names(.), value = .) %>% 
-#             mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-#                    env = "mean", std_error = 0))
-#     
-#     # Iterate over the list and predict
-#     pred_list <- blues_list[1:10] %>% map(~gblup(K = K, train = ., test = test_data, fit.env = F))
-#     # pred_list1 <- train_data_list[1:10] %>% map(~gblup(K = K, train = ., test = test_data, fit.env = F))
-#     
-#     
-#     # Add to the results
-#     results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list, "accuracy"))
-# 
-#   }
-#   
-#   # Add the results list to the core_df and return
-#   core_df %>% 
-#     mutate(out = results_out) %>% 
-#     select(-pred_environment, -core)
-#   
-# })
-# 
-# 
-# cluster_pred_out <- bind_rows(cluster_pred_out)
-
-
+## Should the fixed effect of environment be fitted?
+fit_env <- FALSE
 
 
 # ## Local machine
 # ##
-# cluster_pred_out <- clusters_to_model %>%
+# environment_rank_pred_out <- environment_rank_tomodel %>%
 #   group_by(mat_set, set, trait, validation_environment, model) %>%
 #   do({
 #     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
 #     df <- .
     
+
+### Comment below for local machine
+
 # Parallelize
-cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
-  # core_df <- clusters_to_model_split[[1]]
+environment_rank_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN = function(core_df) {
+  # core_df <- environment_rank_tomodel_split[[1]]
 
   results_out <- vector("list", nrow(core_df))
 
   for (i in seq_along(results_out)) {
-
     df <- core_df[i,]
 
     ### Comment above here for local machine
     
     # Vector of training environments, passed to an accumulation function
-    envs <- df$training_environment[[1]] %>% accumulate(., c) %>% head(-1) # Skip the last / all environments
+    envs <- df$training_environment[[1]] %>% accumulate(., c)
     val_env <- df$validation_environment
     tr <- df$trait
 
     # Create a list of training data
     train_data_list <- envs %>%
       map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
-      map(~mutate(., env = as.factor(environment)))
+      map(~mutate(., environment = as.factor(environment)))
 
     test_data <- S2_MET_BLUEs_tomodel %>%
       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
       mutate(line_name = as.character(line_name))
     
-    # ## Calculate fixed effects, then predict
-    # # list of formulae
-    # form_list <- train_data_list %>%
-    #   map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
-    # 
-    # blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
-    #   map(coef) %>%
-    #   map(~data_frame(line_name = names(.), value = .) %>%
-    #         filter(str_detect(line_name, "line_name")) %>%
-    #         mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-    #                env = "mean", std_error = 0))
+    if (!fit_env) {
     
-    # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
-    blues_list <- train_data_list
+      ## Calculate fixed effects, then predict
+      # list of formulae
+      form_list <- train_data_list %>%
+        map(~{if (n_distinct(.$environment) == 1) formula(value ~ line_name) else formula(value ~ line_name + environment)})
+  
+      blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x)) %>%
+        map(~effects::Effect("line_name", .) %>% as.data.frame()) %>%
+        map(~select(., line_name, value = fit) %>% 
+              mutate(std_error = 0, environment = "mean", line_name = factor(line_name, levels = c(tp_geno, vp_geno))))
+      
+      pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = fit_env))
+      
 
-    # Iterate over the list and predict
-    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = TRUE))
+    } else {
     
-    # Return results
-    # data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+      # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
+      blues_list <- train_data_list
+  
+      # Iterate over the list and predict
+      pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = fit_env))
 
+    }
     
+  #   # Return results
+  #   data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+  # 
+  # 
   # }) %>% ungroup()
     
+    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+
   }
 
   core_df %>%
@@ -191,11 +153,6 @@ cluster_pred_out <- mclapply(X = clusters_to_model_split, FUN = function(core_df
     select(-core)
 
 }, mc.cores = n_core)
-
-
-# cluster_pred_out <- ungroup(cluster_pred_out)
-cluster_pred_out <- bind_rows(cluster_pred_out)
-
 
 
 
@@ -206,72 +163,16 @@ cluster_pred_out <- bind_rows(cluster_pred_out)
 env_window <- 5
 
 
-
-# # Parallelize
-# cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
-# 
-#   # ##
-#   # i = 1
-#   # core_df <- clusters_to_model_split[[i]]
-#   # ##
-# 
-#   # Results list
-#   results_out <- vector("list", nrow(core_df))
-# 
-#   # Iterate over rows
-#   for (i in seq(nrow(core_df))) {
-# 
-#     # Vector of training environments, passed to an accumulation function
-#     envs <- core_df$pred_environment[[i]]
-#     val_env <- core_df$environment[i]
-    # envs <- seq(env_window, length(envs)) %>%
-    #   seq_along() %>%
-    #   map(~. + seq(env_window) - 1) %>%
-    #   map(~envs[.])
-# 
-# 
-#     tr <- core_df$trait[i]
-# 
-#     # Create a list of training data
-#     train_data_list <- envs %>%
-#       map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
-#       map(~mutate(., env = as.factor(environment)))
-# 
-#     test_data <- S2_MET_BLUEs_tomodel %>%
-#       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
-#       mutate(line_name = as.character(line_name))
-# 
-#     # Iterate over the list and predict
-#     pred_list <- train_data_list %>%
-#       map(~gblup(K = K, train = ., test = test_data))
-# 
-#     # Add to the results
-#     results_out[[i]] <- data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list, "accuracy"))
-# 
-#   }
-# 
-#   # Add the results list to the core_df and return
-#   core_df %>%
-#     mutate(out = results_out) %>%
-#     select(-pred_environment, -core)
-# 
-# })
-# 
-# 
-# cluster_pred_out_window <- bind_rows(cluster_pred_out_window)
-
-
-
 # ## Local machine
-# cluster_pred_out_window <- clusters_to_model %>%
+# environment_window_pred_out <- environment_rank_tomodel %>%
 #   group_by(set, trait, validation_environment, model) %>%
 #   do({
 #     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
 #     df <- .
 
 # Parallelize
-cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(core_df) {
-  # core_df <- clusters_to_model_split[[1]]
+environment_window_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN = function(core_df) {
+  # core_df <- environment_rank_tomodel_split[[1]]
 
   results_out <- vector("list", nrow(core_df))
 
@@ -292,37 +193,44 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
     # Create a list of training data
     train_data_list <- envs %>%
       map(~filter(S2_MET_BLUEs_tomodel, trait == tr, environment %in% ., line_name %in% tp_geno)) %>%
-      map(~mutate(., env = as.factor(environment)))
+      map(~mutate(., environment = as.factor(environment)))
     
     test_data <- S2_MET_BLUEs_tomodel %>%
       filter(line_name %in% vp_geno, environment == val_env, trait == tr) %>%
       mutate(line_name = as.character(line_name))
     
-    # ## Calculate fixed effects, then predict
-    # # list of formulae
-    # form_list <- train_data_list %>%
-    #   map(~if (n_distinct(.$environment) == 1) formula(value ~ -1 + line_name) else formula(value ~ -1 + line_name + environment))
-    # 
-    # blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x, contrasts = list(environment = "contr.sum"))) %>%
-    #   map(coef) %>%
-    #   map(~data_frame(line_name = names(.), value = .) %>%
-    #         filter(str_detect(line_name, "line_name")) %>%
-    #         mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-    #                env = "mean", std_error = 0))
+    if (!fit_env) {
+      
+      ## Calculate fixed effects, then predict
+      # list of formulae
+      form_list <- train_data_list %>%
+        map(~{if (n_distinct(.$environment) == 1) formula(value ~ line_name) else formula(value ~ line_name + environment)})
+      
+      blues_list <- map2(.x = train_data_list, .y = form_list, ~lm(.y, data = .x)) %>%
+        map(~effects::Effect("line_name", .) %>% as.data.frame()) %>%
+        map(~select(., line_name, value = fit) %>% 
+              mutate(std_error = 0, environment = "mean", line_name = factor(line_name, levels = c(tp_geno, vp_geno))))
+      
+      pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = fit_env))
+      
+      
+    } else {
+      
+      # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
+      blues_list <- train_data_list
+      
+      # Iterate over the list and predict
+      pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = fit_env))
+      
+    }
     
-    
-    # Fit a mixed model that calculates the fixed effect of environment and random effect of genotype
-    blues_list <- train_data_list
-    
-    # Iterate over the list and predict
-    pred_list_fixed <- map(blues_list, ~gblup(K = K, train = ., test = test_data, fit.env = TRUE))
-    
-    # Return results
+    # # Return results
     # data.frame(window = seq_along(envs), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+    # 
+    # }) %>% ungroup()
+    
     results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
     
-    
-    # }) %>% ungroup()
     
   }
 
@@ -333,13 +241,10 @@ cluster_pred_out_window <- mclapply(X = clusters_to_model_split, FUN = function(
 }, mc.cores = n_core)
     
     
-# cluster_pred_out_window <- ungroup(cluster_pred_out_window)
-cluster_pred_out_window <- bind_rows(cluster_pred_out_window)
-
 
 # Save the results
 save_file <- file.path(result_dir, "distance_rank_predictions.RData")
-save("cluster_pred_out_window", "cluster_pred_out", file = save_file)
+save("environment_rank_pred_out", "environment_window_pred_out", file = save_file)
 
 
 

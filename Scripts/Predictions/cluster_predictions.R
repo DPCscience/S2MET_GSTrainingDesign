@@ -95,40 +95,41 @@ for (i in seq(nrow(cluster_train_test))) {
   
 
 
-## Split the clusters for parallelization
-clusters_split <- cluster_train_test %>%
-  unnest(data) %>%
-  assign_cores(df = ., n_core = n_core) %>%
-  split(.$core)
+# ## Split the clusters for parallelization
+# clusters_split <- cluster_train_test %>%
+#   unnest(data) %>%
+#   assign_cores(df = ., n_core = n_core) %>%
+#   split(.$core)
 
 
-# ## Iterate over trait, model, and validation environments
-# cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
-# 
-#   # #
-#   # r = 1
-#   # core_df <- clusters_split[[r]]
-#   # #
-# 
-#   results_out <- vector("list", nrow(core_df))
-# 
-#   ## Iterate over rows
-#   for (i in seq_along(results_out)) {
-#     
-#     # Grab the data
-#     row <- core_df[i,]
-    
+## Iterate over trait, model, and validation environments
+cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
+
+  # #
+  # r = 1
+  # core_df <- clusters_split[[r]]
+  # #
+
+  results_out <- vector("list", nrow(core_df))
+
+  ## Iterate over rows
+  for (i in seq_along(results_out)) {
+
+    # Grab the data
+    row <- core_df[i,]
+
     ##
     ##
 
    
-cluster_predictions <- cluster_train_test %>%
-  unnest(data) %>%
-  group_by(set, model, trait, val_environment) %>%
-  do(out = {
-    
-    row <- .
-    
+# cluster_predictions <- cluster_train_test %>%
+#   unnest(data) %>%
+#   group_by(set, model, trait, val_environment) %>%
+#   do(out = {
+#     
+#     row <- .
+#     
+#     ##
     
     ## Run the base predictions
     base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
@@ -154,23 +155,28 @@ cluster_predictions <- cluster_train_test %>%
         map_dbl(~gblup(K = K, train = ., test = row$test[[1]], fit.env = TRUE)$accuracy)
       
     }
+
+  #   ##
+  #       
+  #   list(base = base_pred, random = random_pred)
+  #   
+  # }) %>% ungroup()
+  # 
+  # ##
+  
     
-    list(base = base_pred, random = random_pred)
-    
-  }) %>% ungroup()
-    
-#     # Add predictions to the list
-#     results_out[[i]] <- list(base = base_pred, random = random_pred)
-#     
-#   }
-# 
-#   core_df %>%
-#     mutate(out = results_out) %>%
-#     select(-core, -train, -test)
-# 
-# }, mc.cores = n_core) # Close the parallel operation
-# 
-# cluster_predictions <- bind_rows(cluster_predictions)
+    # Add predictions to the list
+    results_out[[i]] <- list(base = base_pred, random = random_pred)
+
+  }
+
+  core_df %>%
+    mutate(out = results_out) %>%
+    select(-core, -train, -test)
+
+}, mc.cores = n_core) # Close the parallel operation
+
+cluster_predictions <- bind_rows(cluster_predictions)
 
 
 
