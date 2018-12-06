@@ -393,7 +393,7 @@ varGE_components <- env_r %>%
 varGE_components %>%
   mutate(heterogeneity = str_c(round(V, 3), " (", round(V_prop, 2) * 100, "%)"), 
          lackCorrelation = str_c(round(L, 3), " (", round(L_prop, 2) * 100, "%)")) %>% 
-  select(population, trait, heterogeneity, lackCorrelation) %>% 
+  select(population, trait, heterogeneity, lackCorrelation) %>% w
   gather(grp, value, -trait, -population) %>% 
   spread(grp, value)
 

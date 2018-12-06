@@ -94,6 +94,9 @@ environment_loeo_predictions_analysis2017 <- environment_loeo_predictions_geno_m
 
 
 
+environment_loeo_predictions_analysis
+
+
 
 
 
@@ -166,15 +169,15 @@ cluster_pred_fit_effects <- cluster_pred_fit %>%
 
 ## Plot the effect of model
 g_model_effect <- cluster_pred_fit_effects %>% 
-  filter(set == "complete") %>%
   unnest(model_effects) %>% 
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
+  mutate(model = factor(model, levels = dist_method_abbr),
+         set = str_to_title(set)) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
   geom_point() + 
   geom_errorbar(width = 0.5) +
   # facet_wrap(~trait, scales = "free") +
-  facet_grid(~ trait) +
+  facet_grid(trait ~ set) +
   scale_color_manual(values = dist_colors) +
   scale_y_continuous(breaks = pretty) +
   ylab("Accuracy") +
