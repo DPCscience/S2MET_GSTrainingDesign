@@ -19,10 +19,13 @@ source(file.path(repo_dir, "source_MSI.R"))
 # ## Run on a local machine
 # repo_dir <- getwd()
 # source(file.path(repo_dir, "source.R"))
+# 
+# load(file.path(result_dir, "distance_rank_predictions.RData"))
+
 
 
 ## Number of cores
-n_core <- 16
+n_core <- 32
 n_core <- detectCores()
 
 
@@ -73,29 +76,39 @@ environment_rank_tomodel_split <- environment_rank_tomodel %>%
   split(.$core)
 
 
+# ### Predict missing combinations in the results
+# observed_results <- environment_rank_pred_out %>% 
+#   bind_rows() %>% 
+#   select(trait:model)
+# 
+# missing_results <- setdiff(select(environment_rank_tomodel, -training_environment), observed_results)
+
+
+
 ## Should the fixed effect of environment be fitted?
 fit_env <- FALSE
 
 
-# ## Local machine
-# ##
-# environment_rank_pred_out <- environment_rank_tomodel %>%
-#   group_by(mat_set, set, trait, validation_environment, model) %>%
-#   do({
-#     # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
-#     df <- .
-    
+## Local machine
+##
+environment_rank_pred_out <- environment_rank_tomodel %>%
+# missing_rank_pred_out <- missing_results %>% left_join(., environment_rank_tomodel) %>%
+  group_by(mat_set, set, trait, validation_environment, model) %>%
+  do({
+    # df <- clusters_to_model %>% filter_at(vars(validation_environment, trait, model), all_vars(. == .[1]))
+    df <- .
+
 
 ### Comment below for local machine
 
-# Parallelize
-environment_rank_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN = function(core_df) {
-  # core_df <- environment_rank_tomodel_split[[1]]
-
-  results_out <- vector("list", nrow(core_df))
-
-  for (i in seq_along(results_out)) {
-    df <- core_df[i,]
+# # Parallelize
+# environment_rank_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN = function(core_df) {
+#   # core_df <- environment_rank_tomodel_split[[1]]
+# 
+#   results_out <- vector("list", nrow(core_df))
+# 
+#   for (i in seq_along(results_out)) {
+#     df <- core_df[i,]
 
     ### Comment above here for local machine
     
@@ -138,21 +151,21 @@ environment_rank_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN = 
 
     }
     
-  #   # Return results
-  #   data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-  # 
-  # 
-  # }) %>% ungroup()
+    # Return results
+    data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+
+
+  }) %>% ungroup()
     
-    results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
-
-  }
-
-  core_df %>%
-    mutate(out = results_out) %>%
-    select(-core)
-
-}, mc.cores = n_core)
+#     results_out[[i]] <- data.frame(n_e = map_dbl(envs, length), accuracy = map_dbl(pred_list_fixed, "accuracy"))
+# 
+#   }
+# 
+#   core_df %>%
+#     mutate(out = results_out) %>%
+#     select(-core)
+# 
+# }, mc.cores = n_core)
 
 
 

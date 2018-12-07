@@ -658,13 +658,29 @@ ggsave(filename = "heritability_expanded_tp.jpg", plot = g_herit, path = fig_dir
 ## Estimate genetic correlations using the BLUEs from each environment
 ## First estimate using only the TP with genotypes
 tp_BLUEs <- S2_MET_BLUEs %>%
-  filter(line_name %in% tp_geno)
+  filter(line_name %in% tp)
 
+tp_BLUEs_use <- tp_BLUEs %>%
+  select(line_name, environment, trait, value)
+
+## Cross all environments
+env_shared_tp <- tp_BLUEs_use %>% 
+  split(.$trait) %>%
+  map(~{
+    df <- .
+    crossing(environment = unique(df$environment), environment2 = environment) %>%
+      filter(environment != environment2) %>%
+      mutate(shared = map2_dbl(.x = environment, .y = environment2, .f = ~{
+        length(intersect(subset(df, environment == .x, line_name, drop = T), subset(df, environment == .y, line_name, drop = T))) }))
+  })
+    
 env_cor_tp <- tp_BLUEs %>% 
   split(.$trait) %>% 
   map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
         as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
         cor(., use = "pairwise.complete.obs"))
+
+
 
 # Now use all data
 env_cor_all <- S2_MET_BLUEs %>% 
