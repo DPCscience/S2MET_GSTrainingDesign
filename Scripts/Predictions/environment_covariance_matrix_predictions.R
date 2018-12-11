@@ -364,6 +364,13 @@ save("environment_loeo_realistic_predictions", file = save_file)
 
 
 
+
+
+
+
+
+
+
 #### Testing #####
 
 
@@ -376,6 +383,7 @@ library(broom)
 
 # Load the clustering results
 load(file.path(result_dir, "distance_method_results.RData"))
+
 
 # Modify the BLUEs for predictions
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
@@ -538,6 +546,112 @@ model_fit <- accuracy_data %>%
 effects::Effect("model", model_fit$fit[[2]]) %>% plot
 
 
+
+
+### Test disconnected CV versus VP predictions
+## Sample environments
+sample_envs <- sample(x = reduce(complete_train_env, intersect), size = 10)
+
+
+# Modify the BLUEs for predictions
+S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
+  filter(line_name %in% c(tp_geno, vp_geno),
+         trait == "GrainYield",
+         environment %in% sample_envs) %>%
+  mutate_at(vars(environment:line_name), as.factor)
+
+## Subset the correlation matrix
+env_cov_use <- filter(env_rank_df, model == "pheno_dist", trait %in% unique(S2_MET_BLUEs_use$trait)) %>% 
+  mutate(cov = map(cov, ~.[sample_envs, sample_envs])) %>% 
+  select(trait, cov)
+
+# Number of cv iterations
+cv_iter <- 10
+# Testing set size
+cv_test_size <- length(vp_geno)
+
+
+## Create training/testing cv sets
+cv_test <- replicate(n = cv_iter, sample(tp_geno, size = cv_test_size), simplify = FALSE)
+cv_train <- map(cv_test, ~setdiff(tp_geno, .))
+
+
+## Create training and testing sets for each trait
+train_test <- distinct(S2_MET_BLUEs_use, trait, environment) %>% 
+  crossing(., data_frame(iter = seq(cv_iter), cv_train_set = cv_train, cv_test_set = cv_test)) %>%
+  mutate(cv_train = map2(environment, cv_train_set, ~filter(S2_MET_BLUEs_use, line_name %in% .y, environment != .x)),
+         cv_test = map2(environment, cv_test_set, ~filter(S2_MET_BLUEs_use, line_name %in% .y, environment == .x)),
+         vp_test = map(environment, ~filter(S2_MET_BLUEs_use, line_name %in% vp_geno, environment == .))) %>%
+  select(-contains("set")) %>%
+  gather(test_set, data, cv_test, vp_test)
+  
+  
+## Line mean predictions (ignores GxE)
+mean_predictions <- train_test %>%
+  group_by(trait, environment, iter, test_set) %>%
+  do(out = gblup(K = K, train = .$cv_train[[1]], test = .$data[[1]], fit.env = TRUE)) %>%
+  ungroup()
+
+## Line x environment predictions using correlations
+ge_predictions <- train_test %>%
+  group_by(trait, environment, iter, test_set) %>%
+  do({
+    df <- .
+    
+    # model.frame
+    mf <- model.frame(value ~ line_name + environment, data = df$cv_train[[1]])
+    y <- model.response(mf)
+    X <- model.matrix(~ 1 + environment, droplevels(mf))
+    
+    # Kronecker of K and E
+    E <- subset(env_cov_use, trait == df$trait, cov, drop = T)[[1]]
+    KE <- kronecker(E, K, make.dimnames = TRUE)
+    
+    # Random effect of g
+    Zg <- model.matrix(~ -1 + line_name, mf)
+    colnames(Zg) <- colnames(K)
+    # Random effect of gxe
+    Zge <- model.matrix(~ -1 + line_name:environment, data = mf)
+    colnames(Zge) <- colnames(KE)
+    # 
+    
+    ## fit the model
+    fit <- mixed.solve(y = y, X = X, Z = Zge, K = KE)
+    
+    predictions <- data.frame(term = names(fit$u), pred_value = fit$u, row.names = NULL, stringsAsFactors = FALSE) %>% 
+      separate(term, c("environment", "line_name"), sep = ":")
+    
+    # fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = K), ge = list(Z = Zge, K = KE)), silent = TRUE)
+    # 
+    # predictions <- full_join(x = fix_data_frame(fit$u.hat$g, newcol = "line_name"), y = separate(fix_data_frame(fit$u.hat$ge), term, c("environment", "line_name"), sep = ":"), by = c("line_name")) %>% 
+    #   mutate(pred_value = {rowSums(select(., contains("T1")))}) %>% 
+    #   select(-contains("T1"))
+    
+    
+    left_join(df$data[[1]], predictions, by = c("environment", "line_name")) %>% 
+      summarize(accuracy = cor(value, pred_value))
+    
+  }) %>% ungroup()
+
+
+
+## Combine results
+predictions_out <- bind_rows(
+  mutate(mean_predictions, accuracy = map_dbl(out, "accuracy"), model = "G"),
+  mutate(ge_predictions, model = "GE")
+) %>% select(-out)
+
+
+## model
+## 
+predictions_out1 <- predictions_out %>%
+  mutate_at(vars(model, test_set, iter), as.factor)
+
+
+
+fit <- lmer(accuracy ~ model + test_set + model:test_set + (1|environment) + (1|environment:test_set) + (1|iter), data = predictions_out1)
+
+plot(effects::allEffects(fit))
 
 
 

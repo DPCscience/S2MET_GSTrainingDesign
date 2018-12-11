@@ -25,7 +25,7 @@ load(file.path(result_dir, "environmental_covariable_distance_mat.RData"))
 # Load the genetic correlation estimates
 load(file.path(result_dir, "environmental_genetic_correlations.RData"))
 # Load the two-way geno/env tables
-load(file.path(result_dir, "genotype_environment_ammi_analysis.RData"))
+load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 # # Create a new data.frame to hold the different datasets
 # S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
@@ -236,6 +236,7 @@ pld_mat_complete <- data_frame(set = "complete", model = "pheno_location_dist", 
   mutate(data = map(data, cmdscale),
          cluster = map(data, ~env_mclust(data = ., min_env = min_env)))
 
+
 ## Environmental covariates
 ec_mat_complete <- ec_mats %>% 
   filter(set == "complete", trait %in% traits) %>% 
@@ -252,6 +253,11 @@ ec_mat_complete <- ec_mats %>%
 cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_complete, ec_mat_complete)
 
   
+
+
+
+
+
 ## Realistic
 # GCD
 gcd_mat_realistic <- data_frame(set = "realistic", model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list,
@@ -290,7 +296,7 @@ cluster_df <- bind_rows(cluster_df_complete, cluster_df_realistic) %>%
 
 ### Test variance components given clustering
 cluster_df_tomodel <- cluster_df %>% 
-  filter(set == "complete") %>% 
+  # filter(set == "complete") %>% 
   unnest(cluster) %>% 
   left_join(filter(S2_MET_BLUEs, line_name %in% tp))
 
@@ -298,7 +304,7 @@ cluster_df_tomodel <- cluster_df %>%
 control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
 
 cluster_varcomp <- cluster_df_tomodel %>% 
-  group_by(model, trait) %>%
+  group_by(set, model, trait) %>%
   filter(n_distinct(cluster) > 1) %>% # Pass over trait/models that forced a single cluster
   do({
     df <- .
@@ -327,9 +333,9 @@ cluster_varcomp <- cluster_df_tomodel %>%
   })
     
 single_cluster_cases <- cluster_df_tomodel %>% 
-  group_by(model, trait) %>%
+  group_by(set, model, trait) %>%
   filter(n_distinct(cluster) == 1) %>%
-  distinct(model, trait)
+  distinct(set, model, trait)
   
 
 ## Plot
@@ -337,7 +343,7 @@ g_cluster_varcomp <- cluster_varcomp %>%
   mutate(varprop = variance / sum(variance)) %>%
   ggplot(aes(x = model, y = varprop, fill = term)) +
   geom_col() +
-  facet_grid(trait ~ .) +
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x") +
   theme_presentation2() +
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 35, hjust = 1))
   
@@ -346,11 +352,11 @@ ggsave(filename = "cluster_varcomp.jpg", plot = g_cluster_varcomp, path = fig_di
 
 # Save a table
 cluster_varcomp_table <- cluster_varcomp %>%
-  ungroup() %>%
+  group_by(set, model, trait) %>%
   mutate(varprop = variance / sum(variance), 
          annotation = paste0(formatC(x = varprop, digits = 2), ifelse(p.value < 0.05, "*", "")), 
          annotation = str_remove_all(annotation, "NA")) %>%
-  select(trait, model, term, annotation) %>%
+  select(set, trait, model, term, annotation) %>%
   spread(term, annotation)
 
 write_csv(x = cluster_varcomp_table, path = file.path(fig_dir, "cluster_varcomp_table.csv"))

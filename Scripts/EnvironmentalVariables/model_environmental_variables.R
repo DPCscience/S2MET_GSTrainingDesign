@@ -25,7 +25,7 @@ library(optimx)
 # Load the environmental variables
 load(file.path(data_dir, "environmental_data_compiled.RData"))
 # Load the AMMI results
-load(file.path(result_dir, "genotype_environment_ammi_analysis.RData"))
+load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 # Significance level
 alpha <- 0.05
@@ -109,93 +109,7 @@ env_means_all %>%
 # This is not surprising
 
     
-# 
-# 
-# ## Calculating using only the tp
-# env_means_tp <- S2_MET_BLUEs %>%
-#   filter(line_name %in% tp) %>%
-#   mutate_at(vars(line_name, environment), as.factor) %>%
-#   group_by(trait) %>%
-#   do({
-#     
-#     df <- droplevels(.)
-#     
-#     print(unique(df$trait))
-#     
-#     # Control and weights
-#     control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-#     wts <- df$std_error^2
-#     
-#     # Formula
-#     form <- value ~ (1|line_name) + environment
-#     # Fit the model
-#     fit <- lmer(formula = form, data = df, control = control, weights = wts, contrasts = list(environment = "contr.sum"))
-#     
-#     # Get the fixed coefficients
-#     env_eff <- fixef(fit)
-#     # Tidy
-#     data_frame(environment = levels(df$environment), 
-#                h = c(env_eff[-1], -sum(env_eff[-1])))  })
-# 
-# ## Calculate the remaining environments using just the vp
-# ## Calculating using only the tp
-# env_means_vp <- S2_MET_BLUEs %>% 
-#   group_by(environment) %>%
-#   filter(!any(line_name %in% tp)) %>%
-#   ungroup() %>%
-#   mutate_at(vars(line_name, environment), as.factor) %>%
-#   group_by(trait) %>%
-#   do({
-#     
-#     df <- droplevels(.)
-#     
-#     print(unique(df$trait))
-#     
-#     # Control and weights
-#     control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-#     wts <- df$std_error^2
-#     
-#     # Formula
-#     form <- value ~ (1|line_name) + environment
-#     # Fit the model
-#     fit <- lmer(formula = form, data = df, control = control, weights = wts, contrasts = list(environment = "contr.sum"))
-#     
-#     # Get the fixed coefficients
-#     env_eff <- fixef(fit)
-#     # Tidy
-#     data_frame(environment = levels(df$environment), 
-#                h = c(env_eff[-1], -sum(env_eff[-1])))  })
-#     
-# 
-# ## Calculate correlations
-# env_means_tp %>% 
-#   left_join(env_means_all, by = c("trait", "environment")) %>% 
-#   group_by(trait) %>% 
-#   summarize(env_mean_cor = cor(h.x, h.y))
-# 
-# env_means_tp %>% 
-#   left_join(env_means_all, by = c("trait", "environment")) %>%
-#   ggplot(aes(x = h.x, y = h.y)) +
-#   geom_point() +
-#   facet_wrap(~ trait, scales = "free", ncol = 1) +
-#   ylab("Environmental mean (n = 233)") +
-#   xlab("Environmental mean (n = 183)")
-# 
-# 
-# env_means_vp %>% 
-#   left_join(env_means_all, by = c("trait", "environment")) %>% 
-#   group_by(trait) %>% 
-#   summarize(env_mean_cor = cor(h.x, h.y))
-# 
-# env_means_vp %>% 
-#   left_join(env_means_all, by = c("trait", "environment")) %>%
-#   ggplot(aes(x = h.x, y = h.y)) +
-#   geom_point() +
-#   facet_wrap(~ trait, scales = "free", ncol = 1) +
-#   ylab("Environmental mean (n = 233)") +
-#   xlab("Environmental mean (n = 183)")
-# 
-# 
+
 
 
 
@@ -230,6 +144,16 @@ ec_env_df <- bind_rows(mutate(one_year_env_df, ec_group = "one_year"),
                        mutate(multi_year_env_df, ec_group = "multi_year"))
 
 
+## A functio to scale a vector to dot product sum = 1
+scale_length <- function(x) {
+  # First center at 0
+  x1 <- scale(x, center = TRUE, scale = FALSE)
+  # Next scale to obtain 1 as the squared vector length
+  scale(x1, center = FALSE, scale = sqrt(sum(x1^2)))
+}
+  
+
+
 # Remove intervals with insufficient observations
 ec_env_df1 <- ec_env_df %>% 
   filter(str_detect(variable, "interval")) %>%
@@ -240,11 +164,12 @@ ec_env_df1 <- ec_env_df %>%
   ungroup() %>%
   unite(variable, interval, variable, sep = "_") %>%
   bind_rows(., filter(ec_env_df, !str_detect(variable, "interval"))) %>%
-  # Center each covariate
-  group_by(ec_group, variable) %>%
-  # mutate(value = scale(value, scale = FALSE)) %>%
-  mutate(value = scale(value)) %>%
-  ungroup()
+  # Center each covariate and scale to achive the squared length of the vector = 1
+  split(list(.$ec_group, .$variable)) %>%
+  map_df(~mutate(., scaled_value = scale_length(x = value),
+              center = attr(scaled_value, "scaled:center"),
+              scale = attr(scaled_value, "scaled:scale"),
+              scaled_value = as.numeric(scaled_value)))
 
 
 
@@ -420,8 +345,18 @@ env_mean_cor_set_overlap <- env_mean_cor_sig %>%
   map(~select(., trait, ec_group, variable)) %>% 
   reduce(., dplyr::intersect)
 
+# trait       ec_group   variable          
+# 1 GrainYield  multi_year interval_1_TSEASON
+# 2 GrainYield  one_year   interval_2_PPT    
+# 3 HeadingDate multi_year interval_1_TSEASON
+# 4 HeadingDate multi_year om_r_topsoil      
+# 5 PlantHeight multi_year interval_2_TMAX   
+# 6 PlantHeight multi_year annual_TSEASON    
+# 7 PlantHeight one_year   interval_1_TRANGE 
+# 8 PlantHeight one_year   interval_1_TSEASON
 
-## Plot the significant results
+
+## Plot the overlapping results
 g_mean_cor <- env_mean_cor_set_overlap %>% 
   split(., .$ec_group) %>%
   map(~{
@@ -602,7 +537,7 @@ ec_score_df_use <- ammi_out %>%
     
 env_ipca_cor1 <- ec_score_df %>% 
   group_by(set, ec_group, trait, variable, PC) %>% 
-  do(test = cor.test(.$score, .$value)) %>%
+  do(test = cor.test(.$score, .$scaled_value)) %>%
   ungroup() %>%
   mutate(cor = map_dbl(test, "estimate"),
          pvalue = map_dbl(test, "p.value"),
@@ -630,7 +565,7 @@ for (i in seq(nrow(env_ipca_mr))) {
   ## Run correlations and rank the ECs by correlation
   cors <- df %>% 
     group_by(variable) %>% 
-    summarize(correlation = cor(score, value)) %>% 
+    summarize(correlation = cor(score, scaled_value)) %>% 
     arrange(desc(abs(correlation)))
   
   # Extract EC names in order of decreasing corelation
@@ -644,8 +579,8 @@ for (i in seq(nrow(env_ipca_mr))) {
   # Create a model frame
   df1 <- df %>% 
     filter(PC == "PC1") %>%
-    select(trait, environment, score, variable, value) %>% 
-    spread(variable, value)
+    select(trait, environment, score, variable, scaled_value) %>% 
+    spread(variable, scaled_value)
   
   # Base model
   fit <- lm(formula = base_formula, data = df1)
@@ -723,7 +658,7 @@ env_ipca_cor_set_overlap <- env_ipca_cor_sig %>%
   reduce(., dplyr::intersect)
 
 
-## Plot the significant results
+## Plot the overlapping results
 g_ipca_cor <- env_ipca_cor_set_overlap %>% 
   split(., .$ec_group) %>%
   map(~{

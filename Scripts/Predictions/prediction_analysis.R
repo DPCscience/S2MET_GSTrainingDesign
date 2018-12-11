@@ -796,12 +796,6 @@ unnest(cluster_predictions_random_analysis, ranef_test) %>% filter(!str_detect(t
 
 
 
-
-
-
-
-
-
 ## Alternatively, analyze the accuracy of only the 2017 environments
 # Fit a model per trait
 cluster_predictions_analysis2017 <- cluster_predictions_out1 %>%
@@ -871,6 +865,154 @@ g_cluster_model_effect1 <- bind_rows(cluster_predictions_analysis, cluster_predi
 
 ## Save
 ggsave(filename = "cluster_model_effect_2017.jpg", plot = g_cluster_model_effect1, path = fig_dir, width = 8, height = 8, dpi = 1000)
+
+
+
+
+## Cross validation cluster predictions
+cluster_cv_predictions_out <- cluster_cv_predictions %>%
+  mutate(cv_accuracy = map_dbl(out, 1),
+         vp_accuracy = map_dbl(out, "base_vp")) %>%
+  gather(design, accuracy, cv_accuracy, vp_accuracy) %>%
+  mutate(zscore = ztrans(accuracy),
+         model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model),
+         dist_method = str_replace_all(model, dist_method_replace),
+         model = factor(abbreviate(dist_method), levels = dist_method_abbr),
+         design = as.factor(design)) %>%
+  select(-out)
+  
+
+
+## Model formula
+## Models fitted individually for each set and trait
+## zscore ~ model + design + model:design + (1|cluster:model) + (1|val_environment:cluster)
+## 
+
+
+# Fit a model per trait
+cluster_cv_predictions_analysis <- cluster_cv_predictions_out %>%
+  group_by(set, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
+
+## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
+for (i in seq(nrow(cluster_cv_predictions_analysis))) {
+  df <- cluster_cv_predictions_analysis$data[[i]] %>%
+    droplevels()
+  
+  fit <- lmer(formula = zscore ~ model + design + model:design + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster) + 
+                (1|cv_rep:val_environment), 
+              data = df, contrasts = list(model = "contr.sum", design = "contr.sum"))
+
+  fit_summary <- data_frame(
+    fitted = list(fit),
+    mean_accuracy = fixef(fit)[1],
+    model_design_effects = list(Effect(c("model", "design"), fit)),
+    design_effects = list(Effect("design", fit)),
+    nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
+    fixef_test = list(tidy(anova(fit))),
+    ranef_test = list(tidy(ranova(fit)))
+  ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
+  
+  # Add the summary to the DF
+  cluster_cv_predictions_analysis$out[[i]] <- fit_summary
+  
+}
+
+cluster_cv_predictions_analysis <- cluster_cv_predictions_analysis %>%
+  select(-data) %>% 
+  unnest(out)
+
+
+## ANOVAs
+unnest(cluster_cv_predictions_analysis, fixef_test)
+
+## Model was sometimes significant
+## Design was always signficiant
+
+
+## RANOVAs
+unnest(cluster_cv_predictions_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
+
+## Environment %in% cluster and cluster %in% model was more often not significant,
+## which should be expected under random conditions
+
+## Plot the effect of model and prediction design
+g_cluster_cv_model_effect_complete <- cluster_cv_predictions_analysis %>%
+  filter(set == "complete") %>%
+  unnest(model_design_effects) %>%
+  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set),
+         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
+  mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) + 
+  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 2)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ design, scales = "free_x", space = "free_x") +
+  ylab("Prediction accuracy") + 
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
+
+g_cluster_cv_model_effect_realistic <- cluster_cv_predictions_analysis %>%
+  filter(set == "realistic") %>%
+  unnest(model_design_effects) %>%
+  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set),
+         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
+  mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) + 
+  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 1)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ design, scales = "free_x", space = "free_x") +
+  ylab("Prediction accuracy") + 
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
+
+
+
+## Save
+ggsave(filename = "cluster_cv_model_design_effect_complete.jpg", plot = g_cluster_cv_model_effect_complete, path = fig_dir, 
+       width = 6, height = 8, dpi = 1000)
+
+## Save
+ggsave(filename = "cluster_cv_model_design_effect_realistic.jpg", plot = g_cluster_cv_model_effect_realistic, path = fig_dir, 
+       width = 6, height = 8, dpi = 1000)
+
+
+
+## Plot the effect of design
+
+g_cluster_cv_design_effect <- cluster_cv_predictions_analysis %>%
+  unnest(design_effects) %>%
+  mutate(set = str_to_title(set),
+         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
+  mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = design, y = fit, ymin = lower, ymax = upper, color = design)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) + 
+  scale_color_brewer(name = "Prediction design", palette = "Set1", guide = FALSE) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ set, scales = "free_y", space = "free_x") +
+  ylab("Prediction accuracy") + 
+  xlab("Design") + 
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "bottom", legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
+
+
+## Save
+ggsave(filename = "cluster_cv_design_effect.jpg", plot = g_cluster_cv_design_effect, path = fig_dir, 
+       width = 6, height = 8, dpi = 1000)
+
+
 
 
 
