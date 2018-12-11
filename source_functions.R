@@ -341,15 +341,39 @@ calc_variance <- function(data, random_effect = c("line_name", "environment", "l
 
 ## A generic prediction function that takes training and test data and returns
 ## PGVs and accuracy
-gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL, add.mu = FALSE) {
+gblup <- function(formula, random, K, train, test, fun = c("rrblup", "sommer"), fit.env = TRUE, bootreps = NULL, add.mu = FALSE) {
   
-  if (missing(formula)) formula <- value ~ line_name + environment
+  if (missing(formula)) formula <- value ~ 1 + environment
+  if (missing(random)) random <- ~ line_name
+  
+  ## separate random and fixed terms
+  fixed_terms <- attr(terms(formula), "term.labels")
+  random_terms <- attr(terms(random), "term.labels")
+
+  ## Combine fixed and random to one formula
+  formula1 <- as.formula(paste(paste(as.character(formula)[c(2,1,3)], collapse = " "), as.character(random)[-1], sep = " + "))
   
   # Create a model.frame
-  mf <- model.frame(formula, weights = std_error, data = train)
+  mf <- model.frame(formula1, weights = std_error, data = train)
   
-  # Verify that the number of levels of 'line_name' is equal to the dimensions of K
-  stopifnot(all(nlevels(mf$line_name) == dim(K)))
+  
+  ## If the number of random terms is > 1, K must be a list
+  if (length(random_terms) == 1) {
+    stopifnot(levels(mf[[random_terms]]) %in% colnames(K))
+    
+    K <- list(K)
+    names(K) <- random_terms
+    
+  } else {
+    if (!is.list(K)) stop("If the number of random terms is > 1, K must be a list of relationship matrices.")
+    
+    ## Test names
+    name_test <- map2_lgl(.x = random_terms, .y = names(K1), ~.x == .y)
+    if (!all(name_test)) stop("If K is a list, the names of the list must match the random terms")
+    
+  }
+   
+  
   
   fun <- match.arg(fun)
   
@@ -357,17 +381,33 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
   
   # Vectors and matrices
   y <- model.response(mf)
-  if (nlevels(mf$environment) <= 1 | !fit.env) {
-    X <- model.matrix(~ 1, mf) 
-  } else {
-    X <- model.matrix(~ 1 + environment, mf)
+  
+  
+  if (nlevels(mf[[fixed_terms]]) <= 1 | !fit.env) {
+    X <- model.matrix(~ 1, droplevels(mf))
+  
+    } else {
+    X <- model.matrix(formula, droplevels(mf))
+    
   }
-  Z <- `colnames<-`(model.matrix(~ -1 + line_name, mf), colnames(K))
+  
+  ## Random effects
+  Z_list <- list()
+  
+  for (term in random_terms) {
+    Zi <- model.matrix(as.formula(paste0("~ -1 + ", term)), mf)
+    colnames(Zi) <- colnames(K[[term]])
+    Z_list[[term]] <- Zi
+    
+  }
+  
   
   # Split on function
   if (fun == "rrblup") {
+    # Can't run with > 1 random term
+    stopifnot(length(random_terms) == 1)
     
-    fit <- mixed.solve(y = y, Z = Z, K = K, X = X)
+    fit <- mixed.solve(y = y, Z = Z_list[[1]], K = K[[1]], X = X)
     
     # Extract PGVs
     pgv <- fit$u %>% 
@@ -378,11 +418,14 @@ gblup <- function(formula, K, train, test, fun = c("rrblup", "sommer"), fit.env 
     
   } else if (fun == "sommer") {
     
-    R <- solve(diag(mf$`(weights)`^2))
-    fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Z, K = K)), R = list(res = R), silent = TRUE)
+    # R <- solve(diag(mf$`(weights)`^2))
+    # fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Z, K = K)), R = list(res = R), silent = TRUE)
+    
+    random_list <- map2(Z_list, K, ~list(Z = .x, K = .y))
+    fit <- sommer::mmer(Y = y, X = X, Z = random_list, silent = TRUE)
   
     # Extract PGVs
-    pgv <- fit$u.hat$g
+    pgv <- fit$u.hat
     pgv <- data.frame(line_name = row.names(pgv), pred_value = pgv[,1], row.names = NULL, stringsAsFactors = FALSE)
     
     beta <- fit$beta.hat[1]

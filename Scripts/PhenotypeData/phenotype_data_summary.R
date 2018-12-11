@@ -20,6 +20,9 @@ library(ggridges)
 library(optimx)
 library(lme4qtl)
 library(cowplot)
+## ggrepel
+library(ggrepel)
+
 
 # Load the distance matrices
 load(file.path(result_dir, "distance_method_results.RData"))
@@ -27,6 +30,14 @@ load(file.path(result_dir, "distance_method_results.RData"))
 
 ## significance level
 alpha <- 0.05
+
+
+## Filter the BLUEs for the environments of interest
+S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
+  filter(environment %in% tp_vp_env,
+         trait %in% traits)
+
+
 
 
 ## Basic Summaries
@@ -37,7 +48,7 @@ alpha <- 0.05
 ## the proportion that are observed for each trait
 ## If a trait was not observed in an entire environment, that environment is not
 ## included in these calculations
-(prob_observed <- S2_MET_BLUEs %>% 
+(prob_observed <- S2_MET_BLUEs_use %>% 
     distinct(trait, environment, line_name) %>%
     mutate_at(vars(line_name, environment), as.factor) %>%
     mutate(observed = TRUE) %>%
@@ -49,16 +60,16 @@ alpha <- 0.05
     }))
 
 # trait           prop_obs
-# 1 GrainYield         0.866
-# 2 HeadingDate        0.901
-# 3 HeadingDateAGDD    0.901
-# 4 PlantHeight        0.910
+# 1 GrainYield         0.987
+# 2 HeadingDate        0.991
+# 3 HeadingDateAGDD    0.991
+# 4 PlantHeight        0.990
 
 
 ## Find the proportion of unbalance in the dataset for the TP (tp and tp_geno)
 (prob_observed <- list(tp = tp, tp_geno = tp_geno) %>% 
     map(~{
-       filter(S2_MET_BLUEs, line_name %in% .) %>%
+       filter(S2_MET_BLUEs_use, line_name %in% .) %>%
         distinct(trait, environment, line_name) %>%
         mutate_at(vars(line_name, environment), as.factor) %>%
         mutate(observed = TRUE) %>%
@@ -71,11 +82,11 @@ alpha <- 0.05
     }))
 
 
-# $tp
+# $`tp`
 # trait           prop_obs
-# 1 GrainYield         0.984
-# 2 HeadingDate        0.988
-# 3 HeadingDateAGDD    0.988
+# 1 GrainYield         0.985
+# 2 HeadingDate        0.989
+# 3 HeadingDateAGDD    0.989
 # 4 PlantHeight        0.988
 # 
 # $tp_geno
@@ -85,12 +96,33 @@ alpha <- 0.05
 # 3 HeadingDateAGDD    0.989
 # 4 PlantHeight        0.988
 
+## Create a table with the proportions of observed combinations for the TP and VP
+prop_observed_table <- data_frame(population = c("tp", "vp"), line_name = list(tp, vp)) %>%
+  mutate(prop_obs = map(line_name, ~{
+    filter(S2_MET_BLUEs_use, line_name %in% .) %>%
+      distinct(trait, environment, line_name) %>%
+      mutate_at(vars(line_name, environment), as.factor) %>%
+      mutate(observed = TRUE) %>%
+      split(.$trait) %>%
+      map_df(~{
+        droplevels(.) %>%
+          complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
+          summarize(trait = unique(trait), prop_obs = mean(observed))
+      }) }) ) %>%
+  unnest(prop_obs)
+
+prop_observed_table %>% 
+  spread(population, prop_obs) %>% 
+  write_csv(x = ., path = file.path(fig_dir, "population_prop_obs.csv"))
+
+
+
 
 
 ## Visualization of distributions
 
 # Sort on grain yield environmental mean
-env_order <- S2_MET_BLUEs %>% 
+env_order <- S2_MET_BLUEs_use %>% 
   mutate_if(is.character, as.factor) %>% 
   group_by(environment, trait) %>% 
   mutate(env_mean = mean(value, na.rm = TRUE)) %>% 
@@ -100,33 +132,18 @@ env_order <- S2_MET_BLUEs %>%
   pull(environment) %>% 
   unique()
 
-S2_MET_BLUEs_toplot <- S2_MET_BLUEs %>%
+S2_MET_BLUEs_toplot <- S2_MET_BLUEs_use %>%
   mutate(environment = parse_factor(environment, levels = env_order))
   
 
-
+## Plot
 g_met_dist <- S2_MET_BLUEs_toplot %>%
   ggplot(aes(x = value, y = environment, fill = environment)) +
   geom_density_ridges() +
   facet_grid(. ~ trait, scales = "free_x") +
   scale_fill_discrete(guide = FALSE) +
   ylab("Environment") +
-  xlab("Phenotypic Value") +
-  theme_acs()
-
-# Save it
-ggsave(filename = "met_trait_dist_agdd.jpg", plot = g_met_dist, path = fig_dir, width = 6, height = 5, dpi = 1000)
-
-
-## Remove HD in AGDD
-g_met_dist <- S2_MET_BLUEs_toplot %>%
-  filter(trait != "HeadingDateAGDD") %>%
-  ggplot(aes(x = value, y = environment, fill = environment)) +
-  geom_density_ridges() +
-  facet_grid(. ~ trait, scales = "free_x") +
-  scale_fill_discrete(guide = FALSE) +
-  ylab("Environment") +
-  xlab("Phenotypic Value") +
+  xlab("Phenotypic value") +
   theme_acs()
 
 # Save it
@@ -141,8 +158,9 @@ ggsave(filename = "met_trait_dist.jpg", plot = g_met_dist, path = fig_dir, width
 
 
 ## Combine data
-S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), 
-                                  mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) 
+S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs_use, population = "all"), 
+                                  mutate(filter(S2_MET_BLUEs_use, line_name %in% tp), population = "tp"),
+                                  mutate(filter(S2_MET_BLUEs_use, line_name %in% vp), population = "vp"))
 
 # Boot reps
 boot_reps <- 100
@@ -255,7 +273,7 @@ g_varprop <- stage_two_fits_GE_varprop %>%
         legend.position = "bottom")
 
 # Save
-ggsave(filename = "variance_components.jpg", plot = g_varprop, path = fig_dir, width = 6, height = 4, dpi = 1000)
+ggsave(filename = "variance_components.jpg", plot = g_varprop, path = fig_dir, width = 8, height = 4, dpi = 1000)
 
 
 ## Plot just the TP and remove AGDD heading date
@@ -271,7 +289,7 @@ g_varprop_tp <- stage_two_fits_GE_varprop %>%
         legend.position = "bottom")
 
 # Save
-ggsave(filename = "variance_components_tp.jpg", plot = g_varprop, path = fig_dir, width = 4, height = 4, dpi = 1000)
+ggsave(filename = "variance_components_tp.jpg", plot = g_varprop_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
 
 
 ## Look at the heritability and plot
@@ -284,18 +302,18 @@ g_herit <- stage_two_fits_GE %>%
   geom_errorbar(position = position_dodge(0.9), width = 0.5) +
   geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
   # geom_hline(aes(yintercept = unbiased_statistic)) +
-  scale_fill_brewer(palette = "Set1", name = "Population") +
+  scale_fill_brewer(palette = "Set2", name = NULL) +
   ylab("Heritability") +
   xlab("Trait") +
   labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
   theme_acs() +
-  theme(legend.position = c(0.15, 0.20))
+  theme(legend.position = c(0.20, 0.85), legend.direction = "horizontal")
 
-ggsave(filename = "heritability.jpg", plot = g_herit, path = fig_dir, width = 4, height = 4, dpi = 1000)
+ggsave(filename = "heritability.jpg", plot = g_herit, path = fig_dir, width = 6, height = 4, dpi = 1000)
 
 
 # Plot just the TP
-g_herit <- stage_two_fits_GE %>% 
+g_herit_tp <- stage_two_fits_GE %>% 
   filter(population == "tp") %>%
   mutate(h2 = map(h2, "heritability"), population = str_to_upper(population)) %>% 
   unnest(h2) %>% 
@@ -304,17 +322,14 @@ g_herit <- stage_two_fits_GE %>%
   geom_col(position = position_dodge(0.9)) + 
   geom_errorbar(position = position_dodge(0.9), width = 0.5) +
   geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
-  scale_fill_brewer(palette = "Set1", name = "Population") +
+  scale_fill_brewer(palette = "Set2", name = "Population", guide = FALSE) +
   ylab("Heritability") +
   xlab("Trait") +
   labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
   theme_acs() +
   theme(legend.position = c(0.15, 0.20))
 
-ggsave(filename = "heritability_tp.jpg", plot = g_herit, path = fig_dir, width = 4, height = 4, dpi = 1000)
-
-
-
+ggsave(filename = "heritability_tp.jpg", plot = g_herit_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
 
 
 
@@ -393,7 +408,7 @@ varGE_components <- env_r %>%
 varGE_components %>%
   mutate(heterogeneity = str_c(round(V, 3), " (", round(V_prop, 2) * 100, "%)"), 
          lackCorrelation = str_c(round(L, 3), " (", round(L_prop, 2) * 100, "%)")) %>% 
-  select(population, trait, heterogeneity, lackCorrelation) %>% w
+  select(population, trait, heterogeneity, lackCorrelation) %>% 
   gather(grp, value, -trait, -population) %>% 
   spread(grp, value)
 
@@ -425,7 +440,7 @@ g_varGE_comp <- varGE_components %>%
   theme_acs() +
   theme(legend.position = c(0.87, 0.75))
 
-ggsave(filename = "varGE_components.jpg", plot = g_varGE_comp, width = 6, height = 3, path = fig_dir, dpi = 1000)
+ggsave(filename = "varGE_components.jpg", plot = g_varGE_comp, width = 8, height = 3, path = fig_dir, dpi = 1000)
 
 
 
@@ -453,8 +468,46 @@ ggsave(filename = "variance_components_combined.jpg", plot = g_varcomp_combine, 
        height = 8, width = 5, dpi = 1000)
 
 
+## Output a table of all variance components for all populations
+prop_varcomp1 <- prop_varcomp %>% 
+  select(trait, population, source, variance) %>% 
+  group_by(trait, population) %>% 
+  mutate(proportion = variance / sum(variance),
+         source = str_replace_all(source, ":", " x "), 
+         source = str_replace_all(source, "line_name", "Genotype"), 
+         source = str_to_title(source))
+  
 
+varGE_components1 <- varGE_components %>% 
+  select(trait, population, V, L) %>% 
+  gather(source, variance, V, L) %>%
+  group_by(trait, population) %>% 
+  mutate(source = ifelse(source == "V", "GeneticHeterogeneity", "LackOfCorrelation"),  
+         proportion = variance / sum(variance))
 
+# Component order
+comp_order <- c("Genotype", "Environment", "Genotype X Environment", "GeneticHeterogeneity", "LackOfCorrelation", "Residual")
+
+## Combine and output
+var_comp_table <- bind_rows(prop_varcomp1, varGE_components1) %>%
+  ungroup() %>%
+  mutate(annotation = paste0(formatC(x = variance, digits = 3), " (", formatC(proportion * 100, digits = 2, width = 2), "%)"),
+         annotation = str_trim(annotation)) %>%
+  select(trait, population, source, annotation) %>%
+  # spread(source, annotation) %>%
+  # select(Trait = trait, Population = population, Genotype, Environment, `Genotype X Environment`, GeneticHeterogeneity, LackOfCorrelation,
+  #        Residual)
+  spread(trait, annotation) %>%
+  mutate(source = factor(source, levels = comp_order)) %>% arrange(population, source) %>%
+  rename(Population = population, Source = source)
+  
+  
+
+write_csv(x = var_comp_table, path = file.path(fig_dir, "population_variance_components.csv"))
+
+## Just the TP
+var_comp_table %>% filter(Population == "tp") %>% select(-Population) %>% 
+  write_csv(x = ., path = file.path(fig_dir, "tp_population_variance_components.csv"))
 
 
 
@@ -464,8 +517,8 @@ ggsave(filename = "variance_components_combined.jpg", plot = g_varcomp_combine, 
 ### Analyze the components of GxE
 
 ## Combine data
-S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs, population = "all"), 
-                                  mutate(filter(S2_MET_BLUEs, line_name %in% tp), population = "tp")) 
+S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs_use, population = "all"), 
+                                  mutate(filter(S2_MET_BLUEs_use, line_name %in% tp), population = "tp")) 
 
 # Lmer control
 lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
@@ -658,7 +711,8 @@ ggsave(filename = "heritability_expanded_tp.jpg", plot = g_herit, path = fig_dir
 ## Estimate genetic correlations using the BLUEs from each environment
 ## First estimate using only the TP with genotypes
 tp_BLUEs <- S2_MET_BLUEs %>%
-  filter(line_name %in% tp)
+  filter(line_name %in% tp,
+         trait %in% traits)
 
 tp_BLUEs_use <- tp_BLUEs %>%
   select(line_name, environment, trait, value)
@@ -680,10 +734,22 @@ env_cor_tp <- tp_BLUEs %>%
         as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
         cor(., use = "pairwise.complete.obs"))
 
+## VP
+env_cor_vp <- S2_MET_BLUEs %>%
+  filter(line_name %in% vp, trait %in% traits) %>%
+  select(line_name, environment, trait, value) %>% 
+  split(.$trait) %>% 
+  map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
+        as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
+        cor(., use = "pairwise.complete.obs"))
+
+
+
 
 
 # Now use all data
-env_cor_all <- S2_MET_BLUEs %>% 
+env_cor_all <- S2_MET_BLUEs %>%
+  filter(trait %in% traits) %>%
   split(.$trait) %>% 
   map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
         as.data.frame() %>% remove_rownames() %>% column_to_rownames("line_name") %>% 
@@ -697,6 +763,22 @@ env_cor_df <- env_cor_all %>%
         filter(environment1 != environment2)) %>%
   list(., names(.)) %>%
   pmap_df(~mutate(.x, trait = .y))
+
+env_cor_tp_df <- env_cor_tp %>% 
+  map(~as.data.frame(.) %>% rownames_to_column("environment1") %>% 
+        gather(environment2, correlation, -environment1) %>% 
+        filter(environment1 != environment2)) %>%
+  list(., names(.)) %>%
+  pmap_df(~mutate(.x, trait = .y))
+
+env_cor_vp_df <- env_cor_vp %>% 
+  map(~as.data.frame(.) %>% rownames_to_column("environment1") %>% 
+        gather(environment2, correlation, -environment1) %>% 
+        filter(environment1 != environment2)) %>%
+  list(., names(.)) %>%
+  pmap_df(~mutate(.x, trait = .y))
+
+
 
 # Plot
 g_env_cor <- env_cor_df %>%
@@ -719,11 +801,58 @@ save_file <- file.path(fig_dir, "environmental_correlation.jpg")
 ggsave(filename = save_file, plot = g_env_cor, height = 8, width = 8)
 
 
+# Plot
+g_env_cor_tp <- env_cor_tp_df %>%
+  ggplot(aes(x = environment1, y = environment2, fill = correlation)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("blue", "white", "red"), na.value = "transparent", 
+                       breaks = c(-1, 0, 1), limits = c(-1, 1), 
+                       guide = guide_colorbar(title = "Genetic Correlation")) +
+  ylab("Environment 2") +
+  xlab("Environment 1") +
+  facet_wrap(~ trait, nrow = 2, ncol = 2, ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+        axis.text.y = element_text(size = 6),
+        legend.position = "bottom",
+        legend.direction = "horizontal")
+
+# Save this plot
+save_file <- file.path(fig_dir, "environmental_correlation_tp.jpg")
+ggsave(filename = save_file, plot = g_env_cor_tp, height = 8, width = 8)
+
+
+## Histogram of pairwise correlations
+env_cor_tp_df %>%
+  ggplot(aes(x = correlation)) + 
+  geom_histogram() + 
+  facet_grid(~trait) +
+  theme_acs()
+
+## Min, max, mean of correlations
+bind_rows(mutate(env_cor_df, population = "all"), mutate(env_cor_tp_df, population = "tp"), mutate(env_cor_vp_df, population = "vp")) %>% 
+  group_by(population, trait) %>%
+  summarize_at(vars(correlation), funs(min, max, mean), na.rm = T) %>%
+  arrange(trait)
+
+
 
 
 ## Save the correlation matrices for further use
 save_file <- file.path(result_dir, "environmental_genetic_correlations.RData")
 save("env_cor_tp", "env_cor_all", file = save_file)
+
+# population trait           min   max  mean
+# 1 all        GrainYield  -0.389  0.616 0.196
+# 2 tp         GrainYield  -0.193  0.616 0.256
+# 3 vp         GrainYield  -0.389  0.609 0.144
+# 4 all        HeadingDate -0.262  0.878 0.552
+# 5 tp         HeadingDate  0.366  0.892 0.708
+# 6 vp         HeadingDate -0.262  0.825 0.390
+# 7 all        PlantHeight -0.132  0.716 0.342
+# 8 tp         PlantHeight -0.0243 0.617 0.329
+# 9 vp         PlantHeight -0.260  0.771 0.359
+
 
 
 
@@ -736,6 +865,9 @@ save("env_cor_tp", "env_cor_all", file = save_file)
 ## 
 
 # split the TP blues by trait
+tp_BLUEs <- S2_MET_BLUEs %>%
+  filter(line_name %in% tp_geno, trait %in% traits) 
+
 tp_BLUEs_split <- tp_BLUEs %>%
   split(.$trait) %>%
   map(~mutate_at(., vars(line_name, environment), as.factor))
@@ -745,16 +877,12 @@ G <- K[tp_geno, tp_geno]
 
 
 # Iterate and fit models
-tp_twoway_fit <- map2(.x = tp_BLUEs_split, .y = env_cor_tp, ~{
+tp_twoway_fit <- map2(.x = tp_BLUEs_split, .y = env_cor_tp[traits], ~{
   phenos <- .x
   E <- .y
   
   # Create the kronecker product
   Kge <- kronecker(E, G, make.dimnames = TRUE)
-  
-  # Fix the contrasts for environments and genotypes
-  contrasts(phenos$environment) <- contr.sum(n = levels(phenos$environment)) %>% `colnames<-`(., head(levels(phenos$environment), -1))
-  contrasts(phenos$line_name) <- contr.sum(n = levels(phenos$line_name)) %>% `colnames<-`(., head(levels(phenos$line_name), -1))
   
   
   # Model frame
@@ -764,56 +892,74 @@ tp_twoway_fit <- map2(.x = tp_BLUEs_split, .y = env_cor_tp, ~{
   # X <- model.matrix(~ 1, data = mf)
   
   # Fixed effects of environments
-  X <- model.matrix(~ 1 + environment + line_name, data = mf)
+  X <- model.matrix(~ 1 + environment + line_name, data = droplevels(mf), contrasts.arg = list(line_name = "contr.sum", environment = "contr.sum"))
   Z <- model.matrix(~ -1 + line_name:environment, data = mf)
   
+  
   # Fit
-  fit <- mixed.solve(y = y, Z = Z, K = Kge, X = X)
-  
-  # Extract the BLUEs and calculate all effects of environments
-  env_eff <- fit$beta[2:n_distinct(mf$environment)]
-  env_eff_df <- env_eff %>% 
-    data_frame(environment = names(.), effect = .) %>% 
-    mutate(environment = str_remove(environment, "environment")) %>% 
-    add_row(environment = tail(levels(mf$environment), 1), effect = -sum(env_eff))
-  
-  # Do the same for genotype effects
-  gen_eff <- fit$beta[(n_distinct(mf$environment)+1):length(fit$beta)]
-  gen_eff_df <- gen_eff %>% 
-    data_frame(line_name = names(.), effect = .) %>% 
-    mutate(line_name = str_remove(line_name, "line_name")) %>% 
-    add_row(line_name = tail(levels(mf$line_name), 1), effect = -sum(gen_eff))
+  fit_complete <- mixed.solve(y = y, Z = Z, K = Kge, X = X)
   
   
-  # Extract BLUPs
-  blups <- fit$u %>% 
-    data_frame(term = names(.), value = .) %>% 
-    separate(term, c("environment", "line_name"), sep = ":")
+  
+  ## Remove data from 2017 and re-fit
+  # Model frame
+  mf <- model.frame(value ~ line_name + environment, data = droplevels(filter(phenos, year < 2017)))
+  y <- model.response(mf)
 
-  # Add the environmental effect and the grand mean  
-  predictions <- blups %>% 
-    left_join(., env_eff_df, by = "environment") %>%
-    left_join(., gen_eff_df, by = "line_name")  %>%
-    mutate(value = value + effect.x + effect.y + as.numeric(fit$beta[1])) %>%
-    select(-contains("effect"))
+  # Fixed effects of environments
+  X <- model.matrix(~ 1 + environment + line_name, data = droplevels(mf), contrasts.arg = list(line_name = "contr.sum", environment = "contr.sum"))
+  Z <- model.matrix(~ -1 + line_name:environment, data = mf)
   
-  # Return the predictions and the GxE BLUPs
-  list(predictions = predictions, ge = blups, varE = fit$Ve)
+  # Create the kronecker product
+  Kge <- kronecker(E[levels(mf$environment), levels(mf$environment)], G, make.dimnames = TRUE)
+  
+  fit_realistic <- mixed.solve(y = y, Z = Z, K = Kge, X = X)
+  
+  ## Create a df
+  fit_df <- data_frame(set = c("complete", "realistic"), model = list(fit_complete, fit_realistic))
+  
+  
+  mf_list <- list(phenos, droplevels(filter(phenos, year < 2017)))
+  
+  ## Add fixed effects and random effects together
+  fit_df1 <- fit_df %>%
+    mutate(predictions = map2(.x = model, .y = mf_list, ~{
+      fit <- .x
+      mf <- .y
+  
+      mu <- fit$beta[[1]]
+      env_eff <- fit$beta[2:n_distinct(mf$environment)]
+      gen_eff <- fit$beta[(n_distinct(mf$environment)+1):length(fit$beta)]
+      
+      env_eff_df <- data_frame(environment = levels(mf$environment), effect = c(env_eff, -sum(env_eff)))
+      gen_eff_df <- data_frame(line_name = levels(mf$line_name), effect = c(gen_eff, -sum(gen_eff)))
+      
+      ## Random effects
+      ge_eff_df <- data_frame(term = names(fit$u), effect = fit$u) %>% 
+        separate(term, c("environment", "line_name"), sep = ":")
+      
+      fitted_df <- left_join(ge_eff_df, gen_eff_df, by = "line_name") %>% 
+        left_join(., env_eff_df, by = "environment") %>% 
+        mutate(value = effect.x + effect.y + effect + mu) %>%
+        select(line_name, environment, value)
+      
+      # Return the predictions and the GxE BLUPs
+      list(predictions = fitted_df, varE = fit$Ve)
+      
+    }))
+  
+  fit_df1 %>% 
+    mutate( varE = map_dbl(predictions, "varE"), predictions = map(predictions, "predictions")) %>% 
+    select(-model)
   
 })
 
 
 
 ## Create two datasets - one using all environments and one without 2017
-training_sets_twoway <- bind_rows(
-  distinct(tp_BLUEs, environment) %>% mutate(set = "complete"),
-  filter(tp_BLUEs, year < 2017) %>% distinct(environment) %>% mutate(set = "realistic")
-) %>%
-  left_join(., tp_twoway_fit %>% list(., names(.)) %>% pmap_df(~mutate(.x$predictions, trait = .y))) %>%
-  group_by(set, trait) %>%
-  nest() %>%
-  left_join(., tp_twoway_fit %>% map("varE") %>% list(., names(.)) %>% pmap_df(~data_frame(trait = .y, varE = .x)))
-
+training_sets_twoway <- tp_twoway_fit %>% 
+  map2_df(.x = ., .y = names(.), ~mutate(.x, trait = .y)) %>% 
+  select(trait, set, data = predictions, varE)
 
 
 ## Perform the AMMI analysis
@@ -938,15 +1084,13 @@ ammi_out %>%
   do(tail(., 1)) %>% 
   select(term, cumprop)
 
-# set       trait           term  cumprop
-# 1 complete  GrainYield      PC2     0.619
-# 2 complete  HeadingDate     PC6     0.772
-# 3 complete  HeadingDateAGDD PC6     0.768
-# 4 complete  PlantHeight     PC1     0.534
-# 5 realistic GrainYield      PC1     0.478
-# 6 realistic HeadingDate     PC5     0.778
-# 7 realistic HeadingDateAGDD PC5     0.771
-# 8 realistic PlantHeight     PC1     0.586
+# set       trait       term  cumprop
+# 1 complete  GrainYield  PC2     0.622
+# 2 complete  HeadingDate PC6     0.776
+# 3 complete  PlantHeight PC1     0.540
+# 4 realistic GrainYield  PC1     0.551
+# 5 realistic HeadingDate PC4     0.707
+# 6 realistic PlantHeight PC1     0.601
 
 ## What proportion of variation do the first IPCA scores explain?
 ammi_out %>% 
@@ -957,19 +1101,15 @@ ammi_out %>%
   slice(1) %>% 
   select(term, cumprop)
 
-# set       trait           term  cumprop
-# 1 complete  GrainYield      PC1     0.464
-# 2 complete  HeadingDate     PC1     0.212
-# 3 complete  HeadingDateAGDD PC1     0.224
-# 4 complete  PlantHeight     PC1     0.534
-# 5 realistic GrainYield      PC1     0.478
-# 6 realistic HeadingDate     PC1     0.257
-# 7 realistic HeadingDateAGDD PC1     0.265
-# 8 realistic PlantHeight     PC1     0.586
+# set       trait       term  cumprop
+# 1 complete  GrainYield  PC1     0.470
+# 2 complete  HeadingDate PC1     0.213
+# 3 complete  PlantHeight PC1     0.540
+# 4 realistic GrainYield  PC1     0.551
+# 5 realistic HeadingDate PC1     0.277
+# 6 realistic PlantHeight PC1     0.601
 
 
-## ggrepel
-library(ggrepel)
 
 year_levels <- c(unique(tp_BLUEs$year), "Genotype")
 
@@ -987,7 +1127,8 @@ g_ammi <- ammi_out %>%
     scores_df <- map_df(out[-1], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
     
     # Create a renaming vector
-    propvar_rename <- setNames(paste0(out$results$term, " (", round(out$results$prop_var, 2) * 100, "%)"), as.character(out$results$term))
+    propvar_rename <- setNames(paste0(str_replace_all(out$results$term, "PC", "IPCA"), " (", round(out$results$prop_var, 2) * 100, "%)"), 
+                               as.character(out$results$term))
     # Renaming function
     label_rename <- function(x) str_replace_all(x, propvar_rename)
     
@@ -1001,44 +1142,81 @@ g_ammi <- ammi_out %>%
     ## Year color scheme
     year_color <- setNames( c(neyhart_palette("umn1", 5)[3:5], "grey"), year_levels)
     
+    ## Figure out the range for x and y axis for the trait
+    effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "effect") %>% unlist()) %>% 
+      unlist() %>% range()
+    
+    scores_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "score") %>% unlist()) %>% 
+      unlist() %>% range()
+    
     
     # Plot
     scores_toplot %>% 
       ggplot(aes(x = effect, y = PC1, color = year)) + 
       geom_point() +
       geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term)) +
-      scale_color_manual(values = year_color, name = "Year") + 
+      scale_color_manual(values = year_color, name = NULL) + 
+      scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
+      scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
       ylab(propvar_rename[2]) +
-      xlab("Effect") +
+      xlab(expression("Effect (deviation from"~mu*")")) +
       facet_grid(~ trait) + 
       theme_presentation2() +
       theme(legend.position = "bottom")
+      # theme(legend.position = "right", legend.direction = "vertical")
     
   })
 
-library(cowplot)
 
 # Plot in a grid
-plot_list <- filter(g_ammi, set == "complete")$plot
-ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 2)
+plot_list_complete <- filter(g_ammi, set == "complete")$plot
+# ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 1)
+ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(0.9, 0.9, 1),
+                                plot_list_complete[[1]] + theme(legend.position = "none", axis.title.x = element_blank()),
+                                plot_list_complete[[2]] + theme(legend.position = "none", axis.title.x = element_blank()),
+                                plot_list_complete[[3]] + theme(legend.position = "none"))
+  
 # Add legend
-ammi_grid1 <- plot_grid(ammi_grid, get_legend(plot_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+ammi_grid1 <- plot_grid(ammi_grid_complete, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
 # Save
-ggsave(filename = "ammi_biplots.jpg", plot = ammi_grid1, path = fig_dir, height = 10, width = 10, dpi = 1000)
+ggsave(filename = "ammi_biplots_complete.jpg", plot = ammi_grid1, path = fig_dir, height = 11, width = 5, dpi = 1000)
   
 
 ## Realistic
 # Plot in a grid
-plot_list <- filter(g_ammi, set == "realistic")$plot
-ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 2)
+plot_list_realistic <- filter(g_ammi, set == "realistic")$plot
+ammi_grid_realistic <- plot_grid(ncol = 1, rel_heights = c(0.9, 0.9, 1),
+                                 plot_list_realistic[[1]] + theme(legend.position = "none", axis.title.x = element_blank()),
+                                 plot_list_realistic[[2]] + theme(legend.position = "none", axis.title.x = element_blank()),
+                                 plot_list_realistic[[3]] + theme(legend.position = "none"))
 # Add legend
-ammi_grid1 <- plot_grid(ammi_grid, get_legend(plot_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+ammi_grid1 <- plot_grid(ammi_grid_realistic, get_legend(plot_list_realistic[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
 # Save
-ggsave(filename = "ammi_biplots_realistic.jpg", plot = ammi_grid1, path = fig_dir, height = 10, width = 10, dpi = 1000)
+ggsave(filename = "ammi_biplots_realistic.jpg", plot = ammi_grid1, path = fig_dir, height = 11, width = 5, dpi = 1000)
 
     
+
+## Combine
+# Plot in a grid
+plot_list <- g_ammi$plot
+
+ammi_grid_complete <- plot_grid(plotlist = plot_list_complete %>% map(~ . + theme(legend.position = "none", axis.title.x = element_blank())), ncol = 1)
+ammi_grid_realistic <- plot_grid(plotlist = plot_list_realistic %>% map(~ . + theme(legend.position = "none", axis.title.x = element_blank())), ncol = 1)
+
+ammi_grid1 <- plot_grid(ammi_grid_complete, ammi_grid_realistic, ncol = 2) %>% 
+  add_sub(label = expression("Effect (deviation from"~mu*")")) %>% 
+  ggdraw()
+
+ammi_grid2 <- plot_grid(ammi_grid1, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
+
+## Save
+ggsave(filename = "ammi_biplots_combined.jpg", plot = ammi_grid2, path = fig_dir, height = 11, width = 9, dpi = 1000)
+
+
 
 
 ## Save all of this

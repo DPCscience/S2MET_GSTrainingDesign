@@ -261,7 +261,7 @@ cluster_cv_predictions <- mclapply(X = clusters_cv_split, FUN = function(core_df
     ##
 
     # Add predictions to the list
-    results_out[[i]] <- list(base_pred_cv, base_vp = base_pred_vp)
+    results_out[[i]] <- list(base_cv = base_pred_cv, base_vp = base_pred_vp)
 
     }
 
