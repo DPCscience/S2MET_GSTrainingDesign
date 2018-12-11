@@ -192,7 +192,7 @@ cluster_predictions <- bind_rows(cluster_predictions)
 ## Cross-validation predictions
 # First generate test/train sets
 n_train <- length(vp_geno)
-reps <- 50
+reps <- 10
 
 cv_test_sets <- replicate(n = reps, sort(sample(tp_geno, size = n_train)), simplify = FALSE)
 cv_train_sets <- map(cv_test_sets, ~setdiff(tp_geno, .))
