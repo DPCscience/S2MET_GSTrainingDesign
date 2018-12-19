@@ -21,8 +21,6 @@ library(broom)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
-# Load the LOEO prediction results
-load(file.path(result_dir, "all_data_environmental_predictions.RData"))
 
 # Load results
 load(file.path(result_dir, "distance_rank_predictions.RData"))
@@ -66,46 +64,34 @@ dist_colors <- setNames(colors_use, dist_method_abbr)
 
 #### Leave-one-environment-out predictions ####
 
-# # Model accuracy for each trait and set
-# environment_loeo_predictions_analysis <- environment_loeo_predictions_geno_mean %>%
-#   mutate(accuracy = map_dbl(predictions, "accuracy")) %>%
-#   filter(accuracy >= env_cutoff) %>%
-#   group_by(set, trait) %>%
-#   summarize(accuracy = mean(accuracy))
-# 
-# # set       trait       accuracy
-# # 1 complete  GrainYield     0.278
-# # 2 complete  HeadingDate    0.384
-# # 3 complete  PlantHeight    0.398
-# # 4 realistic GrainYield     0.322
-# # 5 realistic HeadingDate    0.395
-# # 6 realistic PlantHeight    0.382
-# 
-# 
-# ## Just 2017 environments
-# # Model accuracy for each trait and set
-# environment_loeo_predictions_analysis2017 <- environment_loeo_predictions_geno_mean %>%
-#   filter(str_detect(environment, "17")) %>%
-#   mutate(accuracy = map_dbl(predictions, "accuracy"),
-#          set = ifelse(set == "complete", "complete2017", set)) %>%
-#   filter(accuracy >= env_cutoff) %>%
-#   group_by(set, trait) %>%
-#   summarize(accuracy = mean(accuracy))
-# 
-# # set       trait       accuracy
-# # 1 complete2017 GrainYield     0.325
-# # 2 complete2017 HeadingDate    0.353
-# # 3 complete2017 PlantHeight    0.381
 
-
-environment_loeo_predictions_analysis <- environment_rank_pred_out %>% 
-  unnest() %>% 
+environment_loeo_predictions_analysis <- environment_loeo_predictions_geno_mean %>% 
   group_by(trait, set) %>% 
-  filter(n_e == max(n_e), model == "great_circle_dist") %>% 
   summarize(accuracy = mean(accuracy)) %>%
   ungroup()
 
 
+# trait       set       accuracy
+# 1 GrainYield  complete     0.281
+# 2 GrainYield  realistic    0.321
+# 3 HeadingDate complete     0.421
+# 4 HeadingDate realistic    0.418
+# 5 PlantHeight complete     0.396
+# 6 PlantHeight realistic    0.383
+
+
+## Min, max, mean
+environment_loeo_predictions_geno_mean %>% 
+  group_by(trait, set) %>% 
+  summarize_at(vars(accuracy), funs(min, max, mean)) 
+
+# trait       set           min   max  mean
+# 1 GrainYield  complete  -0.187  0.504 0.281
+# 2 GrainYield  realistic  0.0456 0.494 0.321
+# 3 HeadingDate complete   0.104  0.646 0.421
+# 4 HeadingDate realistic  0.235  0.614 0.418
+# 5 PlantHeight complete   0.0686 0.621 0.396
+# 6 PlantHeight realistic  0.0362 0.589 0.383
 
 
 
@@ -120,7 +106,9 @@ environment_loeo_predictions_analysis <- environment_rank_pred_out %>%
 # Convert the accuracies to z scores
 # Adjust the names of the distance models
 environment_rank_pred_out1 <- environment_rank_pred_out %>%
-  unnest(out) %>% # Comment this if the data was generated on a local machine
+  unnest(out) %>% 
+  left_join(., distinct(environment_loeo_predictions_geno_mean, set, trait, nTrainEnv)) %>% # Filter out results for the max nEnv
+  # filter(n_e < nTrainEnv) %>%
   mutate(zscore = ztrans(accuracy),
          nEnv = as.factor(n_e),
          environment = as.factor(validation_environment),
@@ -177,45 +165,6 @@ environment_rank_pred_fit_effects <- environment_rank_pred_fit %>%
 
 
 
-## Model means when using all data
-environment_loeo_predictions_analysis <- environment_rank_pred_fit_effects %>%
-  unnest(nEnv_effects) %>% 
-  group_by(set, trait) %>% 
-  mutate(nEnv = parse_number(nEnv), accuracy = zexp(fit)) %>%
-  filter(nEnv == max(nEnv)) %>%
-  ungroup() %>%
-  select(set, trait, accuracy)
-
-
-
-
-
-
-
-
-
-## Plot the effect of model
-g_model_effect <- environment_rank_pred_fit_effects %>% 
-  unnest(model_effects) %>% 
-  left_join(., rename(environment_loeo_predictions_analysis, mean_effects = accuracy)) %>% # Add the accuracy when adding using all environments
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr),
-         set = str_to_title(set)) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
-  geom_point() + 
-  geom_errorbar(width = 0.5) +
-  # facet_wrap(~trait, scales = "free") +
-  facet_grid(trait ~ set, scales = "free", space = "free_x") +
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-  scale_y_continuous(breaks = pretty) +
-  scale_linetype_manual(values = 2, name = NULL) + 
-  ylab("Accuracy") +
-  theme_presentation2() +
-  theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
-
-# Save
-ggsave(filename = "cumulative_pred_model_effect.jpg", plot = g_model_effect, path = fig_dir, height = 6, width = 6, dpi = 1000)
 
 
 
@@ -226,21 +175,29 @@ nEnv_select <- c("1", "5", "10")
 g_model_effect_nenv_list <-  environment_rank_pred_fit_effects %>% 
   split(.$set) %>%
   map(~{
-    left_join(., rename(environment_loeo_predictions_analysis, mean_effects = accuracy)) %>% # Add the accuracy when adding using all environments
-      unnest(model_nEnv_effects) %>% 
+    df <- unnest(., model_nEnv_effects)
+    # Results for the maximum number of envs
+    max_env <- mutate(df, nEnv = parse_number(nEnv)) %>% 
+      group_by(trait) %>% 
+      filter(nEnv == max(nEnv)) %>%
+      slice(1) %>% 
+      select(set, trait, fit) %>%
+      mutate(mean_effects = zexp(fit))
+    
+    df %>%
       filter(nEnv %in% nEnv_select) %>%
       mutate_at(vars(fit, se, lower, upper), zexp) %>%
       mutate(model = factor(model, levels = dist_method_abbr),
              nEnv = factor(nEnv, levels = nEnv_select)) %>%
       ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-      geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
+      geom_hline(data = max_env, aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
       geom_point() + 
       geom_errorbar(width = 0.5) +
       facet_grid(trait ~ nEnv, scales = "free") +
       scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
       scale_linetype_manual(values = 2, name = NULL) + 
       scale_y_continuous(breaks = pretty) +
-      ylab("Accuracy") +
+      ylab("Prediction accuracy") +
       theme_presentation2() +
       theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
   })
@@ -253,51 +210,33 @@ for (i in seq_along(g_model_effect_nenv_list)) {
 
 
 
-
-## Plot the effect of number of environment
-g_nenv_effect <- environment_rank_pred_fit_effects %>% 
-  # filter(set == "complete") %>%
-  unnest(nEnv_effects) %>%
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(nEnv = parse_number(nEnv), set = str_to_title(set)) %>%
-  ggplot(aes(x = nEnv, y = fit, ymin = lower, ymax = upper)) + 
-  geom_point() + 
-  geom_line() +
-  # geom_errorbar(width = 0.5) +
-  geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_grid(trait ~ set, scales = "free", space = "free_x") +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  xlab("Number of training environments") +
-  theme_presentation2()
-
-# Save
-ggsave(filename = "cumulative_pred_nEnv_effect.jpg", plot = g_nenv_effect, path = fig_dir, height = 6, width = 7, dpi = 1000)
-
-
 ## Plot the interaction effect of model and number of environment
-g_model_nenv_effect <- environment_rank_pred_fit_effects %>%
+environment_rank_pred_fit_effects1 <- environment_rank_pred_fit_effects %>%
   unnest(model_nEnv_effects) %>%
-  left_join(., rename(environment_loeo_predictions_analysis, mean_effects = accuracy)) %>% # Add the accuracy when adding using all environments
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(nEnv = parse_number(nEnv), model = factor(model, levels = dist_method_abbr), set = str_to_title(set)) %>%
+  mutate(nEnv = parse_number(nEnv), model = factor(model, levels = dist_method_abbr), set = str_to_title(set))
+
+
+g_model_nenv_effect <- environment_rank_pred_fit_effects1 %>% 
   ggplot(aes(x = nEnv, y = fit, color = model, fill = model)) +
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data")) +
-  geom_point() +
-  geom_line() +
+  geom_hline(data = group_by(environment_rank_pred_fit_effects1, set, trait) %>% filter(nEnv == max(nEnv)) %>% slice(1), 
+             aes(yintercept = fit, lty = "Accuracy using\nall data")) +
+  geom_point(size = 0.5) +
+  geom_line(lwd = 0.5) +
   # geom_ribbon(aes(ymin = lower, ymax = upper),color = "grey75", alpha = 0.2) +
-  facet_grid(trait ~ set, scales = "free") +
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-  scale_fill_manual(values = dist_colors, name = "Model") +
+  facet_grid(trait ~ set, scales = "free", space = "free_x", switch = "y") +
+  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = guide_legend(nrow = 3)) +
+  scale_fill_manual(values = dist_colors, name = "Distance\nmeasure") +
   scale_y_continuous(breaks = pretty) +
+  scale_x_continuous(breaks = function(x) seq(1, x[2], by = 5)) + 
   scale_linetype_manual(values = 2, name = NULL) +
-  ylab("Accuracy") +
+  ylab("Prediction accuracy") +
   xlab("Number of training environments") +
-  theme_presentation2() +
-  theme(legend.position = "bottom")
+  theme_presentation2(base_size = 10) +
+  theme(legend.position = "bottom", legend.spacing.x = unit(x = 0.2, units = "line"), legend.key.height = unit(1, "line"))
 
 # Save
-ggsave(filename = "cumulative_pred_model_nEnv_effect.jpg", plot = g_model_nenv_effect, path = fig_dir, height = 8, width = 7, dpi = 1000)
+ggsave(filename = "cumulative_pred_model_nEnv_effect.jpg", plot = g_model_nenv_effect, path = fig_dir, height = 5, width = 4, dpi = 1000)
 
 
 
@@ -663,14 +602,14 @@ cluster_predictions_base_analysis <- cluster_predictions_base_analysis %>%
 ## ANOVAs
 unnest(cluster_predictions_base_analysis, fixef_test)
 
-## Model was never significant
-## Neither was number of training environments
+## Model was significant only for heading date and realistic
 
 
 ## RANOVAs
 unnest(cluster_predictions_base_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
 
 ## Environment %in% cluster and cluster %in% model was usually significant
+## Not for heading date realistic
 
 
 
@@ -678,28 +617,42 @@ unnest(cluster_predictions_base_analysis, ranef_test) %>% filter(!str_detect(ter
 
 ## Plot the effect of model
 g_cluster_model_effect <- cluster_predictions_base_analysis %>%
-  left_join(., environment_loeo_predictions_analysis) %>% rename(mean_effects = accuracy) %>%# Add the all-data results
   unnest(model_effects) %>%
   mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set)) %>%
   mutate_at(vars(fit, lower, upper), zexp) %>%
   ## Plot
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data"), color = "grey75") +
+  geom_hline(data = group_by(environment_rank_pred_fit_effects1, set, trait) %>% filter(nEnv == max(nEnv)) %>% slice(1),
+             aes(yintercept = fit, lty = "Accuracy using\nall data"), color = "black") +
   geom_point() +
   geom_errorbar(width = 0.5) + 
   scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
   scale_linetype_manual(values = 2, name = NULL) +
   scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x") +
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y") +
   ylab("Prediction accuracy") + 
-  theme_presentation2(base_size = 16) +
+  theme_presentation2(base_size = 10) +
   theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
+        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
   
-
-
 ## Save
-ggsave(filename = "cluster_model_effect.jpg", plot = g_cluster_model_effect, path = fig_dir, width = 6, height = 8, dpi = 1000)
+ggsave(filename = "cluster_model_effect.jpg", plot = g_cluster_model_effect, path = fig_dir, width = 4.5, height = 5, dpi = 1000)
+
+
+
+## Output a table
+cluster_model_table <- cluster_predictions_base_analysis %>%
+  unnest(model_effects) %>% 
+  mutate_at(vars(fit, lower, upper), funs(formatC(., digits = 2))) %>% 
+  mutate(annotation = paste0(fit, " (", lower, ", ", upper, ")")) %>% 
+  bind_rows(., mutate(environment_loeo_predictions_analysis, annotation = formatC(accuracy, digits = 2), model = "AllData")) %>%
+  select(trait, set, model, annotation) %>% 
+  spread(model, annotation) %>%
+  arrange(set)
+
+write_csv(x = cluster_model_table, path = file.path(fig_dir, "cluster_model_predictions_table.csv"))
+
+
 
 
 ## Effect of n of training environments
@@ -721,78 +674,78 @@ cluster_predictions_base_analysis %>%
 
 
 
-## Model the random iterations
-## This analysis will model the difference between the base accuracy and the random accuracy
-cluster_predictions_random <- cluster_predictions_out %>%
-  unnest(random) %>%
-  rename(base_accuracy = accuracy, accuracy = accuracy1) %>%
-  mutate(dist_method = str_replace_all(model, dist_method_replace),
-         model = factor(abbreviate(dist_method), levels = dist_method_abbr)) %>%
-  mutate_at(vars(contains("accuracy")), funs(zscore = ztrans)) %>%
-  mutate(zscore_difference = base_accuracy_zscore - accuracy_zscore,
-         zscore_difference = ifelse(is.na(zscore_difference), 0, zscore_difference)) %>%
-  mutate_at(vars(cluster, val_environment), as.factor)
-
-## There will be some NAs from these conditions:
-## 
-# 1 complete  MYICE PlantHeight
-# 2 complete  OYICE PlantHeight
-# 3 realistic LcPD  HeadingDate
-# 4 realistic MYICE GrainYield 
+# ## Model the random iterations
+# ## This analysis will model the difference between the base accuracy and the random accuracy
+# cluster_predictions_random <- cluster_predictions_out %>%
+#   unnest(random) %>%
+#   rename(base_accuracy = accuracy, accuracy = accuracy1) %>%
+#   mutate(dist_method = str_replace_all(model, dist_method_replace),
+#          model = factor(abbreviate(dist_method), levels = dist_method_abbr)) %>%
+#   mutate_at(vars(contains("accuracy")), funs(zscore = ztrans)) %>%
+#   mutate(zscore_difference = base_accuracy_zscore - accuracy_zscore,
+#          zscore_difference = ifelse(is.na(zscore_difference), 0, zscore_difference)) %>%
+#   mutate_at(vars(cluster, val_environment), as.factor)
 # 
-# This is due to there being only one cluster - fill with zero
-
-
-## Model formula
-## Models fitted individually for each set and trait
-## zscore ~ model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster)
-## 
-
-
-# Fit a model per trait
-cluster_predictions_random_analysis <- cluster_predictions_random %>%
-  group_by(set, trait) %>%
-  nest() %>%
-  mutate(out = list(NULL))
-
-## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(cluster_predictions_random_analysis))) {
-  df <- cluster_predictions_random_analysis$data[[i]] %>%
-    droplevels()
-  
-  fit <- lmer(formula = zscore_difference ~ 1 + model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster) + (1|model:val_environment:cluster), 
-              data = df, contrasts = list(model = "contr.sum"))
-  
-  fit_summary <- data_frame(
-    fitted = list(fit),
-    mean_accuracy = fixef(fit)[1],
-    model_effects = list(Effect("model", fit)),
-    nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
-    fixef_test = list(tidy(anova(fit))),
-    ranef_test = list(tidy(ranova(fit)))
-  ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
-  
-  # Add the summary to the DF
-  cluster_predictions_random_analysis$out[[i]] <- fit_summary
-  
-}
-
-cluster_predictions_random_analysis <- cluster_predictions_random_analysis %>%
-  select(-data) %>% 
-  unnest(out)
-
-
-## ANOVAs
-unnest(cluster_predictions_random_analysis, fixef_test)
-
-## Model was sometimes significant
-
-
-## RANOVAs
-unnest(cluster_predictions_random_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
-
-## Environment %in% cluster and cluster %in% model was more often not significant,
-## which should be expected under random conditions
+# ## There will be some NAs from these conditions:
+# ## 
+# # 1 complete  MYICE PlantHeight
+# # 2 complete  OYICE PlantHeight
+# # 3 realistic LcPD  HeadingDate
+# # 4 realistic MYICE GrainYield 
+# # 
+# # This is due to there being only one cluster - fill with zero
+# 
+# 
+# ## Model formula
+# ## Models fitted individually for each set and trait
+# ## zscore ~ model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster)
+# ## 
+# 
+# 
+# # Fit a model per trait
+# cluster_predictions_random_analysis <- cluster_predictions_random %>%
+#   group_by(set, trait) %>%
+#   nest() %>%
+#   mutate(out = list(NULL))
+# 
+# ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
+# for (i in seq(nrow(cluster_predictions_random_analysis))) {
+#   df <- cluster_predictions_random_analysis$data[[i]] %>%
+#     droplevels()
+#   
+#   fit <- lmer(formula = zscore_difference ~ 1 + model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster) + (1|model:val_environment:cluster), 
+#               data = df, contrasts = list(model = "contr.sum"))
+#   
+#   fit_summary <- data_frame(
+#     fitted = list(fit),
+#     mean_accuracy = fixef(fit)[1],
+#     model_effects = list(Effect("model", fit)),
+#     nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
+#     fixef_test = list(tidy(anova(fit))),
+#     ranef_test = list(tidy(ranova(fit)))
+#   ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
+#   
+#   # Add the summary to the DF
+#   cluster_predictions_random_analysis$out[[i]] <- fit_summary
+#   
+# }
+# 
+# cluster_predictions_random_analysis <- cluster_predictions_random_analysis %>%
+#   select(-data) %>% 
+#   unnest(out)
+# 
+# 
+# ## ANOVAs
+# unnest(cluster_predictions_random_analysis, fixef_test)
+# 
+# ## Model was sometimes significant
+# 
+# 
+# ## RANOVAs
+# unnest(cluster_predictions_random_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
+# 
+# ## Environment %in% cluster and cluster %in% model was more often not significant,
+# ## which should be expected under random conditions
 
 
 
@@ -869,6 +822,9 @@ ggsave(filename = "cluster_model_effect_2017.jpg", plot = g_cluster_model_effect
 
 
 
+
+
+
 ## Cross validation cluster predictions
 cluster_cv_predictions_out <- cluster_cv_predictions %>%
   mutate(cv_accuracy = map_dbl(out, 1),
@@ -927,8 +883,9 @@ cluster_cv_predictions_analysis <- cluster_cv_predictions_analysis %>%
 ## ANOVAs
 unnest(cluster_cv_predictions_analysis, fixef_test)
 
-## Model was sometimes significant
+## Model was never significant
 ## Design was always signficiant
+## Model x design was sometimes significant
 
 
 ## RANOVAs
@@ -951,7 +908,7 @@ g_cluster_cv_model_effect_complete <- cluster_cv_predictions_analysis %>%
   scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 2)) +
   scale_linetype_manual(values = 2, name = NULL) +
   scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ design, scales = "free_x", space = "free_x") +
+  facet_grid(trait ~ design, scales = "free", space = "free_x") +
   ylab("Prediction accuracy") + 
   theme_presentation2(base_size = 16) +
   theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
@@ -970,7 +927,7 @@ g_cluster_cv_model_effect_realistic <- cluster_cv_predictions_analysis %>%
   scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 1)) +
   scale_linetype_manual(values = 2, name = NULL) +
   scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ design, scales = "free_x", space = "free_x") +
+  facet_grid(trait ~ design, scales = "free", space = "free_x") +
   ylab("Prediction accuracy") + 
   theme_presentation2(base_size = 16) +
   theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
@@ -1011,10 +968,6 @@ g_cluster_cv_design_effect <- cluster_cv_predictions_analysis %>%
 ## Save
 ggsave(filename = "cluster_cv_design_effect.jpg", plot = g_cluster_cv_design_effect, path = fig_dir, 
        width = 6, height = 8, dpi = 1000)
-
-
-
-
 
 
 
