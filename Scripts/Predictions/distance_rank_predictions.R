@@ -68,7 +68,7 @@ environment_rank_random <- pred_env_rank_random %>%
   select(-envs)
 
 environment_rank_tomodel <- bind_rows(environment_rank_model, environment_rank_random) %>%
-  mutate(training_environment = map(training_environment, ~head(., max_env))) %>%  filter(!str_detect(model, "sample"))
+  mutate(training_environment = map(training_environment, ~head(., max_env)))
 
 # Split by cores
 environment_rank_tomodel_split <- environment_rank_tomodel %>%
@@ -255,9 +255,102 @@ environment_window_pred_out <- mclapply(X = environment_rank_tomodel_split, FUN 
     
     
 
+
+
+
+
+
+
+
+
+### Leave-one-environment-out predictions
+
+# Modify the BLUEs for predictions
+S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>% 
+  filter(line_name %in% c(tp_geno, vp_geno),
+         environment %in% tp_vp_env,
+         trait %in% traits) %>%
+  mutate_at(vars(environment:line_name), as.factor) %>%
+  # group_by(trait, environment) %>%
+  # mutate(value = scale(value)) %>%
+  ungroup()
+
+
+## Create training and test sets
+## Complete data
+train_test_complete <- S2_MET_BLUEs_tomodel %>%
+  group_by(trait) %>%
+  do({
+    df <- droplevels(.)
+    
+    # Get a vector of testing environments
+    val_environment <- distinct(df, environment)
+    
+    # Create testing and training sets based on that environment
+    val_environment %>% 
+      mutate(train = map(environment, ~filter(df, environment != .) %>% droplevels() %>% filter(line_name %in% tp_geno)),
+             test = map(environment, ~filter(df, line_name %in% vp_geno, environment == .) %>% mutate(line_name = as.character(line_name))))
+    
+  }) %>% ungroup()
+
+# Realistic data
+train_test_realistic <- S2_MET_BLUEs_tomodel %>%
+  group_by(trait) %>%
+  do({
+    df <- droplevels(.)
+    
+    val_environment <- distinct(df, environment) %>%
+      filter(str_detect(environment, "17"))
+    
+    # Get a vector of testing environments
+    all_val_environment <- as.character(val_environment$environment)
+    
+    # Create testing and training sets based on that environment
+    val_environment %>% 
+      mutate(train = map(environment, ~filter(df, environment %in% all_val_environment) %>% droplevels() %>% filter(line_name %in% tp_geno)),
+             test = map(environment, ~filter(df, line_name %in% vp_geno, environment == .) %>% mutate(line_name = as.character(line_name))))
+    
+  }) %>% ungroup()
+
+
+## Combine
+train_test <- bind_rows(
+  mutate(train_test_complete, set = "complete"),
+  mutate(train_test_realistic, set = "realistic")
+)
+
+
+
+
+### Leave-one-environment-out predictions using the genotype mean over training environments
+environment_loeo_predictions_geno_mean <- train_test %>%
+  group_by(set, trait, environment) %>%
+  do(predictions = {
+    df <- .
+    
+    # Fit the first model accounting for g and e effects
+    fit <- lm(value ~ 1 + line_name + environment, data = df$train[[1]])
+    blues <- effects::Effect("line_name", fit) %>% 
+      as.data.frame() %>% 
+      select(line_name, value = fit) %>%
+      mutate(std_error = 0, environment = "mean", line_name = factor(line_name, levels = c(tp_geno, vp_geno)))
+      
+    gblup(K = K, train = blues, test = df$test[[1]], fit.env = FALSE) }) %>%
+  ungroup()
+
+
+## Add the number of training environments to the results
+environment_loeo_predictions_geno_mean <- environment_loeo_predictions_geno_mean %>% 
+  mutate(accuracy = map_dbl(predictions, "accuracy")) %>%
+  left_join(train_test) %>% 
+  mutate(nTrainEnv = map_dbl(train, ~n_distinct(.$environment))) %>% 
+  select(set, trait, environment, nTrainEnv, accuracy)
+
+
+
 # Save the results
 save_file <- file.path(result_dir, "distance_rank_predictions.RData")
-save("environment_rank_pred_out", "environment_window_pred_out", file = save_file)
+save("environment_rank_pred_out", "environment_window_pred_out", "environment_loeo_predictions_geno_mean", file = save_file)
 
 
 
