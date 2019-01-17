@@ -334,8 +334,9 @@ g_mean_cor <- env_mean_cor_sig %>%
     
   })
     
-    
 
+    
+  ec_env_df3
 
 
 
@@ -599,7 +600,8 @@ for (i in seq(nrow(env_ipca_mr))) {
   ## Return a tidy df of the model
   env_ipca_mr$out[[i]] <- data_frame(
     fit = list(fit_step),
-    tidy = list(fit_step_tidy))
+    tidy = list(fit_step_tidy),
+    cors = list(cors) )
   
 }
 
@@ -694,7 +696,6 @@ g_ipca_cor <- env_ipca_cor_set_overlap %>%
 
 
 
-
 ## Combine the summary variables with the interval variables
 ## Then select those variables that are significant
 env_ipca_combine <- ec_score_df_use %>%
@@ -705,6 +706,78 @@ env_ipca_combine <- ec_score_df_use %>%
 ## Merge not based on set - we want the ECs that were determined significant using a subset of data
 ec_env_ipca_sig <- select(env_ipca_cor_sig, set, trait, ec_group, variable) %>%
   left_join(., distinct(env_ipca_combine, trait, ec_group, environment, variable, value), by = c("trait", "ec_group", "variable"))
+
+
+
+
+
+
+
+### Poster figures
+
+
+## For each trait, plot the ECs most correlated with the mean or the IPCA score
+env_mean_cor_top <- env_mean_cor_sig %>%
+  filter(set == "complete", ec_group == "multi_year", variable != "ph1to1h2o_r_subsoil") %>%
+  left_join(., ec_env_df3) %>%
+  mutate(variable = case_when(
+    variable == "interval_2_PPT" ~ "Month 2 Precipitation",
+    variable == "interval_2_TMIN" ~ "Month 2 Average Min. Temp.",
+    variable == "annual_TSEASON" ~ "Annual Temperature Seasonality (Max. - Min.)"
+  )) %>%
+  group_by(trait) %>% 
+  top_n(n = 1, wt = -p_value) %>%
+  ggplot(aes(x = value, y = h)) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  geom_point() + 
+  facet_wrap( ~ trait + variable, scale = "free", labeller = labeller(trait = str_add_space), ncol = 1) + 
+  ylab(expression("Environmental effect (deviation from"~mu*")")) +
+  xlab("Covariate value") +
+  scale_x_continuous(breaks = pretty) +
+  scale_y_continuous(breaks = pretty) +
+  labs(title = expression(Example~italic(Mean-EC)~covariables)) +
+  theme_presentation2()
+
+ggsave(filename = "env_mean_cor_top_poster.jpg", plot = env_mean_cor_top, path = fig_dir, width = 5, height = 10, dpi = 1000)
+
+
+env_ipca_cor_top <- env_ipca_cor_sig %>%
+  filter(set == "complete", ec_group == "multi_year") %>%
+  left_join(., ec_score_df) %>%
+  left_join(., unnest(env_ipca_mr1, cors)) %>%
+  mutate(variable = case_when(
+    variable == "max_PPT" ~ "Max. Monthly Precipitation",
+    variable == "interval_1_TMAX" ~ "Month 1 Average Max. Temp.",
+    variable == "annual_TSEASON" ~ "Annual Temperature Seasonality (Max. - Min.)"
+  )) %>%
+  group_by(trait) %>% 
+  top_n(n = 1, wt = -p_value) %>%
+  ggplot(aes(x = value, y = score)) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  geom_point() + 
+  # geom_text(aes(x = Inf, y = -Inf, label = paste0("r = ", formatC(correlation, 2))), hjust = 1, vjust = -1) + 
+  facet_wrap( ~ trait + variable, scale = "free", labeller = labeller(trait = str_add_space), ncol = 1) + 
+  ylab("Environmental IPCA score") +
+  xlab("Covariate value") +
+  scale_x_continuous(breaks = pretty) +
+  scale_y_continuous(breaks = pretty) +
+  labs(title = expression(Example~italic(IPCA-EC)~covariables)) +
+  theme_presentation2()
+
+ggsave(filename = "env_ipca_cor_top_poster.jpg", plot = env_ipca_cor_top, path = fig_dir, width = 5, height = 10, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

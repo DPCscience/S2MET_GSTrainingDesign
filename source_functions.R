@@ -600,4 +600,155 @@ env_mclust <- function(data, min_env = 2, test.env) {
 
 
   
+## Prediction functions for cross-validation
+## Functions for each model
+model1 <- function(train, test) {
+  fit_m1 <- lmer(value ~ 1 + (1|line_name) + (1|environment), data = train)
+  pred <- test %>% 
+    mutate(pred_value = predict(object = fit_m1, newdata = ., allow.new.levels = TRUE)) %>%
+    select(environment, line_name, value, pred_value)
+  
+  return(pred)
+}
+
+model2 <- function(train, test, Kg, Ke) {
+  mf <- train %>% 
+    mutate(LineName = line_name,
+           line_name = factor(line_name, levels = tp_geno)) %>%
+    model.frame(value ~ line_name + LineName + environment, data = .)
+  
+  # Matrices
+  y <- model.response(mf)
+  X <- model.matrix(~ 1, data = mf)
+  Zg <- model.matrix(~ -1 + line_name, mf)
+  colnames(Zg) <- colnames(K)
+  ZE <- model.matrix(~ -1 + environment, mf)
+  colnames(ZE) <- unique(mf$environment)
+  
+  
+  
+  # If Ke is missing, use diagonal
+  if (missing(Ke)) Ke <- diag(ncol(ZE))
+  
+  # Fit
+  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = Kg), E = list(Z = ZE, K = Ke)), silent = TRUE)
+  
+  # Predictions
+  pred_g <- fit$u.hat$g %>%
+    as.data.frame() %>%
+    rownames_to_column("line_name") %>%
+    rename(g = T1)
+  pred_E <- fit$u.hat$E %>%
+    as.data.frame() %>%
+    rownames_to_column("environment") %>%
+    rename(E = T1)
+  
+  pred <- left_join(test, pred_g, by = "line_name") %>%
+    left_join(., pred_E, by = "environment") %>%
+    mutate(pred_value = rowSums(select(., g, E), na.rm = TRUE)) %>%
+    select(environment, line_name, value, pred_value)
+  
+  
+  # ZE <- model.matrix(~ 1 + environment, mf, contrasts.arg = list(environment = "contr.sum"))
+  # colnames(ZE) <- c("mean", head(unique(mf$environment), -1))
+  # 
+  # fit_alt <- mixed.solve(y = y, Z = Zg, K = Kg, X = ZE)
+  # 
+  # 
+  # pred_g <- fit_alt$u %>% 
+  #   as.data.frame() %>%
+  #   rownames_to_column("line_name") %>%
+  #   rename_at(vars(-line_name), ~"g")
+  # pred_E <- fit_alt$beta[-1] %>% 
+  #   as.data.frame() %>% 
+  #   rownames_to_column("environment") %>%
+  #   rename_at(vars(-environment), ~"E") %>% 
+  #   add_row(environment = tail(unique(mf$environment), 1), E = -sum(.$E))
+  # 
+  # pred_alt <- left_join(test, pred_g, by = "line_name") %>%
+  #   left_join(., pred_E, by = "environment") %>%
+  #   mutate(pred_value = g + E) %>%
+  #   select(environment, line_name, value, pred_value)
+  
+  return(pred)
+  
+}
+
+
+
+model3 <- function(train, test, Kg, Ke) {
+  mf <- train %>% 
+    mutate(LineName = line_name,
+           line_name = factor(line_name, levels = tp_geno),
+           interaction = interaction(line_name, environment, sep = ":")) %>%
+    model.frame(value ~ line_name + LineName + environment + interaction, data = .)
+  
+  # Matrices
+  y <- model.response(mf)
+  X <- model.matrix(~ 1, data = mf)
+  Zg <- model.matrix(~ -1 + line_name, mf)
+  colnames(Zg) <- colnames(K)
+  ZG <- model.matrix(~ -1 + LineName, mf)
+  ZE <- model.matrix(~ -1 + environment, mf)
+  colnames(ZE) <- unique(mf$environment)
+  ZgE <- model.matrix(~ -1 + interaction, mf)
+  colnames(ZgE) <- levels(mf$interaction)
+  
+  # If Ke is missing, use diagonal
+  if (missing(Ke)) Ke <- diag(ncol(ZE))
+  
+  # K_gE <- (Zg %*% Kg %*% t(Zg)) * (ZE %*% Ke %*% t(ZE))
+  K_gE <- kronecker(X = Ke, Y = Kg, make.dimnames = TRUE)
+  dimnames(K_gE) <- replicate(2, colnames(ZgE), simplify = FALSE)
+  
+  # Fit
+  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = K), E = list(Z = ZE, K = Ke), gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
+  
+  # Predictions
+  pred_g <- fit$u.hat$g %>%
+    as.data.frame() %>%
+    rownames_to_column("line_name") %>%
+    rename(g = T1)
+  pred_E <- fit$u.hat$E %>%
+    as.data.frame() %>%
+    rownames_to_column("environment") %>%
+    rename(E = T1)
+  pred_gE <- fit$u.hat$gE %>%
+    as.data.frame() %>%
+    rownames_to_column("term") %>%
+    separate(term, c("line_name", "environment"), sep = ":") %>%
+    rename(gE = T1)
+  
+  pred <- left_join(test, pred_g, by = "line_name") %>%
+    left_join(., pred_E, by = "environment") %>%
+    left_join(., pred_gE, by = c("line_name", "environment")) %>%
+    mutate(pred_value = rowSums(select(., g, E, gE), na.rm = TRUE)) %>%
+    select(environment, line_name, value, pred_value)
+  
+  
+  # ## Prediction of just GxE effect
+  # fit_alt <- mixed.solve(y = y, Z = ZgE, K = K_gE, X = X)
+  # 
+  # pred_gE <- fit_alt$u %>%
+  #   as.data.frame() %>%
+  #   rownames_to_column("term") %>%
+  #   separate(term, c("line_name", "environment"), sep = ":") %>%
+  #   rename_at(vars(-line_name, -environment), ~"gE")
+  # 
+  # 
+  # pred_alt <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
+  #   mutate(pred_value = gE) %>%
+  #   select(environment, line_name, value, pred_value)
+  
+  return(pred)
+  
+}
+
+
+
+
+
+
+
+
   

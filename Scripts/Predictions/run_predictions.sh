@@ -17,9 +17,12 @@ module load R/3.5.0
 # Predictions by environmental rank
 # Rscript distance_rank_predictions.R
 
-# Predictions 
-Rscript environment_covariance_matrix_predictions.R
+# # Predictions 
+# Rscript environment_covariance_matrix_predictions.R
 
 # Cluster predictions
 # Rscript cluster_predictions.R
+
+# Cross validation
+Rscript cross_validation.R
 
