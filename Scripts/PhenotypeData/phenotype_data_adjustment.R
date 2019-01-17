@@ -26,11 +26,6 @@ source(file.path(repo_dir, "source.R"))
 
 
 
-
-# Project directory
-proj_dir <- "C:/Users/Jeff/Google Drive/Barley Lab/Projects/S2MET/"
-
-
 # Load the tidy S2 data
 load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
 

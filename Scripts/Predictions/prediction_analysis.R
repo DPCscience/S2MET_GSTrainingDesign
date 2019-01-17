@@ -49,6 +49,10 @@ dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" 
                          "sample" = "Random")
 dist_method_abbr <- abbreviate(dist_method_replace)
 
+## Alternative abbreviations
+dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "Random"),
+                             names(dist_method_replace))
+
 colors <- umn_palette(3)
 colors_use <- c(colors[2], "#FFDE7A", colors[c(1, 3, 8, 4, 9, 5, 10)], "grey75")
 dist_colors <- setNames(colors_use, dist_method_abbr)
@@ -113,7 +117,7 @@ environment_rank_pred_out1 <- environment_rank_pred_out %>%
          nEnv = as.factor(n_e),
          environment = as.factor(validation_environment),
          model = ifelse(str_detect(model, "sample"), "sample", model),
-         model = abbreviate(str_replace_all(model, dist_method_replace)),
+         model = str_replace_all(model, dist_method_abbr),
          model = factor(model, levels = dist_method_abbr)) %>%
   filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>% # Filter out the relationship matrices
   # unite(model, model, mat_set, sep = "_") %>% 
@@ -141,7 +145,6 @@ for (i in seq(nrow(environment_rank_pred_fit))) {
   
   fit_summary <- data_frame(
     fitted = list(fit),
-    model_effects = list(Effect(focal.predictors = "model", fit)),
     nEnv_effects = list(Effect(focal.predictors = "nEnv", fit)),
     model_nEnv_effects = list(Effect(focal.predictors = c("model", "nEnv"), fit))) %>% 
     mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
@@ -151,7 +154,7 @@ environment_rank_pred_fit$out[[i]] <- fit_summary
   
 }
 
-environment_rank_pred_fit <- environment_rank_pred_fit %>% unnest(out)
+environment_rank_pred_fit <- unnest(environment_rank_pred_fit, out)
 
 # Quick anova scan
 environment_rank_pred_fit$fitted %>% map(anova)
@@ -202,6 +205,40 @@ g_model_effect_nenv_list <-  environment_rank_pred_fit_effects %>%
       theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
   })
 
+## Plot this differently
+g_model_effect_nenv_list <-  environment_rank_pred_fit_effects %>% 
+  split(.$set) %>%
+  map(~{
+    df <- unnest(., model_nEnv_effects)
+    # Results for the maximum number of envs
+    max_env <- mutate(df, nEnv = parse_number(nEnv)) %>% 
+      group_by(trait) %>% 
+      filter(nEnv == max(nEnv)) %>%
+      slice(1) %>% 
+      select(set, trait, fit) %>%
+      mutate(mean_effects = zexp(fit))
+    
+    df %>%
+      filter(nEnv %in% nEnv_select) %>%
+      mutate_at(vars(fit, se, lower, upper), zexp) %>%
+      mutate(model = factor(model, levels = dist_method_abbr),
+             nEnv = factor(nEnv, levels = nEnv_select)) %>%
+      ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
+      geom_hline(data = max_env, aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
+      geom_point() + 
+      geom_errorbar(width = 0.5) +
+      facet_grid(trait ~ nEnv, scales = "free") +
+      scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
+      scale_linetype_manual(values = 2, name = NULL) + 
+      scale_y_continuous(breaks = pretty) +
+      ylab("Prediction accuracy") +
+      theme_presentation2() +
+      theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
+  })
+
+
+
+
 # Save
 for (i in seq_along(g_model_effect_nenv_list)) {
   filename <- paste0("cumulative_pred_model_effect_envselect_", names(g_model_effect_nenv_list)[i], ".jpg")
@@ -214,7 +251,9 @@ for (i in seq_along(g_model_effect_nenv_list)) {
 environment_rank_pred_fit_effects1 <- environment_rank_pred_fit_effects %>%
   unnest(model_nEnv_effects) %>%
   mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(nEnv = parse_number(nEnv), model = factor(model, levels = dist_method_abbr), set = str_to_title(set))
+  mutate(nEnv = parse_number(nEnv), 
+         model = factor(model, levels = dist_method_abbr), 
+         set = str_to_title(set))
 
 
 g_model_nenv_effect <- environment_rank_pred_fit_effects1 %>% 
@@ -553,8 +592,8 @@ cluster_predictions_out <- cluster_predictions %>%
   
 cluster_predictions_base <- cluster_predictions_out %>%
   select(-random) %>%
-  mutate(dist_method = str_replace_all(model, dist_method_replace),
-         model = factor(abbreviate(dist_method), levels = dist_method_abbr),
+  mutate(model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr),
          zscore = ztrans(accuracy)) %>% 
   mutate_at(vars(cluster, val_environment), as.factor)
 
@@ -637,6 +676,51 @@ g_cluster_model_effect <- cluster_predictions_base_analysis %>%
   
 ## Save
 ggsave(filename = "cluster_model_effect.jpg", plot = g_cluster_model_effect, path = fig_dir, width = 4.5, height = 5, dpi = 1000)
+
+
+
+
+
+
+## Subset for poster
+dist_method_poster <- dist_method_abbr[c(1:3,7:9)]
+# Rename the prediction scenario
+set_replace <- c("complete" = "Leave-One-Out", "realistic" = "Time-Forward" )
+
+environment_rank_pred_fit_effects1_use <- environment_rank_pred_fit_effects1 %>%
+  mutate(set = str_to_lower(set),
+         set = str_replace_all(set, set_replace)) %>%
+  group_by(set, trait) %>% 
+  filter(nEnv == max(nEnv)) %>% 
+  slice(1)
+
+
+g_cluster_model_effect_poster <- cluster_predictions_base_analysis %>%
+  unnest(model_effects) %>%
+  mutate(model = factor(model, levels = dist_method_abbr),
+         set = str_replace_all(set, set_replace)) %>%
+  filter(model %in% dist_method_poster) %>%
+  mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
+  geom_hline(data = environment_rank_pred_fit_effects1_use, aes(yintercept = fit, lty = "Accuracy using\nall data"), color = "black") +
+  geom_point() +
+  geom_errorbar(width = 0.5) + 
+  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = guide_legend(ncol = 1)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
+  ylab("Prediction accuracy") + 
+  labs(title = "Genomewide prediction accuracy") +
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "left", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
+
+## Save
+ggsave(filename = "cluster_model_effect_poster.jpg", plot = g_cluster_model_effect_poster, path = fig_dir, width = 8.5, height = 6, dpi = 1000)
+
+
+
 
 
 

@@ -916,7 +916,7 @@ g_env_cor1 <- plot_grid(g_env_cor, get_legend(g_env_cor_list_tp[[1]]), nrow = 1,
 
 
 # Save this plot
-ggsave(filename = "environmental_correlation_tp.jpg", path = fig_dir, plot = g_env_cor1, height = 3, width = 10, dpi = 1000)
+ggsave(filename = "environmental_correlation_tp.jpg", path = fig_dir, plot = g_env_cor1, height = , width = 10, dpi = 1000)
 
 
 
@@ -1372,7 +1372,7 @@ ggsave(filename = "ammi_biplots_combined.jpg", plot = ammi_grid1, path = fig_dir
 
 
 ## Save all of this
-save_file <- file.path(result_dir, "genotype_environment_phenotypic_analysis.RData")
+save_file <-  
 save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_GE", file = save_file)
 
     
