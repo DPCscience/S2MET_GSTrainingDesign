@@ -621,7 +621,7 @@ model2 <- function(train, test, Kg, Ke) {
   y <- model.response(mf)
   X <- model.matrix(~ 1, data = mf)
   Zg <- model.matrix(~ -1 + line_name, mf)
-  colnames(Zg) <- colnames(K)
+  colnames(Zg) <- colnames(Kg)
   ZE <- model.matrix(~ -1 + environment, mf)
   colnames(ZE) <- unique(mf$environment)
   
@@ -687,7 +687,7 @@ model3 <- function(train, test, Kg, Ke) {
   y <- model.response(mf)
   X <- model.matrix(~ 1, data = mf)
   Zg <- model.matrix(~ -1 + line_name, mf)
-  colnames(Zg) <- colnames(K)
+  colnames(Zg) <- colnames(Kg)
   ZG <- model.matrix(~ -1 + LineName, mf)
   ZE <- model.matrix(~ -1 + environment, mf)
   colnames(ZE) <- unique(mf$environment)
@@ -702,7 +702,7 @@ model3 <- function(train, test, Kg, Ke) {
   dimnames(K_gE) <- replicate(2, colnames(ZgE), simplify = FALSE)
   
   # Fit
-  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = K), E = list(Z = ZE, K = Ke), gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
+  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = Kg), E = list(Z = ZE, K = Ke), gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
   
   # Predictions
   pred_g <- fit$u.hat$g %>%
