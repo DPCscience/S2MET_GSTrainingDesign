@@ -9,7 +9,7 @@
 ## 
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
 source(file.path(repo_dir, "source_MSI.R"))
 
 ## Number of cores
@@ -224,8 +224,7 @@ pocv_data <- S2_MET_BLUEs %>%
 ## Generate CV randomizations
 # First generate training/test lines
 train_test1 <- train_test %>%
-  mutate(test = list(vp_geno)) %>%
-  crossing(trait = traits, .)
+  mutate(test = list(vp_geno))
 
 
 # POCV1 - predict the VP using all environments
@@ -252,8 +251,8 @@ pocv0_rand <- pocv_data %>%
 
 # POCV00 - predict totally untested VP in totally untested environments
 pocv00_rand <- full_join(train_test1, select(pocv0_rand, -.id), by = "trait") %>%
-  mutate(train = map2(train.x, train.y, ~filter(.y, line_name %in% .x)),
-         test = map2(test.x, test.y, ~filter(.y, line_name %in% .x))) %>%
+  mutate(train = map2(train.x, train.y, ~filter(.y, line_name %in% .x)), # Take the available training data and subset the TP
+         test = map2(test.x, test.y, ~filter(.y, line_name %in% .x))) %>% # Take the available testing data and subset the VP
   select(trait, environment, .id, train, test) %>%
   arrange(trait, environment)
 
@@ -267,6 +266,40 @@ POCV_zero <- bind_rows(
   mutate(pocv0_rand, cv = "pocv0"),
   mutate(pocv00_rand, cv = "pocv00")
 )
+
+
+# ## Predict
+# pocv12_prediction <- POCV12 %>%
+#   group_by(cv, trait, .id) %>%
+#   do({
+#     row <- .
+# 
+#     ## Model 2
+#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     ## Model 3
+#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+# 
+#     data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+# 
+#   })
+# 
+# 
+# 
+# pocv_zero_prediction <- POCV_zero %>%
+#   group_by(cv, trait, environment, .id) %>%
+#   do({
+#     row <- .
+# 
+#     ## Model 2
+#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     ## Model 3
+#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+# 
+#     data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+# 
+#   })
+
+
 
 
 
@@ -338,7 +371,7 @@ pocv_predictions <- bind_rows(pocv12_prediction, pocv_zero_prediction)
 
 
 ## Save
-save("cv_predictions", "pocv_predictions", file = file.path(results_dir, "cross_validation.RData"))
+save("cv_predictions", "pocv_predictions", file = file.path(result_dir, "cross_validation.RData"))
 
 
 
