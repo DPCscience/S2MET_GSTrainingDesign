@@ -58,7 +58,7 @@ cv_data <- S2_MET_BLUEs %>%
 ## Generate CV randomizations
 # First generate training/test lines
 set.seed(1171039)
-train_test <- data_frame(.id = as.character(seq(nCV)), train = replicate(n = nCV, sample_frac(tbl = distinct(cv_data, line_name), size = pTrain)$line_name, simplify = FALSE)) %>%
+train_test <- data_frame(.id = str_pad(as.character(seq(nCV)), width = 2, side = "left", pad = 0), train = replicate(n = nCV, sample_frac(tbl = distinct(cv_data, line_name), size = pTrain)$line_name, simplify = FALSE)) %>%
   mutate(test = map(train, ~setdiff(tp_geno, .))) %>%
   crossing(trait = traits, .)
 
@@ -162,7 +162,8 @@ cv12_prediction <- CV12 %>%
     
     core_df %>% 
       mutate(results = results_out) %>%
-      select(cv, trait, .id, results)
+      select(cv, trait, .id, results) %>%
+      unnest(results)
       
   })
 
@@ -275,9 +276,9 @@ POCV_zero <- bind_rows(
 #     row <- .
 # 
 #     ## Model 2
-#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
 #     ## Model 3
-#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
 # 
 #     data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
 # 
@@ -291,9 +292,9 @@ POCV_zero <- bind_rows(
 #     row <- .
 # 
 #     ## Model 2
-#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
 #     ## Model 3
-#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+#     model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
 # 
 #     data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
 # 
