@@ -48,7 +48,7 @@ K_pov <- K
 
 ## Data to use for CV
 cv_data <- S2_MET_BLUEs %>%
-  filter(environment %in% sample(tp_vp_env, 5)) %>%
+  filter(environment %in% sample(tp_vp_env, 10)) %>%
   filter(line_name %in% tp_geno,
          trait %in% traits,
          environment %in% tp_vp_env) %>%
@@ -57,6 +57,7 @@ cv_data <- S2_MET_BLUEs %>%
 
 ## Generate CV randomizations
 # First generate training/test lines
+set.seed(1171039)
 train_test <- data_frame(.id = as.character(seq(nCV)), train = replicate(n = nCV, sample_frac(tbl = distinct(cv_data, line_name), size = pTrain)$line_name, simplify = FALSE)) %>%
   mutate(test = map(train, ~setdiff(tp_geno, .))) %>%
   crossing(trait = traits, .)
@@ -209,11 +210,135 @@ cv_predictions <- bind_rows(cv12_prediction, cv_zero_prediction)
 
 
 
+### Parent-offspring cross-validation
+
+## Data to use for CV
+pocv_data <- S2_MET_BLUEs %>% 
+  filter(environment %in% unique(cv_data$environment)) %>%
+  filter(line_name %in% c(tp_geno, vp_geno),
+         trait %in% traits,
+         environment %in% tp_vp_env) %>%
+  mutate(id = seq(nrow(.)))
+
+
+## Generate CV randomizations
+# First generate training/test lines
+train_test1 <- train_test %>%
+  mutate(test = list(vp_geno)) %>%
+  crossing(trait = traits, .)
+
+
+# POCV1 - predict the VP using all environments
+pocv1_rand <- train_test1 %>%
+  mutate_at(vars(train, test), funs(map2(.x = ., .y = trait, ~filter(pocv_data, line_name %in% .x, trait == .y))))
+
+# POCV2 - predict partially tested VP
+pocv2_rand <- pocv_data %>%
+  group_by(trait) %>%
+  do(crossv_mc(data = ., n = nCV, test = pTest)) %>%
+  ungroup()
+
+# POCV0 - predict totally tested VP in unobserved environments
+pocv0_rand <- pocv_data %>%
+  group_by(trait) %>%
+  do({
+    df <- .
+    
+    distinct(df, environment) %>% 
+      mutate(train = map(environment, ~filter(df, environment != .)), 
+             test = map(environment, ~filter(df, environment == ., line_name %in% vp_geno)))
+  }) %>% ungroup() %>%
+  mutate(.id = "01")
+
+# POCV00 - predict totally untested VP in totally untested environments
+pocv00_rand <- full_join(train_test1, select(pocv0_rand, -.id), by = "trait") %>%
+  mutate(train = map2(train.x, train.y, ~filter(.y, line_name %in% .x)),
+         test = map2(test.x, test.y, ~filter(.y, line_name %in% .x))) %>%
+  select(trait, environment, .id, train, test) %>%
+  arrange(trait, environment)
+
+## Combine POCV1 and POCV2
+POCV12 <- bind_rows(
+  mutate(pocv1_rand, cv = "pocv1"),
+  mutate(pocv2_rand, cv = "pocv2")
+)
+
+POCV_zero <- bind_rows(
+  mutate(pocv0_rand, cv = "pocv0"),
+  mutate(pocv00_rand, cv = "pocv00")
+)
 
 
 
 
+## Use parallelization
+pocv12_prediction <- POCV12 %>%
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    # Iterate over core_df
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+      
+      ## Model 2
+      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      ## Model 3
+      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      
+      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      
+    }
+    
+    core_df %>% 
+      mutate(results = results_out) %>%
+      select(cv, trait, .id, results)
+    
+  })
 
+pocv12_prediction <- bind_rows(pocv12_prediction)
+
+## CV-zero
+pocv_zero_prediction <- POCV_zero %>%
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    # Iterate over core_df
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+      
+      ## Model 2
+      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      ## Model 3
+      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      
+      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      
+    }
+    
+    core_df %>% 
+      mutate(results = results_out) %>%
+      select(cv, trait, .id, results) %>% 
+      unnest(results)
+    
+  })
+
+pocv_zero_prediction <- bind_rows(pocv_zero_prediction)
+
+
+
+## Combine
+pocv_predictions <- bind_rows(pocv12_prediction, pocv_zero_prediction)
+
+
+
+## Save
+save("cv_predictions", "pocv_predictions", file = file.path(results_dir, "cross_validation.RData"))
 
 
 
