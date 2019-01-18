@@ -614,7 +614,7 @@ model1 <- function(train, test) {
 model2 <- function(train, test, Kg, Ke) {
   mf <- train %>% 
     mutate(LineName = line_name,
-           line_name = factor(line_name, levels = tp_geno)) %>%
+           line_name = factor(line_name, levels = colnames(Kg))) %>%
     model.frame(value ~ line_name + LineName + environment, data = .)
   
   # Matrices
@@ -679,7 +679,7 @@ model2 <- function(train, test, Kg, Ke) {
 model3 <- function(train, test, Kg, Ke) {
   mf <- train %>% 
     mutate(LineName = line_name,
-           line_name = factor(line_name, levels = tp_geno),
+           line_name = factor(line_name, levels = colnames(Kg)),
            interaction = interaction(line_name, environment, sep = ":")) %>%
     model.frame(value ~ line_name + LineName + environment + interaction, data = .)
   

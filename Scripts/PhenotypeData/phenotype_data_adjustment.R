@@ -115,8 +115,15 @@ for (i in seq(nrow(stage_one_results))) {
   full_form <- base_form %>%
     add_predictors(as.formula(str_c("~ ", str_c("(1|", rand_eff_tomodel, ")", collapse = " + "))))
   
+  
+  
+  ## Testing contrasts
+  contrasts(df$line) <- contr.treatment(levels(df$line))
+  contrasts(df$check) <- contr.treatment(levels(df$check))
+  
+  
   # Fit the model
-  fit <- lmer(formula = full_form, data = df, contrasts = list(line = "contr.sum"))
+  fit <- lmer(formula = full_form, data = df)
   # Backwards elimination
   back_elim <- step(fit, alpha.random = 0.05, reduce.fixed = FALSE)
   fit_final <- get_model(back_elim)
@@ -168,6 +175,7 @@ for (i in seq(nrow(stage_one_results))) {
 
 # Unnest
 stage_one_data <- stage_one_results %>%
+  filter(trait %in% traits) %>%
   unnest()
 
 

@@ -26,6 +26,9 @@ library(ggrepel)
 
 # Load the distance matrices
 load(file.path(result_dir, "distance_method_results.RData"))
+# Load the tidy S2 data
+load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
+
 
 
 ## significance level
@@ -167,6 +170,25 @@ ggsave(filename = "met_trait_dist.jpg", plot = g_met_dist, path = fig_dir, width
 
 
 
+
+## Fit a one-step model to analyze GxE
+# Subset the traits and relevant trials
+data_to_model <- s2_tidy_pheno %>%
+  filter(year %in% 2015:2017, !str_detect(trial, "FHB|PVV"), trait %in% traits) %>%
+  mutate(location = ifelse(location == "CNY", "HNY", location),
+         environment = ifelse(environment == "CNY15", "HNY15", environment)) %>%
+  group_by(trait) %>%
+  filter(n_distinct(environment) > 35) %>%
+  group_by(trial, trait, line_name) %>% 
+  ungroup() %>%
+  mutate(line_name = as.character(line_name),
+         line = ifelse(!line_name %in% checks, line_name, "00check"),
+         check = ifelse(line_name %in% checks, line_name, "00line")) %>%
+  mutate_at(vars(rep, line, check, row, column, blk), as.factor)
+
+
+
+
 ## Stage-Two analysis
 
 
@@ -180,6 +202,14 @@ boot_reps <- 100
 
 # Group by trait and fit the multi-environment model
 # Fit models in the TP and the TP + VP
+
+#### Note
+#### 
+#### I am not sure whether to weight the residuals. It seems to result in a more realistic estimate of residual
+#### variance, but it may not be correct.
+#### 
+
+
 stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
   mutate_at(vars(location, year, line_name), as.factor) %>%
   group_by(trait, population) %>%
@@ -207,12 +237,16 @@ stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
     
     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
     
-    # Get the weights
-    wts <- pull(df, std_error)^2
+    # # Get the weights
+    # wts <- pull(df, std_error)^2
+    # 
+    # ## Fit the full model
+    # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
+    #             data = df, control = lmer_control, weights = wts)
     
     ## Fit the full model
     fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
-                data = df, control = lmer_control, weights = wts)
+                data = df, control = lmer_control)
     
     ## Likelihood ratio tests
     lrt <- ranova(fit) %>% 

@@ -26,6 +26,8 @@ load(file.path(result_dir, "distance_method_results.RData"))
 load(file.path(result_dir, "distance_rank_predictions.RData"))
 # Load the cluster results
 load(file.path(result_dir, "cluster_predictions.RData"))
+# Load the cross-validation results
+load(file.path(result_dir, "cross_validation.RData"))
 
 
 ## Significant level
@@ -1052,6 +1054,178 @@ g_cluster_cv_design_effect <- cluster_cv_predictions_analysis %>%
 ## Save
 ggsave(filename = "cluster_cv_design_effect.jpg", plot = g_cluster_cv_design_effect, path = fig_dir, 
        width = 6, height = 8, dpi = 1000)
+
+
+
+
+
+
+
+
+
+###
+### Cross-validation results
+### 
+### 
+
+# Regular cross-validation
+
+## Temporary edits
+cv_predictions_tidy <- bind_rows(
+  cv_predictions %>% filter(cv %in% c("cv1", "cv2")) %>% select(-model, -prediction) %>% unnest(),
+  cv_predictions %>% filter(cv %in% c("cv0", "cv00")) %>%   select(-results) ) %>%
+  unnest()
+
+
+## Calculate prediction accuracy and prepare for modelling
+cv_prediction_accuracy <- cv_predictions_tidy %>% 
+  group_by(trait, cv, model, environment, .id) %>% 
+  summarize(accuracy = cor(value, pred_value)) %>%
+  ungroup()
+  
+
+cv_prediction_accuracy_tomodel <- cv_prediction_accuracy %>%
+  mutate(zscore = ztrans(accuracy),
+         environment = as.factor(environment),
+         model = factor(model))
+
+## Fit a model by trait and CV
+## The model will estimate the fixed effect of model and random everything else
+cv0_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
+  filter(cv == "cv0") %>%
+  group_by(cv, trait, model) %>%
+  summarize(mean_acc = mean(zscore))
+
+
+# Other cv
+other_cv_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
+  filter(cv != "cv0") %>%
+  distinct(trait, cv) %>%
+  mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
+
+## Iterate over rows
+for (i in seq(nrow(other_cv_prediction_accuracy_fit))) {
+  row <- other_cv_prediction_accuracy_fit[i,]
+  df <- cv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv == row$cv)
+  
+  # Fit the model
+  fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
+  ran <- ranova(fit)
+  aov <- anova(fit)
+  
+  other_cv_prediction_accuracy_fit$fit[[i]] <- fit
+  other_cv_prediction_accuracy_fit$anova[[i]] <- aov
+  other_cv_prediction_accuracy_fit$ranova[[i]] <- ran
+  other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
+}
+
+
+
+## Extract effects
+cv_prediction_accuracy_effect <- bind_rows(
+  unnest(other_cv_prediction_accuracy_fit, effect),
+  rename(cv0_prediction_accuracy_fit, fit = mean_acc)) %>%
+  mutate_at(vars(fit, lower, upper), funs(zexp(.)))
+
+## Plot
+g_cv <- cv_prediction_accuracy_effect %>%
+  ggplot(aes(x = cv, y = fit, color = model, shape = model)) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9), size = 2) + 
+  scale_y_continuous(breaks = pretty) +
+  facet_grid(~ trait) +
+  theme_acs()
+
+
+
+
+## Parent-offspring cross-validation
+
+## Temporary edits
+cv_predictions_tidy <- bind_rows(
+  cv_predictions %>% filter(cv %in% c("cv1", "cv2")) %>% select(-model, -prediction) %>% unnest(),
+  cv_predictions %>% filter(cv %in% c("cv0", "cv00")) %>%   select(-results) ) %>%
+  unnest()
+
+
+## Calculate prediction accuracy and prepare for modelling
+cv_prediction_accuracy <- cv_predictions_tidy %>% 
+  group_by(trait, cv, model, environment, .id) %>% 
+  summarize(accuracy = cor(value, pred_value)) %>%
+  ungroup()
+
+
+cv_prediction_accuracy_tomodel <- cv_prediction_accuracy %>%
+  mutate(zscore = ztrans(accuracy),
+         environment = as.factor(environment),
+         model = factor(model))
+
+## Fit a model by trait and CV
+## The model will estimate the fixed effect of model and random everything else
+cv0_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
+  filter(cv == "cv0") %>%
+  group_by(cv, trait, model) %>%
+  summarize(mean_acc = mean(zscore))
+
+
+# Other cv
+other_cv_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
+  filter(cv != "cv0") %>%
+  distinct(trait, cv) %>%
+  mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
+
+## Iterate over rows
+for (i in seq(nrow(other_cv_prediction_accuracy_fit))) {
+  row <- other_cv_prediction_accuracy_fit[i,]
+  df <- cv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv == row$cv)
+  
+  # Fit the model
+  fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
+  ran <- ranova(fit)
+  aov <- anova(fit)
+  
+  other_cv_prediction_accuracy_fit$fit[[i]] <- fit
+  other_cv_prediction_accuracy_fit$anova[[i]] <- aov
+  other_cv_prediction_accuracy_fit$ranova[[i]] <- ran
+  other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
