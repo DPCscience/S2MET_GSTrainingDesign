@@ -746,6 +746,100 @@ model3 <- function(train, test, Kg, Ke) {
 
 
 
+## Model 4 has a single random effect (main effect of G)
+model4 <- function(train, test, Kg) {
+  
+  mf <- train %>% 
+    mutate(line_name = factor(line_name, levels = colnames(Kg)),
+           environment = as.factor(environment),
+           interaction = interaction(line_name, environment, sep = ":")) %>%
+    model.frame(value ~ line_name  + environment + interaction, data = .)
+  
+  ## First fit model accounting for G and E (no GxE)
+  fit <- lm(value ~ line_name + environment, data = mf)
+  # Get the marginal means
+  means <- effects::Effect("line_name", fit) %>%
+    as.data.frame()
+  
+  mf1 <- means %>%
+    select(line_name, value = fit) %>%
+    mutate(line_name = factor(line_name, levels = colnames(Kg))) %>%
+    model.frame(value ~ line_name, data = .)
+  
+  # Matrices
+  y <- model.response(mf1)
+  X <- model.matrix(~ 1, data = mf1)
+  Zg <- model.matrix(~ -1 + line_name, mf1)
+  colnames(Zg) <- colnames(Kg)
+
+
+  ## Prediction
+  fit_alt <- mixed.solve(y = y, Z = Zg, K = Kg, X = X)
+
+  # Extract the predictions
+  pred_g <- fit_alt$u %>%
+    as.data.frame() %>%
+    rownames_to_column("line_name") %>%
+    rename_at(vars(-line_name), ~"g")
+
+  # Add test data
+  pred_alt <- left_join(test, pred_g, by = c("line_name")) %>%
+    mutate(pred_value = g) %>%
+    select(environment, line_name, value, pred_value)
+  
+  
+  return(pred_alt)
+  
+}
+
+
+## Model 5 has a single random effect (GxE)
+model5 <- function(train, test, Kg, Ke) {
+  
+  mf <- train %>% 
+    mutate(line_name = factor(line_name, levels = colnames(Kg)),
+           environment = as.factor(environment),
+           interaction = interaction(line_name, environment, sep = ":")) %>%
+    model.frame(value ~ line_name  + environment + interaction, data = .)
+  
+  # Matrices
+  y <- model.response(mf)
+  X <- model.matrix(~ 1, data = mf)
+  Zg <- model.matrix(~ -1 + line_name, mf)
+  colnames(Zg) <- colnames(Kg)
+  ZE <- model.matrix(~ -1 + environment, mf)
+  colnames(ZE) <- unique(mf$environment)
+  # Interaction
+  ZgE <- model.matrix(~ -1 + line_name:environment, mf)
+  colnames(ZgE) <- levels(mf$interaction)
+  
+  # GxE covariance matrix
+  # If Ke is missing, use diagonal
+  if (missing(Ke)) Ke <- diag(ncol(ZE))
+  
+  # K_gE <- (Zg %*% Kg %*% t(Zg)) * (ZE %*% Ke %*% t(ZE))
+  KgE <- kronecker(X = Ke, Y = Kg, make.dimnames = TRUE)
+  dimnames(KgE) <- replicate(2, colnames(ZgE), simplify = FALSE)
+  
+  
+  ## Prediction
+  fit_alt <- mixed.solve(y = y, Z = ZgE, K = KgE, X = X)
+  
+  # Extract the predictions
+  pred_gE <- fit_alt$u %>%
+    as.data.frame() %>%
+    rownames_to_column("term") %>%
+    separate(term, c("line_name", "environment"), sep = ":") %>%
+    rename_at(vars(-line_name, -environment), ~"gE")
+  
+  # Add test data
+  pred_alt <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
+    mutate(pred_value = gE) %>%
+    select(environment, line_name, value, pred_value)
+  
+  return(pred_alt)
+  
+}
 
 
 
