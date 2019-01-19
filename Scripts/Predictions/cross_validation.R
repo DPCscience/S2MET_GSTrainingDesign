@@ -48,7 +48,7 @@ K_pov <- K
 
 ## Data to use for CV
 cv_data <- S2_MET_BLUEs %>%
-  filter(environment %in% sample(tp_vp_env, 10)) %>%
+  # filter(environment %in% sample(tp_vp_env, 10)) %>%
   filter(line_name %in% tp_geno,
          trait %in% traits,
          environment %in% tp_vp_env) %>%
@@ -151,12 +151,21 @@ cv12_prediction <- CV12 %>%
       
       row <- core_df[i,]
     
-      ## Model 2
-      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
-      ## Model 3
-      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # ## Model 2
+      # model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # ## Model 3
+      # model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # 
+      # results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      # 
+      
+      ## Model 4
+      model4_out <- model4(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      ## Model 5
+      model5_out <- model5(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
     
-      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      results_out[[i]] <- data_frame(model = c("M4", "M5"), prediction = list(model4_out, model5_out))
+      
       
     }
     
@@ -181,12 +190,20 @@ cv_zero_prediction <- CV_zero %>%
       
       row <- core_df[i,]
       
-      ## Model 2
-      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
-      ## Model 3
-      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # ## Model 2
+      # model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # ## Model 3
+      # model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      # 
+      # results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      # 
       
-      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      ## Model 4
+      model4_out <- model4(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      ## Model 5
+      model5_out <- model5(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_cv)
+      
+      results_out[[i]] <- data_frame(model = c("M4", "M5"), prediction = list(model4_out, model5_out))
       
     }
     
@@ -317,12 +334,20 @@ pocv12_prediction <- POCV12 %>%
       
       row <- core_df[i,]
       
-      ## Model 2
-      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
-      ## Model 3
-      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # ## Model 2
+      # model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # ## Model 3
+      # model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # 
+      # results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      # 
       
-      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      ## Model 4
+      model4_out <- model4(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      ## Model 5
+      model5_out <- model5(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      
+      results_out[[i]] <- data_frame(model = c("M4", "M5"), prediction = list(model4_out, model5_out))
       
     }
     
@@ -346,12 +371,20 @@ pocv_zero_prediction <- POCV_zero %>%
       
       row <- core_df[i,]
       
-      ## Model 2
-      model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
-      ## Model 3
-      model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # ## Model 2
+      # model2_out <- model2(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # ## Model 3
+      # model3_out <- model3(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      # 
+      # results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      # 
       
-      results_out[[i]] <- data_frame(model = c("M2", "M3"), prediction = list(model2_out, model3_out))
+      ## Model 4
+      model4_out <- model4(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      ## Model 5
+      model5_out <- model5(train = as.data.frame(row$train[[1]]), test = as.data.frame(row$test[[1]]), Kg = K_pov)
+      
+      results_out[[i]] <- data_frame(model = c("M4", "M5"), prediction = list(model4_out, model5_out))
       
     }
     
