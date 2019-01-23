@@ -9,21 +9,21 @@
 ## This is the base script from which other scripts will draw
 ## 
 
-# Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
-source(file.path(repo_dir, "source_MSI.R"))
+# # Run the source script
+# repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+# source(file.path(repo_dir, "source_MSI.R"))
+# 
+# ## Number of cores
+# n_core <- 32
+# n_core <- detectCores()
 
-## Number of cores
-n_core <- 32
-n_core <- detectCores()
 
+# Run on a local machine
+repo_dir <- getwd()
+source(file.path(repo_dir, "source.R"))
 
-## Run on a local machine
-# repo_dir <- getwd()
-# source(file.path(repo_dir, "source.R"))
-#
-# # Other packages
-# library(modelr)
+# Other packages
+library(modelr)
 
 load(file.path(result_dir, "distance_method_results.RData"))
 
@@ -90,9 +90,12 @@ cv2_rand <- cv_data %>%
 # CV0 - predict previously tested genotypes in unobserved environments
 cv0_rand_loeo <- cv_data %>%
   group_by(trait) %>%
-  do(distinct(., environment) %>% 
+  do({
+    df <- .
+    
+    distinct(., environment) %>% 
       mutate(train = map(environment, ~filter(df, environment != .)), 
-             test = map(environment, ~filter(df, environment == .)))) %>% 
+             test = map(environment, ~filter(df, environment == .))) }) %>% 
   ungroup() %>%
   mutate(.id = "01")
 
@@ -171,9 +174,12 @@ pocv2_rand <- pocv_data %>%
 # POCV0 - predict totally tested VP in unobserved environments
 pocv0_rand_loeo <- pocv_data %>%
   group_by(trait) %>%
-  do(distinct(., environment) %>% 
-       mutate(train = map(environment, ~filter(df, environment != .)), 
-              test = map(environment, ~filter(df, environment == .)))) %>% 
+  do({
+    df <- .
+    
+    distinct(., environment) %>% 
+      mutate(train = map(environment, ~filter(df, environment != .)), 
+             test = map(environment, ~filter(df, environment == .))) }) %>% 
   ungroup() %>%
   mutate(.id = "01")
 

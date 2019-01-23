@@ -7,8 +7,8 @@
 ## 
 
 ## Source the base script
-pred_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
 pred_dir <- "C:/Users/jln54/GoogleDrive/BarleyLab/Projects/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
+pred_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
 source(file.path(pred_dir, "cross_validation_base.R"))
 
 
