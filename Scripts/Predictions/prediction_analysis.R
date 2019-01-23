@@ -18,6 +18,7 @@ library(ggforce)
 library(ggridges)
 library(gridExtra)
 library(broom)
+library(car)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
@@ -1063,6 +1064,12 @@ ggsave(filename = "cluster_cv_design_effect.jpg", plot = g_cluster_cv_design_eff
 
 
 
+
+
+
+
+
+
 ###
 ### Cross-validation results
 ### 
@@ -1100,27 +1107,27 @@ cv_prediction_accuracy_tomodel %>%
   do(levene_test = leveneTest(y = .$zscore, group = .$cv)) %>% 
   pull()
 
-## Results suggest homogeneity of variance, so fit models across all CV schema
+## Results suggest heterogeneity of variance, so fit model for each CV scheme
 
 
 
 # Other cv
 other_cv_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>%
-  # distinct(trait, cv) %>%
-  distinct(design, trait) %>%
+  filter(cv != "cv0") %>% filter(cv != "cv00") %>%
+  distinct(design, trait, cv) %>%
+  # distinct(design, trait) %>%
   mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
 
 ## Iterate over rows
 for (i in seq(nrow(other_cv_prediction_accuracy_fit))) {
   row <- other_cv_prediction_accuracy_fit[i,]
-  df <- cv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv != "cv0")
+  df <- cv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv == row$cv)
 
   
   # Fit the model
-  # fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
-  fit <- lmer(zscore ~ 1 + model + cv + model:cv + (1|environment) + (1|model:environment) + (1|cv:environment) + 
-                (1|cv:model:environment), data = df)
+  fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
+  # fit <- lmer(zscore ~ 1 + model + cv + model:cv + (1|environment) + (1|model:environment) + (1|cv:environment) + 
+  #               (1|cv:model:environment), data = df)
   
   ran <- ranova(fit)
   aov <- anova(fit)
@@ -1128,8 +1135,8 @@ for (i in seq(nrow(other_cv_prediction_accuracy_fit))) {
   other_cv_prediction_accuracy_fit$fit[[i]] <- fit
   other_cv_prediction_accuracy_fit$anova[[i]] <- aov
   other_cv_prediction_accuracy_fit$ranova[[i]] <- ran
-  # other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
-  other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect(c("model", "cv"), fit))
+  other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
+  # other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect(c("model", "cv"), fit))
   
 }
 
@@ -1141,9 +1148,13 @@ cv_prediction_accuracy_effect <- bind_rows(
   rename(cv0_prediction_accuracy_fit, fit = mean_acc)) %>%
   mutate_at(vars(fit, lower, upper), funs(zexp(.)))
 
+## A vector to rename models
+model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Main effect)", "M5" = "M2 (GxE)")
+
+
 ## Plot
 g_cv <- cv_prediction_accuracy_effect %>%
-  mutate(model = str_replace_all(model, c("M2" = "M2 (Main effect)", "M3" = "M3 (GxE)")),
+  mutate(model = str_replace_all(model, model_replace),
          cv = str_to_upper(cv)) %>%
   rename(Model = model) %>%
   ggplot(aes(x = cv, y = fit, color = Model, shape = Model)) +
@@ -1204,7 +1215,7 @@ pocv_prediction_accuracy_tomodel %>%
 
 # Other cv
 other_pocv_prediction_accuracy_fit <- pocv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>%
+  filter(cv != "cv0") %>% filter(cv != "cv00") %>%
   distinct(design, trait, cv) %>%
   # distinct(trait) %>%
   mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
@@ -1240,7 +1251,7 @@ pocv_prediction_accuracy_effect <- bind_rows(
 
 ## Plot
 g_pocv <- pocv_prediction_accuracy_effect %>%
-  mutate(model = str_replace_all(model, c("M2" = "M2 (Main effect)", "M3" = "M3 (GxE)")),
+  mutate(model = str_replace_all(model, model_replace),
          cv = str_to_upper(cv)) %>%
   rename(Model = model) %>%
   ggplot(aes(x = cv, y = fit, color = Model, shape = Model)) +

@@ -703,6 +703,8 @@ model3 <- function(train, test, Kg, Ke) {
   
   # Fit
   fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = Kg), E = list(Z = ZE, K = Ke), gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
+  # fit <- sommer::mmer(Y = y, X = X, Z = list(gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
+  
   
   # Predictions
   pred_g <- fit$u.hat$g %>%
@@ -724,21 +726,11 @@ model3 <- function(train, test, Kg, Ke) {
     left_join(., pred_gE, by = c("line_name", "environment")) %>%
     mutate(pred_value = rowSums(select(., g, E, gE), na.rm = TRUE)) %>%
     select(environment, line_name, value, pred_value)
-  
-  
-  # ## Prediction of just GxE effect
-  # fit_alt <- mixed.solve(y = y, Z = ZgE, K = K_gE, X = X)
-  # 
-  # pred_gE <- fit_alt$u %>%
-  #   as.data.frame() %>%
-  #   rownames_to_column("term") %>%
-  #   separate(term, c("line_name", "environment"), sep = ":") %>%
-  #   rename_at(vars(-line_name, -environment), ~"gE")
-  # 
-  # 
-  # pred_alt <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
-  #   mutate(pred_value = gE) %>%
+    
+  # pred <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
+  #   mutate(pred_value = rowSums(select(., gE), na.rm = TRUE)) %>%
   #   select(environment, line_name, value, pred_value)
+
   
   return(pred)
   
@@ -808,7 +800,7 @@ model5 <- function(train, test, Kg, Ke) {
   Zg <- model.matrix(~ -1 + line_name, mf)
   colnames(Zg) <- colnames(Kg)
   ZE <- model.matrix(~ -1 + environment, mf)
-  colnames(ZE) <- unique(mf$environment)
+  colnames(ZE) <- levels(mf$environment)
   # Interaction
   ZgE <- model.matrix(~ -1 + line_name:environment, mf)
   colnames(ZgE) <- levels(mf$interaction)

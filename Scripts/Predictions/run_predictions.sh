@@ -6,7 +6,6 @@
 # #PBS -N environmental_distance_pred
 # #PBS -N environmental_covariance_predictions
 # #PBS -N cluster_preds
-#PBS -N cross-validation
 #PBS -M neyha001@umn.edu
 #PBS -m abe
 #PBS -r n
@@ -25,7 +24,4 @@ module load R/3.5.2_mkl
 
 # Cluster predictions
 # Rscript cluster_predictions.R
-
-# Cross validation
-Rscript cross_validation.R
 
