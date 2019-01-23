@@ -12,7 +12,7 @@
 #PBS -r n
 
 # Change the working directory
-cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/Scripts/Predictions/CrossValidation
+cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/
 
 # module load R/3.5.0
 module load R/3.5.2_mkl
@@ -20,12 +20,12 @@ module load R/3.5.2_mkl
 # Cross validation
 Rscript cross_validation_CV12.R
 
-Rscript cross_validation_CVzero_loeo.R
+# Rscript cross_validation_CVzero_loeo.R
 
-Rscript cross_validation_CVzero_future.R
+# Rscript cross_validation_CVzero_future.R
 
-Rscript cross_validation_POCV12.R
+# Rscript cross_validation_POCV12.R
 
-Rscript cross_validation_POCVzero_loeo.R
+# Rscript cross_validation_POCVzero_loeo.R
 
-Rscript cross_validation_POCVzero_future.R
+# Rscript cross_validation_POCVzero_future.R
