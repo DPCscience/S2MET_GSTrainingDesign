@@ -54,7 +54,8 @@ pocv12_prediction <- POCV12 %>%
       mutate(results = results_out) %>%
       select(cv, trait, .id, results)
     
-  })
+  }, mc.cores = n_core)
+
 
 pocv12_prediction <- bind_rows(pocv12_prediction)
 

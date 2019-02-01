@@ -65,7 +65,8 @@ cv_zero_loeo_prediction <- CV_zero_loeo %>%
       select(cv, trait, .id, results) %>% 
       unnest(results)
     
-  })
+  }, mc.cores = n_core)
+
 
 cv_zero_loeo_prediction <- bind_rows(cv_zero_loeo_prediction)
 

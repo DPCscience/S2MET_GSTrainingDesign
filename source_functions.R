@@ -517,9 +517,6 @@ window_mean <- function(x, y, window = 8) {
 }
 
 
-## Fisher's z transformation and back-transformation
-ztrans <- function(x) 0.5 * (log((1 + x) / (1 - x)))
-zexp <- function(x) (exp(2 * x) - 1) / (exp(2 * x) + 1)
 
 
 ## Function to create training and testing sets

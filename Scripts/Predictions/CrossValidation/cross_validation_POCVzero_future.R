@@ -58,7 +58,8 @@ pocv_zero_future_prediction <- POCV_zero_future %>%
       select(cv, trait, .id, results) %>% 
       unnest(results)
     
-  })
+  }, mc.cores = n_core)
+
 
 pocv_zero_future_prediction <- bind_rows(pocv_zero_future_prediction)
 

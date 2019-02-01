@@ -65,7 +65,8 @@ cv_zero_future_prediction <- CV_zero_future %>%
       select(cv, trait, .id, results) %>% 
       unnest(results)
     
-  })
+  }, mc.cores = n_core)
+
 
 cv_zero_future_prediction <- bind_rows(cv_zero_future_prediction)
 

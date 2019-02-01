@@ -68,7 +68,7 @@ cv12_prediction <- CV12 %>%
       select(cv, trait, .id, results) %>%
       unnest(results)
       
-  })
+  }, mc.cores = n_core)
 
 cv12_prediction <- bind_rows(cv12_prediction)
 
