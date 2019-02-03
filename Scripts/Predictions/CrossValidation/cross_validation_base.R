@@ -6,7 +6,8 @@
 ## Author: Jeff Neyhart
 ## Last modified: January 17, 2019
 ## 
-## This is the base script from which other scripts will draw
+## This is the base script from which other scripts will drawn upon
+## Cross-validation is initiated by drawing 20 replicates of 5-folds
 ## 
 
 # Run the source script
@@ -29,13 +30,11 @@ load(file.path(result_dir, "distance_method_results.RData"))
 
 
 ## Some parameters
-# The proportion of lines to use for testing (in CV schemes)
-# pTest <- 0.2
-pTest <- length(vp_geno) / length(tp_geno)
-pTrain <- 1 - pTest
+# Number of folds
+nFolds <- 5
 
 # Number of CV iterations
-nCV <- 100
+nCV <- 20
 
 
 
@@ -69,9 +68,9 @@ cv_data <- S2_MET_BLUEs %>%
 ## Generate CV randomizations
 # First generate training/test lines
 set.seed(1171039)
-train_test <- data_frame(.id = str_pad(as.character(seq(nCV)), width = 2, side = "left", pad = 0), 
-                         train = replicate(n = nCV, sample_frac(tbl = distinct(cv_data, line_name), size = pTrain)$line_name, simplify = FALSE)) %>%
-  mutate(test = map(train, ~setdiff(tp_geno, .))) %>%
+train_test <- replicate(n = nCV, crossv_kfold(data = distinct(cv_data, line_name), k = nFolds), simplify = FALSE) %>% 
+  map2_df(.x = ., .y = seq_along(.), ~mutate(.x, .id = paste0(.y, "_", .id))) %>%
+  mutate_at(vars(train, test), funs(map(., ~as.data.frame(.)$line_name))) %>%
   crossing(trait = traits, .)
 
 # CV1 - predict totally untested genotypes using all environments
@@ -79,9 +78,13 @@ cv1_rand <- train_test %>%
   mutate_at(vars(train, test), funs(map2(.x = ., .y = trait, ~filter(cv_data, line_name %in% .x, trait == .y))))
 
 # CV2 - predict partially tested genotypes
+# This randomly assigns observations in environments to a fivefold partition
 cv2_rand <- cv_data %>%
   group_by(trait) %>%
-  do(crossv_mc(data = ., n = nCV, test = pTest)) %>%
+  # do(crossv_mc(data = ., n = nCV, test = pTest)) %>%
+  do({
+    replicate(n = nCV, crossv_kfold(data = ., k = nFolds), simplify = FALSE) %>%
+      map2_df(.x = ., .y = seq_along(.), ~mutate(.x, .id = paste0(.y, "_", .id))) }) %>%
   ungroup()
 
 ## Predict unobserved environments
@@ -168,7 +171,10 @@ pocv1_rand <- train_test1 %>%
 # POCV2 - predict partially tested VP
 pocv2_rand <- pocv_data %>%
   group_by(trait) %>%
-  do(crossv_mc(data = ., n = nCV, test = pTest)) %>%
+  # do(crossv_mc(data = ., n = nCV, test = pTest)) %>%
+  do({
+    replicate(n = nCV, crossv_kfold(data = ., k = nFolds), simplify = FALSE) %>%
+      map2_df(.x = ., .y = seq_along(.), ~mutate(.x, .id = paste0(.y, "_", .id))) }) %>%
   ungroup()
 
 # POCV0 - predict totally tested VP in unobserved environments

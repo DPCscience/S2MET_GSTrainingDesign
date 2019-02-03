@@ -47,7 +47,8 @@ colors <- umn_palette(3)
 colors_use <- c(colors[2], "#FFDE7A", colors[c(1, 3, 8, 4, 9, 5, 10)], "grey75")
 dist_colors <- setNames(colors_use, dist_method_abbr)
 
-
+## A vector to rename models
+model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Main effect)", "M5" = "M2 (GxE)")
 
 
 
@@ -59,99 +60,52 @@ dist_colors <- setNames(colors_use, dist_method_abbr)
 
 # Regular cross-validation
 
-
-## Calculate prediction accuracy and prepare for modelling
-cv_prediction_accuracy <- cv_predictions %>% 
+## CV1 and CV2 - predicting untested genotypes or partially tested genotypes
+cv12_accuracy <- cv12_prediction %>% 
   unnest(prediction) %>% 
-  group_by(trait, cv, model, environment, .id) %>% 
+  group_by(cv, trait, model, .id, environment) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
-  ungroup()
+  ungroup() %>% 
+  mutate(zscore = ztrans(accuracy)) %>% 
+  mutate_at(vars(model, environment), as.factor)
+
+
+## Fit a model for each CV
+cv12_tomodel <- cv12_accuracy %>%
+  group_by(cv, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
+
+for (i in seq(nrow(cv12_tomodel))) {
   
-
-cv_prediction_accuracy_tomodel <- cv_prediction_accuracy %>%
-  mutate(zscore = ztrans(accuracy),
-         design = str_remove_all(cv, "[0-9]"),
-         cv = str_extract(cv, "cv[0-9]{1,2}")) %>%
-  mutate_at(vars(environment, model, cv), as.factor)
-
-## Fit a model by trait and CV
-## The model will estimate the fixed effect of model and random everything else
-cv0_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
-  filter(cv == "cv0") %>%
-  group_by(cv, trait, model, design) %>%
-  summarize(mean_acc = mean(zscore))
-
-
-## For each trait, fit a model then test for variance heterogeneity across CV schemes
-cv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>% 
-  group_by(trait) %>% 
-  do(levene_test = leveneTest(y = .$zscore, group = .$cv)) %>% 
-  pull()
-
-## Results suggest heterogeneity of variance, so fit model for each CV scheme
-
-
-
-# Other cv
-other_cv_prediction_accuracy_fit <- cv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>% filter(cv != "cv00") %>%
-  distinct(design, trait, cv) %>%
-  # distinct(design, trait) %>%
-  mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
-
-## Iterate over rows
-for (i in seq(nrow(other_cv_prediction_accuracy_fit))) {
-  row <- other_cv_prediction_accuracy_fit[i,]
-  df <- cv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv == row$cv)
-
+  df <- unnest(cv12_tomodel[i,], data)
   
-  # Fit the model
-  fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
-  # fit <- lmer(zscore ~ 1 + model + cv + model:cv + (1|environment) + (1|model:environment) + (1|cv:environment) + 
-  #               (1|cv:model:environment), data = df)
+  # Fit a model
+  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
   
-  ran <- ranova(fit)
-  aov <- anova(fit)
+  # Significance testing
+  anova_df <- tidy(anova(fit))
+  ranova_df <- tidy(ranova(fit))
+  effects_df <- as.data.frame(Effect("model", fit))
   
-  other_cv_prediction_accuracy_fit$fit[[i]] <- fit
-  other_cv_prediction_accuracy_fit$anova[[i]] <- aov
-  other_cv_prediction_accuracy_fit$ranova[[i]] <- ran
-  other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
-  # other_cv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect(c("model", "cv"), fit))
+  cv12_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
   
 }
 
-
-
-## Extract effects
-cv_prediction_accuracy_effect <- bind_rows(
-  unnest(other_cv_prediction_accuracy_fit, effect),
-  rename(cv0_prediction_accuracy_fit, fit = mean_acc)) %>%
-  mutate_at(vars(fit, lower, upper), funs(zexp(.)))
-
-## A vector to rename models
-model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Main effect)", "M5" = "M2 (GxE)")
+cv12_summ <- cv12_tomodel %>% 
+  unnest(out) %>% 
+  select(-data) %>%
+  unnest(effects) %>%
+  mutate_at(vars(fit, lower, upper), zexp)
 
 
 ## Plot
-g_cv <- cv_prediction_accuracy_effect %>%
-  mutate(model = str_replace_all(model, model_replace),
-         cv = str_to_upper(cv)) %>%
-  rename(Model = model) %>%
-  ggplot(aes(x = cv, y = fit, color = Model, shape = Model)) +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.75), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.75), size = 2) + 
-  scale_y_continuous(breaks = pretty, limits = c(0, 1), name = "Prediction accuracy") +
-  xlab("Cross-validation scheme") +
-  facet_grid(~ trait) +
-  # theme_presentation2(base_size = 10) +
-  theme_acs() +
-  theme(legend.position = c(0.15, 0.80))
-
-ggsave(filename = "cross_validation_accuracy.jpg", plot = g_cv, path = fig_dir, width = 5, height = 3, dpi = 1000)
-
-
+cv12_summ %>%
+  mutate(cv = toupper(cv)) %>%
+  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9), size = 2) +
+  facet_grid(~ trait)
 
 
 
@@ -225,6 +179,80 @@ bind_rows(cv0_future_summ, cv00_future_summ) %>%
 
 
 
+## CV0 and CV00 - leave one environment out 
+
+# Calculate accuracy
+cv_zero_loeo_acc <- cv_zero_loeo_prediction %>% 
+  unnest(prediction) %>% 
+  group_by(trait, cv, model, .id, environment) %>% 
+  summarize(accuracy = cor(value, pred_value)) %>%
+  ungroup() %>%
+  mutate(zscore = ztrans(accuracy)) %>%
+  mutate_at(vars(model, environment), as.factor)
+
+## Summarize for CV0
+cv0_future_summ <- cv_zero_future_acc %>% 
+  filter(cv == "cv0") %>% 
+  group_by(cv, trait, model) %>% 
+  summarize(fit = mean(accuracy)) %>%
+  ungroup()
+
+# trait       model accuracy
+# 1 GrainYield  M4       0.486
+# 2 GrainYield  M5_PD    0.469
+# 3 HeadingDate M4       0.822
+# 4 HeadingDate M5_PD    0.815
+# 5 PlantHeight M4       0.497
+# 6 PlantHeight M5_PD    0.489
+
+
+## Fit a model for CV00
+cv00_future_tomodel <- cv_zero_future_acc %>%
+  filter(cv == "cv00") %>%
+  group_by(cv, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
+
+for (i in seq(nrow(cv00_future_tomodel))) {
+  
+  df <- unnest(cv00_future_tomodel[i,], data)
+  
+  # Fit a model
+  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
+  
+  # Significance testing
+  anova_df <- tidy(anova(fit))
+  ranova_df <- tidy(ranova(fit))
+  effects_df <- as.data.frame(Effect("model", fit))
+  
+  cv00_future_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
+  
+}
+
+cv00_future_summ <- cv00_future_tomodel %>% 
+  unnest(out) %>% 
+  select(-data) %>%
+  unnest(effects) %>%
+  mutate_at(vars(fit, lower, upper), zexp)
+
+
+## Combine and plot
+bind_rows(cv0_future_summ, cv00_future_summ) %>%
+  mutate(cv = toupper(cv)) %>%
+  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9), size = 2) +
+  facet_grid(~ trait)
+
+
+
+cv_combine <- bind_rows(cv12_summ, cv0_future_summ, cv00_future_summ) %>%
+  mutate(cv_class = "cv")
+
+
+
+
+
 
 
 ####
@@ -232,101 +260,124 @@ bind_rows(cv0_future_summ, cv00_future_summ) %>%
 #### 
 
 
-
-
-## Temporary edits
-pocv_predictions_tidy <- bind_rows(
-  pocv_predictions %>% filter(cv %in% c("pocv1", "pocv2")) %>% select(-model, -prediction) %>% unnest(),
-  pocv_predictions %>% filter(cv %in% c("pocv0", "pocv00")) %>%   select(-results) ) %>%
-  unnest()
-
-## Calculate prediction accuracy and prepare for modelling
-pocv_prediction_accuracy <- pocv_predictions_tidy %>% 
-  # unnest(prediction) %>% 
-  group_by(trait, cv, model, environment, .id) %>% 
+## POCV1 and POCV2 - predicting untested genotypes or partially tested genotypes
+pocv12_accuracy <- pocv12_prediction %>% 
+  unnest() %>% unnest() %>%
+  group_by(cv, trait, model, .id, environment) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
-  ungroup()
+  ungroup() %>% 
+  mutate(zscore = ztrans(accuracy)) %>% 
+  mutate_at(vars(model, environment), as.factor)
 
 
-pocv_prediction_accuracy_tomodel <- pocv_prediction_accuracy %>%
-  mutate(zscore = ztrans(accuracy),
-         design = str_remove_all(cv, "[0-9]"),
-         cv = str_extract(cv, "cv[0-9]{1,2}")) %>%
-  mutate_at(vars(environment, model, cv), as.factor)
+## Fit a model for each CV
+pocv12_tomodel <- pocv12_accuracy %>%
+  group_by(cv, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
 
-## Fit a model by trait and CV
-## The model will estimate the fixed effect of model and random everything else
-pocv0_prediction_accuracy_fit <- pocv_prediction_accuracy_tomodel %>%
-  filter(cv == "cv0") %>%
-  group_by(design, cv, trait, model) %>%
-  summarize(mean_acc = mean(zscore))
-
-
-## For each trait, fit a model then test for variance heterogeneity across CV schemes
-pocv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>% 
-  group_by(design, trait) %>% 
-  do(levene_test = leveneTest(y = .$zscore, group = .$cv)) %>% 
-  pull()
-
-## Results suggest heterogeneity of variance, so fit models separately for all CV schema
-
-
-
-# Other cv
-other_pocv_prediction_accuracy_fit <- pocv_prediction_accuracy_tomodel %>%
-  filter(cv != "cv0") %>% filter(cv != "cv00") %>%
-  distinct(design, trait, cv) %>%
-  # distinct(trait) %>%
-  mutate(fit = list(NULL), effect = list(NULL), anova = list(NULL), ranova = list(NULL))
-
-## Iterate over rows
-for (i in seq(nrow(other_pocv_prediction_accuracy_fit))) {
-  row <- other_pocv_prediction_accuracy_fit[i,]
-  df <- pocv_prediction_accuracy_tomodel %>% filter(trait == row$trait, cv == row$cv)
-  # df <- pocv_prediction_accuracy_tomodel %>% filter(trait == row$trait)
+for (i in seq(nrow(pocv12_tomodel))) {
   
+  df <- unnest(pocv12_tomodel[i,], data)
   
-  # Fit the model
-  fit <- lmer(zscore ~ 1 + model + (1|environment) + (1|model:environment), data = df)
+  # Fit a model
+  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
   
-  ran <- ranova(fit)
-  aov <- anova(fit)
+  # Significance testing
+  anova_df <- tidy(anova(fit))
+  ranova_df <- tidy(ranova(fit))
+  effects_df <- as.data.frame(Effect("model", fit))
   
-  other_pocv_prediction_accuracy_fit$fit[[i]] <- fit
-  other_pocv_prediction_accuracy_fit$anova[[i]] <- aov
-  other_pocv_prediction_accuracy_fit$ranova[[i]] <- ran
-  other_pocv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect("model", fit))
-  # other_pocv_prediction_accuracy_fit$effect[[i]] <- as.data.frame(Effect(c("model", "cv"), fit))
+  pocv12_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
   
 }
 
+pocv12_summ <- pocv12_tomodel %>% 
+  unnest(out) %>% 
+  select(-data) %>%
+  unnest(effects) %>%
+  mutate_at(vars(fit, lower, upper), zexp)
 
-
-## Extract effects
-pocv_prediction_accuracy_effect <- bind_rows(
-  unnest(other_pocv_prediction_accuracy_fit, effect),
-  rename(pocv0_prediction_accuracy_fit, fit = mean_acc)) %>%
-  mutate_at(vars(fit, lower, upper), funs(zexp(.)))
 
 ## Plot
-g_pocv <- pocv_prediction_accuracy_effect %>%
-  mutate(model = str_replace_all(model, model_replace),
-         cv = str_to_upper(cv)) %>%
-  rename(Model = model) %>%
-  ggplot(aes(x = cv, y = fit, color = Model, shape = Model)) +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.75), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.75), size = 2) + 
-  scale_y_continuous(breaks = pretty, limits = c(0, 1), name = "Prediction accuracy") +
-  xlab("Cross-validation scheme") +
-  facet_grid(~ trait) +
-  # theme_presentation2(base_size = 10) +
-  theme_acs() +
-  theme(legend.position = c(0.15, 0.80))
-
-ggsave(filename = "parent_offspring_cross_validation_accuracy.jpg", plot = g_pocv, path = fig_dir, width = 5, height = 3, dpi = 1000)
+pocv12_summ %>%
+  mutate(cv = toupper(cv)) %>%
+  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9), size = 2) +
+  facet_grid(~ trait)
 
 
+
+
+## CV0 and CV00 - predicting future years
+
+# Calculate accuracy
+pocv_zero_future_acc <- pocv_zero_future_prediction %>% 
+  unnest(prediction) %>% 
+  group_by(trait, cv, model, .id, environment) %>% 
+  summarize(accuracy = cor(value, pred_value)) %>%
+  ungroup() %>%
+  mutate(zscore = ztrans(accuracy)) %>%
+  mutate_at(vars(model, environment), as.factor)
+
+## Summarize for CV0
+pocv0_future_summ <- pocv_zero_future_acc %>% 
+  filter(cv == "pocv0") %>% 
+  group_by(cv, trait, model) %>% 
+  summarize(fit = mean(accuracy)) %>%
+  ungroup()
+
+# trait       model accuracy
+# 1 GrainYield  M4       0.486
+# 2 GrainYield  M5_PD    0.469
+# 3 HeadingDate M4       0.822
+# 4 HeadingDate M5_PD    0.815
+# 5 PlantHeight M4       0.497
+# 6 PlantHeight M5_PD    0.489
+
+
+## Fit a model for CV00
+pocv00_future_tomodel <- pocv_zero_future_acc %>%
+  filter(cv == "pocv00") %>%
+  group_by(cv, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
+
+for (i in seq(nrow(pocv00_future_tomodel))) {
+  
+  df <- unnest(pocv00_future_tomodel[i,], data)
+  
+  # Fit a model
+  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
+  
+  # Significance testing
+  anova_df <- tidy(anova(fit))
+  ranova_df <- tidy(ranova(fit))
+  effects_df <- as.data.frame(Effect("model", fit))
+  
+  pocv00_future_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
+  
+}
+
+pocv00_future_summ <- pocv00_future_tomodel %>% 
+  unnest(out) %>% 
+  select(-data) %>%
+  unnest(effects) %>%
+  mutate_at(vars(fit, lower, upper), zexp)
+
+
+pocv_combine <- bind_rows(pocv12_summ, pocv0_future_summ, pocv00_future_summ) %>%
+  mutate(cv_class = "pocv")
+
+
+## Combine and plot
+bind_rows(pocv0_future_summ, pocv00_future_summ) %>%
+  mutate(cv = toupper(cv)) %>%
+  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9), size = 2) +
+  facet_grid(~ trait)
 
 
 
@@ -398,6 +449,10 @@ pov00_summ <- pov00_tomodel %>%
   mutate_at(vars(fit, lower, upper), zexp)
 
 
+pov_combine <- bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
+  mutate(cv_class = "pov")
+
+
 ## Combine and plot
 bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
   mutate(cv = toupper(cv)) %>%
@@ -412,56 +467,30 @@ bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
 
 
 
-# Calculate accuracy
-cv_zero_future_acc <- cv_zero_future_prediction %>% 
-  unnest(prediction) %>% 
-  group_by(trait, cv, model, .id, environment) %>% 
-  summarize(accuracy = cor(value, pred_value)) %>%
-  ungroup() %>%
-  mutate(zscore = ztrans(accuracy)) %>%
-  mutate_at(vars(model, environment), as.factor)
+## 
+## Combine all CV and POV results
+## 
 
-## Summarize for CV0
-cv0_future_summ <- cv_zero_future_acc %>% 
-  filter(cv == "cv0") %>% 
-  group_by(cv, trait, model) %>% 
-  summarize(fit = mean(accuracy)) %>%
-  ungroup()
+all_val_combine <- bind_rows(cv_combine, pocv_combine, pov_combine)
 
 
-
-
-
-
-
-
-
-
-
-
-## Combine
-all_pred_accuracy_effect <- bind_rows(cv_prediction_accuracy_effect, pocv_prediction_accuracy_effect)
-
-
-## Plot
-g_all_cv <- all_pred_accuracy_effect %>%
-  mutate(model = str_replace_all(model, c("M2" = "M2 (Main effect)", "M3" = "M3 (GxE)")),
-         cv = str_to_upper(cv), design = str_to_upper(design),
-         group = paste0(design, "_", model)) %>%
-  ggplot(aes(x = cv, y = fit, color = design, shape = model)) +
-  geom_errorbar(aes(ymin = lower, ymax = upper, group = group), position = position_dodge(0.75), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.75), size = 2) + 
-  scale_color_discrete(name = "Design") +
+g_all_cv <- all_val_combine %>%
+  mutate_at(vars(cv, cv_class), toupper) %>%
+  mutate(model = str_extract(model, "M[0-9]"),
+         model = str_replace_all(model, model_replace),
+         cv = str_replace_all(cv, "_", "\n")) %>%
+  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, color = model, shape = model)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
+  geom_point(position = position_dodge(0.9)) +
+  facet_wrap(~ trait + cv_class, scales = "free_x") +
+  scale_y_continuous(name = "Prediction accuracy", breaks = pretty) +
+  scale_color_discrete(name = "Model") +
   scale_shape_discrete(name = "Model") +
-  scale_y_continuous(breaks = pretty, limits = c(0, 1), name = "Prediction accuracy") +
-  xlab("Cross-validation scheme") +
-  facet_grid(trait ~ .) +
-  # theme_presentation2(base_size = 10) +
-  theme_acs() +
-  theme(legend.position = "bottom", legend.direction = "horizontal")
+  theme_presentation2(base_size = 12) +
+  theme(axis.title.x = element_blank(), legend.position = "bottom")
 
 
-ggsave(filename = "all_cross_validation_accuracy.jpg", plot = g_all_cv, path = fig_dir, width = 4, height = 4, dpi = 1000)
+ggsave(filename = "all_cross_validation_accuracy.jpg", plot = g_all_cv, path = fig_dir, width = 7, height = 9, dpi = 1000)
 
 
 #
