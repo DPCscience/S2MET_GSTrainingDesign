@@ -1,11 +1,12 @@
 #!/bin/bash
 
-#PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
-#PBS -N cross-validation-CV12
+# #PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
+#PBS -l walltime=24:00:00,mem=32gb,nodes=1:ppn=16
+# #PBS -N cross-validation-CV12
 # #PBS -N cross-validation-CVzeroLOEO
 # #PBS -N cross-validation-CVzeroFuture
 # #PBS -N cross-validation-POCV12
-# #PBS -N cross-validation-POCVzeroFuture
+#PBS -N cross-validation-POCVzeroLOEO
 # #PBS -N cross-validation-POCVzeroFuture
 #PBS -M neyha001@umn.edu
 #PBS -m abe
@@ -14,11 +15,11 @@
 # Change the working directory
 cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/
 
-# module load R/3.5.0
-module load R/3.5.2_mkl
+module load R/3.5.0
+# module load R/3.5.2_mkl
 
 # Cross validation
-Rscript cross_validation_CV12.R
+# Rscript cross_validation_CV12.R
 
 # Rscript cross_validation_CVzero_loeo.R
 
@@ -26,6 +27,6 @@ Rscript cross_validation_CV12.R
 
 # Rscript cross_validation_POCV12.R
 
-# Rscript cross_validation_POCVzero_loeo.R
+Rscript cross_validation_POCVzero_loeo.R
 
 # Rscript cross_validation_POCVzero_future.R

@@ -59,7 +59,7 @@ env_cor_mats <- env_rank_df %>%
 
 ## Data to use for CV
 cv_data <- S2_MET_BLUEs %>%
-  # filter(environment %in% sample(tp_vp_env, 10)) %>%
+  filter(environment %in% sample(tp_vp_env, 10)) %>%
   filter(line_name %in% tp_geno,
          trait %in% traits,
          environment %in% tp_vp_env) %>%
