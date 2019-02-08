@@ -110,11 +110,24 @@ env_herit_rank <- stage_one_data %>%
 irrig_env <- subset(trial_info, irrigated == "yes", environment)[[1]]
 
 # Filter the S2 MET BLUEs for non-irrigated trials
-S2_MET_BLUEs <- S2_MET_BLUEs %>% 
+S2_MET_BLUEs_temp <- S2_MET_BLUEs %>% 
   filter(!environment %in% irrig_env) %>%
   # Remove environments deemed failures (i.e. HNY16 for grain yield)
   filter(!(environment == "HNY16" & trait == "GrainYield"),
          !(environment == "BCW16" & trait == "PlantHeight"))
+
+## Remove environments with low heritability
+high_herit_environments <- env_herit_rank %>%
+  map(mutate, environment = as.character(environment)) %>% 
+  map(~filter(., heritability >= 0.10))
+
+S2_MET_BLUEs_temp1 <- S2_MET_BLUEs_temp %>% 
+  split(.$trait) %>%
+  map2_df(.x = ., .y = high_herit_environments, ~filter(.x, environment %in% .y$environment))
+
+
+## Reassign BLUEs
+S2_MET_BLUEs <- S2_MET_BLUEs_temp1
 
 
 # Find environments in which just data on both the TP and VP is available
@@ -167,16 +180,5 @@ realistic_train_env <- tp_vp_env_trait %>%
 realistic_test_env <- tp_vp_env_trait %>%
   map(~str_subset(., "17"))
 
-
-
-## Sample environments for testing
-# First identify environments in which the TP and VP are phenotyped for all traits
-set.seed(1049)
-sample_envs <- S2_MET_BLUEs %>% 
-  group_by(environment) %>% 
-  filter(sum(tp_geno %in% line_name) > 0, sum(vp_geno %in% line_name) > 0, dplyr::n_distinct(trait) == length(unique(S2_MET_BLUEs$trait))) %>%
-  pull(environment) %>%
-  unique() %>%
-  sample(x = ., size = 10)
 
 
