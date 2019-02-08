@@ -7,26 +7,35 @@
 ## Last modified: January 17, 2019
 ## 
 
-## Parent-offspring cross-validation
+# ## Parent-offspring cross-validation
+# 
+# # Run on a local machine
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# 
+# # Other packages
+# library(modelr)
 
-# Run on a local machine
-repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
 
-# Other packages
-library(modelr)
+
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+source(file.path(repo_dir, "source_MSI.R"))
+
+## Number of cores
+n_core <- 32
+n_core <- detectCores()
+
 
 load(file.path(result_dir, "distance_method_results.RData"))
 
 
-## Some parameters
-# The proportion of lines to use for testing (in CV schemes)
-# pTest <- 0.2
-pTest <- length(vp_geno) / length(tp_geno)
-pTrain <- 1 - pTest
+
+# Number of folds
+k <- 5
 
 # Number of CV iterations
-nCV <- 100
+nCV <- 50
 
 
 
@@ -147,10 +156,23 @@ pov1_prediction <- pov1_rand %>%
 
 
 ## Predict
-pov0_loeo_prediction <- pov0_rand_loeo %>%
-  group_by(trait, environment) %>%
-  do({
-    row <- .
+# pov0_loeo_prediction <- pov0_rand_loeo %>%
+#   group_by(trait, environment) %>%
+#   do({
+#   
+#       row <- .
+    
+pov0_loeo_prediction <- pov0_rand_loeo %>% 
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+    
+
     tr_env <- tp_vp_env_trait[[row$trait[[1]]]]
     
     
@@ -172,17 +194,37 @@ pov0_loeo_prediction <- pov0_rand_loeo %>%
     
     model5_PD_out <- model5(train = train, test = test, Kg = K_pov, Ke = Ke)
     
-    data_frame(model = c("M4", "M5_PD"), 
-               prediction = list(model4_out, model5_PD_out))
+    results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
-  }) %>% ungroup()
+    }
+    
+  })
+    
+    
+  #   data_frame(model = c("M4", "M5_PD"), 
+  #              prediction = list(model4_out, model5_PD_out))
+  #   
+  # }) %>% ungroup()
 
 
 ## Predict
-pov0_future_prediction <- pov0_rand_future %>%
-  group_by(trait) %>%
-  do({
-    row <- .
+# pov0_future_prediction <- pov0_rand_future %>%
+#   group_by(trait) %>%
+#   do({
+#     row <- .
+
+pov0_future_prediction <- pov0_rand_future %>% 
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+    
+    
+    
     tr_env <- tp_vp_env_trait[[row$trait[[1]]]]
     
     
@@ -204,18 +246,40 @@ pov0_future_prediction <- pov0_rand_future %>%
     
     model5_PD_out <- model5(train = train, test = test, Kg = K_pov, Ke = Ke)
     
-    data_frame(model = c("M4", "M5_PD"), 
-               prediction = list(model4_out, model5_PD_out))
+    results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
-  }) %>% ungroup()
+    }
+    
+  })
+    
+
+    
+  #   data_frame(model = c("M4", "M5_PD"), 
+  #              prediction = list(model4_out, model5_PD_out))
+  #   
+  # }) %>% ungroup()
 
 
 
-## Predict
-pov00_loeo_prediction <- pov00_rand_loeo %>%
-  group_by(trait, environment) %>%
-  do({
-    row <- .
+# ## Predict
+# pov00_loeo_prediction <- pov00_rand_loeo %>%
+#   group_by(trait, environment) %>%
+#   do({
+#     row <- .
+
+pov00_loeo_prediction <- pov00_rand_loeo %>% 
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+    
+    
+    
+    
     tr_env <- tp_vp_env_trait[[row$trait[[1]]]]
     
     
@@ -237,17 +301,37 @@ pov00_loeo_prediction <- pov00_rand_loeo %>%
     
     model5_PD_out <- model5(train = train, test = test, Kg = K_pov, Ke = Ke)
     
-    data_frame(model = c("M4", "M5_PD"), 
-               prediction = list(model4_out, model5_PD_out))
+    results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
-  }) %>% ungroup()
+    }
+    
+  })
 
 
-## Predict
-pov00_future_prediction <- pov00_rand_future %>%
-  group_by(trait) %>%
-  do({
-    row <- .
+
+#   data_frame(model = c("M4", "M5_PD"), 
+#              prediction = list(model4_out, model5_PD_out))
+#   
+# }) %>% ungroup()
+
+
+# ## Predict
+# pov00_future_prediction <- pov00_rand_future %>%
+#   group_by(trait) %>%
+#   do({
+#     row <- .
+    
+pov00_future_prediction <- pov00_rand_future %>% 
+  assign_cores(n_core = n_core) %>% 
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+    
+    results_out <- vector("list", nrow(core_df))
+    for (i in seq_along(results_out)) {
+      
+      row <- core_df[i,]
+    
+    
     tr_env <- tp_vp_env_trait[[row$trait[[1]]]]
     
     
@@ -269,10 +353,18 @@ pov00_future_prediction <- pov00_rand_future %>%
     
     model5_PD_out <- model5(train = train, test = test, Kg = K_pov, Ke = Ke)
     
-    data_frame(model = c("M4", "M5_PD"), 
-               prediction = list(model4_out, model5_PD_out))
+    results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
-  }) %>% ungroup()
+    }
+    
+  })
+
+
+
+#   data_frame(model = c("M4", "M5_PD"), 
+#              prediction = list(model4_out, model5_PD_out))
+#   
+# }) %>% ungroup()
 
 
 
