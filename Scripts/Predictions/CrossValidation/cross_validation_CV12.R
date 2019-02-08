@@ -6,10 +6,43 @@
 ## 
 ## 
 
+# # Run on a local machine
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# 
+# # Other packages
+# library(modelr)
+
+
 ## Source the base script
 pred_dir <- "C:/Users/jln54/GoogleDrive/BarleyLab/Projects/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
 pred_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
-source(file.path(pred_dir, "cross_validation_base.R"))
+
+
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+source(file.path(repo_dir, "source_MSI.R"))
+
+## Number of cores
+n_core <- 32
+n_core <- detectCores()
+
+## Load the cross-validation starting data
+load(file.path(pred_dir, "cv_starting_material_sample.RData"))
+
+## Load correlation matrices
+load(file.path(result_dir, "distance_method_results.RData"))
+
+# ## List of E correlation matrices
+env_cor_mats <- env_rank_df %>%
+  filter((str_detect(model, "MYEC") & mat_set == "Jarquin") | model %in% c("pheno_loc_dist", "pheno_dist")) %>%
+  select(-dist, -env_rank)
+
+
+
+## Relationship matrix for CV and POV
+K_cv <- K[tp_geno, tp_geno]
+K_pov <- K
 
 
 ## Run cross-validation
@@ -72,6 +105,39 @@ cv12_prediction <- CV12 %>%
 
 cv12_prediction <- bind_rows(cv12_prediction)
 
+
+# 
+# 
+# ## On a local machine
+# cv12_prediction <- CV12 %>%
+#   group_by(trait, cv, .id) %>%
+#   do({
+# 
+#     row <- .
+#     tr_env <- tp_vp_env_trait[[row$trait[[1]]]]
+# 
+# 
+#     ## Extract train/test
+#     train <- as.data.frame(row$train[[1]]) %>%
+#       mutate(environment = factor(environment, levels = tr_env))
+#     test <-  as.data.frame(row$test[[1]])
+# 
+# 
+#     ## Model 4
+#     model4_out <- model4(train = train, test = test, Kg = K_cv)
+#     ## Model 5
+#     # model5_out <- model5(train = train, test = test, Kg = K_cv)
+# 
+#     ## Model 5 PD uses the phenotypic correlation as the E covariance matrix
+#     # Calculate the correlation between environments
+#     Ke <- subset(env_cor_mats, model == "pheno_dist" & trait == row$trait[1], cov, drop = T)[[1]]
+#     Ke <- Ke[tr_env, tr_env]
+# 
+#     model5_PD_out <- model5(train = train, test = test, Kg = K_cv, Ke = Ke)
+# 
+#     data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
+# 
+#   })
 
 
 ## Save

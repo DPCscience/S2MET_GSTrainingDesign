@@ -53,6 +53,14 @@ model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Mai
 
 
 
+
+
+
+
+
+
+
+
 ###
 ### Cross-validation results
 ### 
@@ -63,6 +71,7 @@ model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Mai
 ## CV1 and CV2 - predicting untested genotypes or partially tested genotypes
 cv12_accuracy <- cv12_prediction %>% 
   unnest(prediction) %>% 
+  separate(.id, c(".id", "fold"), sep = "_") %>%
   group_by(cv, trait, model, .id, environment) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
   ungroup() %>% 
@@ -115,6 +124,7 @@ cv12_summ %>%
 # Calculate accuracy
 cv_zero_future_acc <- cv_zero_future_prediction %>% 
   unnest(prediction) %>% 
+  separate(.id, c(".id", "fold"), sep = "_") %>%
   group_by(trait, cv, model, .id, environment) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
   ungroup() %>%

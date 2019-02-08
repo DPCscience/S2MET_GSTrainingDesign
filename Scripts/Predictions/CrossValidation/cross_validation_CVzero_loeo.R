@@ -1,16 +1,48 @@
 ## S2MET cross-validation
 ## 
 ## # Regular cross-validation
-## # CV1 and CV2
+## # CV0 and CV00 leave-one-environment-out
 ## 
 ## 
 ## 
+
+# # Run on a local machine
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# 
+# # Other packages
+# library(modelr)
+
 
 ## Source the base script
 pred_dir <- "C:/Users/jln54/GoogleDrive/BarleyLab/Projects/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
 pred_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/CrossValidation/"
-source(file.path(pred_dir, "cross_validation_base.R"))
 
+
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+source(file.path(repo_dir, "source_MSI.R"))
+
+## Number of cores
+n_core <- 32
+n_core <- detectCores()
+
+## Load the cross-validation starting data
+load(file.path(pred_dir, "cv_starting_material_sample.RData"))
+
+## Load correlation matrices
+load(file.path(result_dir, "distance_method_results.RData"))
+
+# ## List of E correlation matrices
+env_cor_mats <- env_rank_df %>%
+  filter((str_detect(model, "MYEC") & mat_set == "Jarquin") | model %in% c("pheno_loc_dist", "pheno_dist")) %>%
+  select(-dist, -env_rank)
+
+
+
+## Relationship matrix for CV and POV
+K_cv <- K[tp_geno, tp_geno]
+K_pov <- K
 
 
 ## CV-zero
