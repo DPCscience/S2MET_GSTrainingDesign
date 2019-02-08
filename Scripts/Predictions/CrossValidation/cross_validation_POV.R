@@ -7,26 +7,35 @@
 ## Last modified: January 17, 2019
 ## 
 
-## Parent-offspring cross-validation
+# ## Parent-offspring cross-validation
+# 
+# # Run on a local machine
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# 
+# # Other packages
+# library(modelr)
 
-# Run on a local machine
-repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
 
-# Other packages
-library(modelr)
+
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+source(file.path(repo_dir, "source_MSI.R"))
+
+## Number of cores
+n_core <- 32
+n_core <- detectCores()
+
 
 load(file.path(result_dir, "distance_method_results.RData"))
 
 
-## Some parameters
-# The proportion of lines to use for testing (in CV schemes)
-# pTest <- 0.2
-pTest <- length(vp_geno) / length(tp_geno)
-pTrain <- 1 - pTest
+
+# Number of folds
+k <- 5
 
 # Number of CV iterations
-nCV <- 100
+nCV <- 50
 
 
 

@@ -392,6 +392,11 @@ bind_rows(pocv0_future_summ, pocv00_future_summ) %>%
 
 
 
+
+
+
+
+
 #####
 ##### Parent-offspring validation
 ##### 
@@ -420,6 +425,8 @@ pov0_loeo_summ <- pov0_loeo_prediction %>%
   summarize(fit = mean(accuracy)) %>%
   ungroup() %>%
   mutate(cv = "pov0_loeo")
+
+
 
 ## Fit models to POV00
 pov00_tomodel <- bind_rows(
@@ -460,16 +467,18 @@ pov00_summ <- pov00_tomodel %>%
 
 
 pov_combine <- bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
-  mutate(cv_class = "pov")
+  mutate(cv_class = "pov") %>%
+  separate(cv, c("cv", "type"), sep = "_") %>%
+  mutate(cv_ann = ifelse(!is.na(type), paste0(toupper(cv), "\n(", str_to_title(type), ")"), toupper(cv)))
 
 
 ## Combine and plot
-bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
-  mutate(cv = toupper(cv)) %>%
-  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
+pov_combine %>%
+  ggplot(aes(x = cv_ann, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
   geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
   geom_point(position = position_dodge(0.9), size = 2) +
-  facet_grid(~ trait)
+  facet_grid(~ trait) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   
   
