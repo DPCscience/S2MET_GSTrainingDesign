@@ -6,8 +6,9 @@
 # #PBS -N cross-validation-CVzeroLOEO
 # #PBS -N cross-validation-CVzeroFuture
 # #PBS -N cross-validation-POCV12
-#PBS -N cross-validation-POCVzeroLOEO
+# #PBS -N cross-validation-POCVzeroLOEO
 # #PBS -N cross-validation-POCVzeroFuture
+#PBS -N cross-validation-POV
 #PBS -M neyha001@umn.edu
 #PBS -m abe
 #PBS -r n
@@ -27,6 +28,9 @@ module load R/3.5.0
 
 # Rscript cross_validation_POCV12.R
 
-Rscript cross_validation_POCVzero_loeo.R
+# Rscript cross_validation_POCVzero_loeo.R
 
 # Rscript cross_validation_POCVzero_future.R
+
+## Parent-offspring validation
+Rscript cross_validation_POV.R
