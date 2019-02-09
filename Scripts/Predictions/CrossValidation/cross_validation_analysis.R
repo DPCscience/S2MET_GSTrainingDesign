@@ -135,16 +135,16 @@ cv_zero_future_acc <- cv_zero_future_prediction %>%
 cv0_future_summ <- cv_zero_future_acc %>% 
   filter(cv == "cv0") %>% 
   group_by(cv, trait, model) %>% 
-  summarize(fit = mean(accuracy)) %>%
+  summarize(fit = mean(accuracy), sd = sd(accuracy), n = n()) %>%
   ungroup()
 
-# trait       model accuracy
-# 1 GrainYield  M4       0.486
-# 2 GrainYield  M5_PD    0.469
-# 3 HeadingDate M4       0.822
-# 4 HeadingDate M5_PD    0.815
-# 5 PlantHeight M4       0.497
-# 6 PlantHeight M5_PD    0.489
+# cv    trait       model   fit
+# 1 cv0   GrainYield  M4    0.366
+# 2 cv0   GrainYield  M5_PD 0.383
+# 3 cv0   HeadingDate M4    0.834
+# 4 cv0   HeadingDate M5_PD 0.798
+# 5 cv0   PlantHeight M4    0.568
+# 6 cv0   PlantHeight M5_PD 0.513
 
 
 ## Fit a model for CV00
@@ -262,132 +262,6 @@ cv_combine <- bind_rows(cv12_summ, cv0_future_summ, cv00_future_summ) %>%
 
 
 
-
-
-
-####
-#### Parent-offspring cross-validation
-#### 
-
-
-## POCV1 and POCV2 - predicting untested genotypes or partially tested genotypes
-pocv12_accuracy <- pocv12_prediction %>% 
-  unnest() %>% unnest() %>%
-  group_by(cv, trait, model, .id, environment) %>% 
-  summarize(accuracy = cor(value, pred_value)) %>%
-  ungroup() %>% 
-  mutate(zscore = ztrans(accuracy)) %>% 
-  mutate_at(vars(model, environment), as.factor)
-
-
-## Fit a model for each CV
-pocv12_tomodel <- pocv12_accuracy %>%
-  group_by(cv, trait) %>%
-  nest() %>%
-  mutate(out = list(NULL))
-
-for (i in seq(nrow(pocv12_tomodel))) {
-  
-  df <- unnest(pocv12_tomodel[i,], data)
-  
-  # Fit a model
-  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
-  
-  # Significance testing
-  anova_df <- tidy(anova(fit))
-  ranova_df <- tidy(ranova(fit))
-  effects_df <- as.data.frame(Effect("model", fit))
-  
-  pocv12_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
-  
-}
-
-pocv12_summ <- pocv12_tomodel %>% 
-  unnest(out) %>% 
-  select(-data) %>%
-  unnest(effects) %>%
-  mutate_at(vars(fit, lower, upper), zexp)
-
-
-## Plot
-pocv12_summ %>%
-  mutate(cv = toupper(cv)) %>%
-  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
-  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.9), size = 2) +
-  facet_grid(~ trait)
-
-
-
-
-## CV0 and CV00 - predicting future years
-
-# Calculate accuracy
-pocv_zero_future_acc <- pocv_zero_future_prediction %>% 
-  unnest(prediction) %>% 
-  group_by(trait, cv, model, .id, environment) %>% 
-  summarize(accuracy = cor(value, pred_value)) %>%
-  ungroup() %>%
-  mutate(zscore = ztrans(accuracy)) %>%
-  mutate_at(vars(model, environment), as.factor)
-
-## Summarize for CV0
-pocv0_future_summ <- pocv_zero_future_acc %>% 
-  filter(cv == "pocv0") %>% 
-  group_by(cv, trait, model) %>% 
-  summarize(fit = mean(accuracy)) %>%
-  ungroup()
-
-# trait       model accuracy
-# 1 GrainYield  M4       0.486
-# 2 GrainYield  M5_PD    0.469
-# 3 HeadingDate M4       0.822
-# 4 HeadingDate M5_PD    0.815
-# 5 PlantHeight M4       0.497
-# 6 PlantHeight M5_PD    0.489
-
-
-## Fit a model for CV00
-pocv00_future_tomodel <- pocv_zero_future_acc %>%
-  filter(cv == "pocv00") %>%
-  group_by(cv, trait) %>%
-  nest() %>%
-  mutate(out = list(NULL))
-
-for (i in seq(nrow(pocv00_future_tomodel))) {
-  
-  df <- unnest(pocv00_future_tomodel[i,], data)
-  
-  # Fit a model
-  fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
-  
-  # Significance testing
-  anova_df <- tidy(anova(fit))
-  ranova_df <- tidy(ranova(fit))
-  effects_df <- as.data.frame(Effect("model", fit))
-  
-  pocv00_future_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
-  
-}
-
-pocv00_future_summ <- pocv00_future_tomodel %>% 
-  unnest(out) %>% 
-  select(-data) %>%
-  unnest(effects) %>%
-  mutate_at(vars(fit, lower, upper), zexp)
-
-
-pocv_combine <- bind_rows(pocv12_summ, pocv0_future_summ, pocv00_future_summ) %>%
-  mutate(cv_class = "pocv")
-
-
-## Combine and plot
-bind_rows(pocv0_future_summ, pocv00_future_summ) %>%
-  mutate(cv = toupper(cv)) %>%
-  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
-  geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.9), size = 2) +
-  facet_grid(~ trait)
 
 
 

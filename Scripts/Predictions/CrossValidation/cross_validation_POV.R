@@ -198,6 +198,8 @@ pov0_loeo_prediction <- pov0_rand_loeo %>%
     
     }
     
+    mutate(core_df, out = results_out)
+    
   })
     
     
@@ -249,6 +251,9 @@ pov0_future_prediction <- pov0_rand_future %>%
     results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
     }
+    
+    mutate(core_df, out = results_out)
+    
     
   })
     
@@ -305,6 +310,9 @@ pov00_loeo_prediction <- pov00_rand_loeo %>%
     
     }
     
+    mutate(core_df, out = results_out)
+    
+    
   })
 
 
@@ -356,6 +364,9 @@ pov00_future_prediction <- pov00_rand_future %>%
     results_out[[i]] <-  data_frame(model = c("M4", "M5_PD"), prediction = list(model4_out, model5_PD_out))
     
     }
+    
+    mutate(core_df, out = results_out)
+    
     
   })
 
