@@ -8,7 +8,7 @@
 ### Run on MSI
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET/"
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
 source(file.path(repo_dir, "source_MSI.R"))
 
 
