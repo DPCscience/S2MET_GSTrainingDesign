@@ -110,7 +110,7 @@ clusters_split <- cluster_train_test %>%
 cluster_predictions <- mclapply(X = clusters_split, FUN = function(core_df) {
 
   # #
-  # r = 1
+  # r = 14
   # core_df <- clusters_split[[r]]
   # #
 
