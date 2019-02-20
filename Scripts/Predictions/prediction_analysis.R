@@ -723,6 +723,33 @@ g_cluster_model_effect_poster <- cluster_predictions_base_analysis %>%
 ggsave(filename = "cluster_model_effect_poster.jpg", plot = g_cluster_model_effect_poster, path = fig_dir, width = 8.5, height = 6, dpi = 1000)
 
 
+## Another version
+g_cluster_model_effect_poster <- cluster_predictions_base_analysis %>%
+  unnest(model_effects) %>%
+  mutate(model = factor(model, levels = dist_method_abbr),
+         set = str_replace_all(set, set_replace)) %>%
+  filter(model %in% dist_method_poster) %>%
+  mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
+  geom_hline(data = environment_rank_pred_fit_effects1_use, aes(yintercept = fit, lty = "Accuracy using all data"), color = "black") +
+  geom_point() +
+  geom_errorbar(width = 0.5) + 
+  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = FALSE) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_y_continuous(breaks = pretty) + 
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
+  ylab("Prediction accuracy") + 
+  xlab("Distance measure") +
+  # labs(title = "Genomewide prediction accuracy") +
+  theme_presentation2(base_size = 16) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1), legend.justification = "right",
+        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
+
+## Save
+ggsave(filename = "cluster_model_effect_poster2.jpg", plot = g_cluster_model_effect_poster, path = fig_dir, width = 7, height = 7, dpi = 1000)
+
+
 
 
 

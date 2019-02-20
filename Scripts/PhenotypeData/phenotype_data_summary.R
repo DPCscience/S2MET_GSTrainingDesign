@@ -41,6 +41,16 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
          trait %in% traits)
 
 
+## Determine the number of environments per trait
+S2_MET_BLUEs_use %>% 
+  group_by(trait) %>% 
+  summarize_at(vars(location, year, environment), n_distinct)
+
+# trait       location  year environment
+# 1 GrainYield        13     3          23
+# 2 HeadingDate       12     3          26
+# 3 PlantHeight       13     3          27
+
 
 
 ## Basic Summaries
@@ -62,11 +72,10 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
         summarize(trait = unique(trait), prop_obs = mean(observed))
     }))
 
-# trait           prop_obs
-# 1 GrainYield         0.987
-# 2 HeadingDate        0.991
-# 3 HeadingDateAGDD    0.991
-# 4 PlantHeight        0.990
+# trait       prop_obs
+# 1 GrainYield     0.986
+# 2 HeadingDate    0.991
+# 3 PlantHeight    0.991
 
 
 ## Find the proportion of unbalance in the dataset for the TP (tp and tp_geno)
@@ -84,20 +93,19 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
         })
     }))
 
-
-# $`tp`
-# trait           prop_obs
-# 1 GrainYield         0.985
-# 2 HeadingDate        0.989
-# 3 HeadingDateAGDD    0.989
-# 4 PlantHeight        0.988
+# $tp
+# # A tibble: 3 x 2
+# trait       prop_obs
+# 1 GrainYield     0.984
+# 2 HeadingDate    0.989
+# 3 PlantHeight    0.989
 # 
 # $tp_geno
-# trait           prop_obs
-# 1 GrainYield         0.985
-# 2 HeadingDate        0.989
-# 3 HeadingDateAGDD    0.989
-# 4 PlantHeight        0.988
+# # A tibble: 3 x 2
+# trait       prop_obs
+# 1 GrainYield     0.984
+# 2 HeadingDate    0.989
+# 3 PlantHeight    0.989
 
 ## Create a table with the proportions of observed combinations for the TP and VP
 prop_observed_table <- data_frame(population = c("tp", "vp"), line_name = list(tp, vp)) %>%
@@ -121,16 +129,14 @@ prop_observed_table %>%
 
 
 ## Range of heritabilities
-stage_one_data %>% 
-  filter(environment %in% tp_vp_env) %>% 
+left_join(distinct(S2_MET_BLUEs_use, trait, trial, environment), stage_one_data) %>% 
   group_by(trait) %>% 
   summarize_at(vars(heritability), funs(min, max, mean))
 
-# trait              min   max  mean
-# 1 GrainYield      0      0.856 0.441
-# 2 HeadingDate     0.563  0.978 0.846
-# 3 HeadingDateAGDD 0.569  0.973 0.843
-# 4 PlantHeight     0.0849 0.883 0.52
+# trait         min   max  mean
+# 1 GrainYield  0.180 0.856 0.542
+# 2 HeadingDate 0.563 0.978 0.846
+# 3 PlantHeight 0.106 0.883 0.532
 
 
 
@@ -198,7 +204,7 @@ S2_MET_BLUEs_tomodel <- bind_rows(mutate(S2_MET_BLUEs_use, population = "all"),
                                   mutate(filter(S2_MET_BLUEs_use, line_name %in% vp), population = "vp"))
 
 # Boot reps
-boot_reps <- 100
+boot_reps <- 10
 
 # Group by trait and fit the multi-environment model
 # Fit models in the TP and the TP + VP
@@ -237,16 +243,16 @@ stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
     
     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
     
-    # # Get the weights
-    # wts <- pull(df, std_error)^2
-    # 
+    # Get the weights
+    wts <- pull(df, std_error)^2
+
+    ## Fit the full model
+    fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment),
+                data = df, control = lmer_control, weights = wts)
+    
     # ## Fit the full model
     # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
-    #             data = df, control = lmer_control, weights = wts)
-    
-    ## Fit the full model
-    fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
-                data = df, control = lmer_control)
+    #             data = df, control = lmer_control)
     
     ## Likelihood ratio tests
     lrt <- ranova(fit) %>% 
@@ -277,20 +283,6 @@ stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
   }) %>% ungroup()
 
 
-## What is the significance of each variance component?
-# trait             n_e   n_r variation_source         df statistic   p_value
-# 1 GrainYield       29.3     1 line_name:environment     1     4654. 0.       
-# 2 GrainYield       29.3     1 environment               1    16847. 0.       
-# 3 GrainYield       29.3     1 line_name                 1     1308. 2.12e-286
-# 4 HeadingDate      27.9     1 line_name:environment     1     3749. 0.       
-# 5 HeadingDate      27.9     1 environment               1    11437. 0.       
-# 6 HeadingDate      27.9     1 line_name                 1     4798. 0.       
-# 7 HeadingDateAGDD  27.9     1 line_name:environment     1     3485. 0.       
-# 8 HeadingDateAGDD  27.9     1 environment               1     8294. 0.       
-# 9 HeadingDateAGDD  27.9     1 line_name                 1     4841. 0.       
-# 10 PlantHeight      29.0     1 line_name:environment     1     1860. 0.       
-# 11 PlantHeight      29.0     1 environment               1    13568. 0.       
-# 12 PlantHeight      29.0     1 line_name                 1     1991. 0. 
 
 
 # Everything is significant
@@ -396,7 +388,7 @@ env_varG <- S2_MET_BLUEs_tomodel %>%
     df <- .
     wts <- df$std_error^2
     
-    # If more than one trial is present, add trial as a fixed effect
+    # If more than one trial is present, average over trials
     if (n_distinct(df$trial) > 1) {
       formula <- value ~ 1 + trial + (1|line_name)
     } else {
@@ -438,11 +430,10 @@ env_r %>%
   select(population, trait, r_G) %>% 
   spread(population, r_G)
 
-# trait             all    tp
-# 1 GrainYield      0.262 0.273
-# 2 HeadingDate     0.614 0.703
-# 3 HeadingDateAGDD 0.614 0.697
-# 4 PlantHeight     0.343 0.342
+# trait         all    tp    vp
+# 1 GrainYield  0.697 0.680 1.52 
+# 2 HeadingDate 1.00  1.11  1.26 
+# 3 PlantHeight 0.439 1.06  0.468
 
 
 ## What proportion do V and L make up of varGE?
@@ -461,14 +452,15 @@ varGE_components %>%
 
 
 # population trait           heterogeneity  lackCorrelation 
-# 1 all        GrainYield      28018.464 (9%) 276020.293 (91%)
-# 2 all        HeadingDate     0.98 (12%)     6.982 (88%)     
-# 3 all        HeadingDateAGDD 1110.434 (11%) 8748.997 (89%)  
-# 4 all        PlantHeight     1.975 (9%)     18.862 (91%)    
-# 5 tp         GrainYield      26800.803 (9%) 277236.568 (91%)
-# 6 tp         HeadingDate     1.214 (18%)    5.603 (82%)     
-# 7 tp         HeadingDateAGDD 1342.66 (16%)  7200.925 (84%)  
-# 8 tp         PlantHeight     2.018 (10%)    18.461 (90%) 
+# 1 all        GrainYield  22853.898 (8%) 276513.747 (92%)
+# 2 all        HeadingDate 1.057 (13%)    6.816 (87%)     
+# 3 all        PlantHeight 2.034 (10%)    18.469 (90%)    
+# 4 tp         GrainYield  19983.738 (7%) 285343.381 (93%)
+# 5 tp         HeadingDate 1.271 (18%)    5.611 (82%)     
+# 6 tp         PlantHeight 2 (10%)        18.054 (90%)    
+# 7 vp         GrainYield  19347.096 (8%) 232695.993 (92%)
+# 8 vp         HeadingDate 1.181 (20%)    4.748 (80%)     
+# 9 vp         PlantHeight 2.41 (12%)     17.173 (88%)
 
 
 # Plot
@@ -607,6 +599,9 @@ stage_two_fits_GYL <- S2_MET_BLUEs_tomodel %>%
     ## fit the full model
     fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|location) + (1|year) + (1|line_name:location) + (1|line_name:year) + (1|line_name:location:year),
                 data = df, control = lmer_control, weights = wts)
+                
+    # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|location) + (1|year) + (1|line_name:location) + (1|line_name:year) + (1|line_name:location:year),
+    #             data = df, control = lmer_control)
     
     
     ## Likelihood ratio tests
@@ -785,7 +780,7 @@ var_comp_table_gyl %>% filter(Population == "tp") %>% select(-Population) %>%
 
 ## Estimate genetic correlations using the BLUEs from each environment
 ## First estimate using only the TP with genotypes
-tp_BLUEs <- S2_MET_BLUEs %>%
+tp_BLUEs <- S2_MET_BLUEs_use %>%
   filter(line_name %in% tp,
          trait %in% traits)
 
@@ -810,7 +805,7 @@ env_cor_tp <- tp_BLUEs %>%
         cor(., use = "pairwise.complete.obs"))
 
 ## VP
-env_cor_vp <- S2_MET_BLUEs %>%
+env_cor_vp <- S2_MET_BLUEs_use %>%
   filter(line_name %in% vp, trait %in% traits) %>%
   select(line_name, environment, trait, value) %>% 
   split(.$trait) %>% 
@@ -823,7 +818,7 @@ env_cor_vp <- S2_MET_BLUEs %>%
 
 
 # Now use all data
-env_cor_all <- S2_MET_BLUEs %>%
+env_cor_all <- S2_MET_BLUEs_use %>%
   filter(trait %in% traits) %>%
   split(.$trait) %>% 
   map(~select(., line_name, environment, value) %>% spread(environment, value) %>% 
@@ -990,6 +985,10 @@ save_file <- file.path(result_dir, "environmental_genetic_correlations.RData")
 save("env_cor_tp", "env_cor_all", file = save_file)
 
 
+
+
+
+
 ## Create a two-way table of genotypes and environments
 ## 
 ## We will fill in the missing TP geno points using the kronecker
@@ -998,7 +997,7 @@ save("env_cor_tp", "env_cor_all", file = save_file)
 ## 
 
 # split the TP blues by trait
-tp_BLUEs <- S2_MET_BLUEs %>%
+tp_BLUEs <- S2_MET_BLUEs_use %>%
   filter(line_name %in% tp_geno, trait %in% traits) 
 
 tp_BLUEs_split <- tp_BLUEs %>%
@@ -1095,173 +1094,257 @@ training_sets_twoway <- tp_twoway_fit %>%
   select(trait, set, data = predictions, varE)
 
 
+## Create a function to perform the bootstrapping procedure of Forkman and Piepho 2014
+boot.ammi <- function(theta, boot.reps) {
+  
+  ## Perform SVD on theta
+  theta_svd <- svd(theta)
+
+  # Get the values of lambda
+  lambda <- theta_svd$d
+  # M is the total number of PCs
+  M <- length(lambda) - 1
+  # M <- min(nrow(theta) - 1, ncol(theta) - 1)
+  v <- prod(dim(theta) - 1)
+  
+  
+  ## Calculate the test statistic for each number of PCs
+  stat <- map_dbl(seq(0, M), ~lambda[.+1]^2 / sum(lambda[seq(. + 1, M)]^2))
+  
+  # Create a data.frame
+  out <- data.frame(nPC = seq(0, M), stat, p.value = NA)
+  
+  ## Iterate over the number of PCs from 0 to K
+  for (k in seq(0, M)) {
+    
+    # Calculate a fitted theta matrix
+    if (k == 0) {
+      theta_fitted <- matrix(data = 0, nrow = nrow(theta), ncol = ncol(theta))
+      
+    } else if (k == 1) {
+      theta_fitted <- theta_svd$u[,seq(k), drop = F] %*% theta_svd$d[seq(k)] %*% t(theta_svd$v[,seq(k), drop = F])
+      
+    } else {
+      theta_fitted <- theta_svd$u[,seq(k), drop = F] %*% diag(theta_svd$d[seq(k)]) %*% t(theta_svd$v[,seq(k), drop = F])
+      
+    }
+    
+    ## Calculate the estimate residual variance
+    varRk <- sum(lambda[seq(k + 1, M)]^2) / v
+    
+    ## Replicate generating a residual matrix R
+    R_b_list <- replicate(boot.reps, matrix(data = rnorm(n = prod(dim(theta)), mean = 0, sd = sqrt(varRk)), nrow = nrow(theta), ncol = ncol(theta)), 
+                          simplify = FALSE)
+    
+    ## Add each residual matrix to the fitted theta matrix
+    ge_b <- map(R_b_list, ~. + theta_fitted)
+    # Center 
+    ge_b1 <- map(ge_b, ~. - rowMeans(.) - colMeans(.) + mean(.))
+    # Subject to SVD
+    ge_b_svd <- map(ge_b1, svd)
+    
+    # Calculate the T stat for k
+    stat_null <- map_dbl(ge_b_svd, ~ .$d[k + 1]^2  / sum(.$d[seq(k + 1, M)]^2))
+    # Calculate the p_value and return
+    out$p.value[k + 1] <- mean(stat_null > stat[k+1])
+  }
+  
+}
+
+
 ## Perform the AMMI analysis
 # Create a two-way matrix
 ammi_out <- training_sets_twoway %>%
   group_by(set, trait) %>%
   do(ammi = {
     df <- .$data[[1]]
-    varE <- .$varE
+    # varE <- .$varE
     
-    ## Fit a model
-    fit <- aov(value ~ line_name + environment, data = df)
-    # Get the effects
-    effects <- model.tables(fit)
-    effects_df <- effects$tables %>% 
-      map(~as.matrix(.) %>% fix_data_frame(newnames = "effect"))
+    ## Use the bi-linear package
+    fit <- bilinear(x = df, G = "line_name", E = "environment", y = "value", model = "AMMI", alpha = 0.05, test = "bootstrap", B = 1000)
     
-    # Add the residuals (GxE effects) to the df
-    df1 <- add_residuals(df, fit, var = "ge")
+    ## Create escores and gscores
+    gscores <- fit$scores$Gscores
+    escores <- fit$scores$Escores
     
-    # Create a two-way table
-    ge <- xtabs(ge ~ line_name + environment, df1)
+    ## Create df of eigenvalues
+    geigen <- fit$svdE$u[,seq(1, fit$sigPC), drop = FALSE]
+    dimnames(geigen) <- dimnames(gscores)
+    geigen_df <- rownames_to_column(as.data.frame(geigen), "line_name") %>% gather(PC, eigen, -line_name)
     
-    ## SVD
-    ge_svd <- svd(ge)
-    # Get the d values for each factor
-    dm <- svd(ge)$d
+    eeigen <- fit$svdE$v[,seq(1, fit$sigPC), drop = FALSE]
+    dimnames(eeigen) <- dimnames(escores)
+    eeigen_df <- rownames_to_column(as.data.frame(eeigen), "environment") %>% gather(PC, eigen, -environment)
     
-    ## Calculate sums of squares for each factor
-    SSd <- dm^2
-    # Calculate the proportion of variance explained by each factor
-    varprop <- SSd / sum(SSd)
-    # Cumulative proportion
-    cumprop <- cumsum(varprop)
     
-    # Calculate the degrees of freedom for each factor
-    J <- nrow(ge)
-    K <- ncol(ge)
-    df_d <- (J + K - 1 - (2 * seq_along(SSd)))
-    
-    # Calculate the mean squares
-    MSd <- SSd / df_d
-    
-    ## Use the residual variance from the previous model as the expected mean squares of the residuals
-    ## Calculate an F statistic
-    stat <- MSd / varE
-    
-    # Calculate p-values
-    p_value_Ftest <- pf(q = stat, df1 = df_d, df2 = (J * K), lower.tail = FALSE)
-    
-
-    
-    # ## Use resampling to determine the null distribution of MSf / MSe
-    # # First fit a main effects model, then simulate from that model to calculate ge terms
-    # fit <- aov(value ~ line_name + environment, df)
-    # mf <- model.frame(fit)
-    # 
-    # # Simulate from the model
-    # sims <- simulate(fit, nsim = 1000)
-    # # Update the model
-    # fit_sims <- apply(X = sims, MARGIN = 2, FUN = function(data) {
-    #   mf$value <- data
-    #   fit1 <- lm(value ~ line_name + environment, mf)
-    #   
-    #   # Get the residuals / GE
-    #   ge1 <- matrix(data = residuals(fit1), nrow = J, ncol = K)
-    #   svd(ge1)$d
-    # })
-    # 
-    # ## Use the matrix to determine the significance of each factor
-    # SS_sims <- fit_sims^2
-    # p_value_sim <- map_dbl(seq_along(SSd), ~mean(SS_sims[.,] >= SSd[.]))
-
-    p_value_sim <- rep(NA, length(SSd))
-    
-    # Create a table of sums of squares
-    out <- data.frame(term = c("ge", str_c("PC", seq_along(SSd)), "Residuals"),
-               sum_squares = c(sum(ge^2), SSd, varE * (J * K)),
-               prop_var = c(NA, varprop, NA),
-               cumprop = c(NA, cumprop, NA),
-               F_value = c(NA, stat, NA),
-               p_value_F = c(NA, p_value_Ftest, NA),
-               p_value_sim = c(NA, p_value_sim, NA))
-    
-    ## Select the significant environmental scores based on the F-test
-    which_scores <- which(p_value_Ftest < alpha)
-    
-    escores <- ge_svd$v[,which_scores, drop = FALSE]
-    dimnames(escores) <- list(colnames(ge), paste0("PC", seq(ncol(escores))))
-    
-    escores_df <- effects_df$environment %>%
-      rename(environment = term) %>%
-      left_join(., fix_data_frame(escores, newcol = "environment"), by = "environment") %>%
-      gather(PC, eigen, -environment, -effect) %>%
-      left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
-      mutate(score = eigen * sqrt(d)) %>%
-      select(-d)
-    
-    gscores <- ge_svd$u[,which_scores, drop = FALSE]
-    dimnames(gscores) <- list(rownames(ge), paste0("PC", seq(ncol(gscores))))
-    
-    gscores_df <- effects_df$line_name %>%
-      rename(line_name = term) %>%
-      left_join(., fix_data_frame(gscores, newcol = "line_name"), by = "line_name") %>%
-      gather(PC, eigen, -line_name, -effect) %>%
-      left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
-      mutate(score = eigen * sqrt(d)) %>%
-      select(-d)
+    gscores_df <- left_join(rownames_to_column(data.frame(effect = fit$Geffect), "line_name"), rownames_to_column(as.data.frame(gscores), "line_name")) %>%
+      gather(PC, score, -line_name, -effect) %>%
+      left_join(., geigen_df)
+    escores_df <- left_join(rownames_to_column(data.frame(effect = fit$Eeffect), "environment"), rownames_to_column(as.data.frame(escores), "environment")) %>%
+      gather(PC, score, -environment, -effect) %>%
+      left_join(., eeigen_df)
     
     # Return
-    list(results = out, escores = escores_df, gscores = gscores_df) %>% map(as_data_frame)
+    map(list(results = rownames_to_column(fit$ANOVA, "term"), escores = escores_df, gscores = gscores_df), as_data_frame)
+    
+    
+    
+    
+    
+    # ## Fit a model
+    # fit <- aov(value ~ line_name + environment, data = df)
+    # # Get the effects
+    # effects <- model.tables(fit)
+    # effects_df <- effects$tables %>% 
+    #   map(~as.matrix(.) %>% fix_data_frame(newnames = "effect"))
+    # 
+    # # Add the residuals (GxE effects) to the df
+    # df1 <- add_residuals(df, fit, var = "ge")
+    # 
+    # # Create a two-way table of GxE + residuals
+    # ge <- xtabs(ge ~ line_name + environment, df1)
+    # 
+    # ## SVD
+    # ge_svd <- svd(ge)
+    # # Get the d values for each factor
+    # dm <- svd(ge)$d
+    # 
+    # ## Calculate sums of squares for each factor
+    # SSd <- dm^2
+    # # Calculate the proportion of variance explained by each factor
+    # varprop <- SSd / sum(SSd)
+    # # Cumulative proportion
+    # cumprop <- cumsum(varprop)
+    # 
+    # # Calculate the degrees of freedom for each factor
+    # J <- nrow(ge)
+    # K <- ncol(ge)
+    # df_d <- (J + K - 1 - (2 * seq_along(SSd)))
+    # 
+    # # Calculate the mean squares
+    # MSd <- SSd / df_d
+    # 
+    # ## Use the residual variance from the previous model as the expected mean squares of the residuals
+    # ## Calculate an F statistic
+    # stat <- MSd / varE
+    # 
+    # # Calculate p-values
+    # p_value_Ftest <- pf(q = stat, df1 = df_d, df2 = (J * K), lower.tail = FALSE)
+    # 
+    # 
+    # 
+    # # ## Use resampling to determine the null distribution of MSf / MSe
+    # # # First fit a main effects model, then simulate from that model to calculate ge terms
+    # # fit <- aov(value ~ line_name + environment, df)
+    # # mf <- model.frame(fit)
+    # # 
+    # # # Simulate from the model
+    # # sims <- simulate(fit, nsim = 1000)
+    # # # Update the model
+    # # fit_sims <- apply(X = sims, MARGIN = 2, FUN = function(data) {
+    # #   mf$value <- data
+    # #   fit1 <- lm(value ~ line_name + environment, mf)
+    # #   
+    # #   # Get the residuals / GE
+    # #   ge1 <- matrix(data = residuals(fit1), nrow = J, ncol = K)
+    # #   svd(ge1)$d
+    # # })
+    # # 
+    # # ## Use the matrix to determine the significance of each factor
+    # # SS_sims <- fit_sims^2
+    # # p_value_sim <- map_dbl(seq_along(SSd), ~mean(SS_sims[.,] >= SSd[.]))
+    # 
+    # p_value_sim <- rep(NA, length(SSd))
+    # 
+    # # Create a table of sums of squares
+    # out <- data.frame(term = c("ge", str_c("PC", seq_along(SSd)), "Residuals"),
+    #            sum_squares = c(sum(ge^2), SSd, varE * (J * K)),
+    #            prop_var = c(NA, varprop, NA),
+    #            cumprop = c(NA, cumprop, NA),
+    #            F_value = c(NA, stat, NA),
+    #            p_value_F = c(NA, p_value_Ftest, NA),
+    #            p_value_sim = c(NA, p_value_sim, NA))
+    # 
+    # ## Select the significant environmental scores based on the F-test
+    # which_scores <- which(p_value_Ftest < alpha)
+    # 
+    # escores <- ge_svd$v[,which_scores, drop = FALSE]
+    # dimnames(escores) <- list(colnames(ge), paste0("PC", seq(ncol(escores))))
+    # 
+    # escores_df <- effects_df$environment %>%
+    #   rename(environment = term) %>%
+    #   left_join(., fix_data_frame(escores, newcol = "environment"), by = "environment") %>%
+    #   gather(PC, eigen, -environment, -effect) %>%
+    #   left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
+    #   mutate(score = eigen * sqrt(d)) %>%
+    #   select(-d)
+    # 
+    # gscores <- ge_svd$u[,which_scores, drop = FALSE]
+    # dimnames(gscores) <- list(rownames(ge), paste0("PC", seq(ncol(gscores))))
+    # 
+    # gscores_df <- effects_df$line_name %>%
+    #   rename(line_name = term) %>%
+    #   left_join(., fix_data_frame(gscores, newcol = "line_name"), by = "line_name") %>%
+    #   gather(PC, eigen, -line_name, -effect) %>%
+    #   left_join(., data_frame(PC = paste0("PC", seq_along(dm)), d = dm), by = "PC") %>%
+    #   mutate(score = eigen * sqrt(d)) %>%
+    #   select(-d)
+    # 
+    # # Return
+    # list(results = out, escores = escores_df, gscores = gscores_df) %>% map(as_data_frame)
     
   }) %>% ungroup()
  
 
-## What total proportion of variation do the AMMI axes explain?
+## What total proportion of variation do the significant AMMI axes explain?
 ammi_out %>% 
-  mutate(results = map(ammi, "results")) %>% 
+  mutate(results = map(ammi, ~mutate(.$results, maxPC = tail(.$escores$PC, 1))),
+         results = map(results, ~filter(., str_detect(term, "PC"))),
+         results = map(results, ~mutate(., cumprop = SS / sum(SS))),
+         results = map(results, ~filter(., parse_number(term) <= parse_number(maxPC)))) %>%
   unnest(results) %>%
-  filter(p_value_F < alpha) %>% 
-  group_by(set, trait) %>% 
-  do(tail(., 1)) %>% 
-  select(term, cumprop)
+  group_by(set, trait) %>%
+  summarize_at(vars(cumprop), sum)
 
-# set       trait       term  cumprop
-# 1 complete  GrainYield  PC2     0.622
-# 2 complete  HeadingDate PC6     0.776
-# 3 complete  PlantHeight PC1     0.540
-# 4 realistic GrainYield  PC1     0.551
-# 5 realistic HeadingDate PC4     0.707
-# 6 realistic PlantHeight PC1     0.601
+## Way too much
 
 ## What proportion of variation do the first IPCA scores explain?
-ammi_out %>% 
-  mutate(results = map(ammi, "results")) %>% 
-  unnest(results) %>%
-  filter(p_value_F < alpha) %>% 
-  group_by(set, trait) %>% 
-  slice(1) %>% 
-  select(term, cumprop)
+ammi_out1 <- ammi_out %>% 
+  mutate(results = map(ammi, ~mutate(.$results, maxPC = tail(.$escores$PC, 1))),
+         results = map(results, ~filter(., str_detect(term, "PC"))),
+         results = map(results, ~mutate(., cumprop = SS / sum(SS))),
+         results = map(results, ~filter(., parse_number(term) <= parse_number(maxPC))))
 
-# set       trait       term  cumprop
-# 1 complete  GrainYield  PC1     0.470
-# 2 complete  HeadingDate PC1     0.213
-# 3 complete  PlantHeight PC1     0.540
-# 4 realistic GrainYield  PC1     0.551
-# 5 realistic HeadingDate PC1     0.277
-# 6 realistic PlantHeight PC1     0.601
+# set       trait       term     Df         SS        MS Pvalue  ` `   maxPC cumprop
+# 1 complete  GrainYield  PC1     195 146319165. 750355.   < 0.001 ***   PC20    0.508
+# 2 complete  HeadingDate PC1     198      2727.     13.8  < 0.001 ***   PC22    0.222
+# 3 complete  PlantHeight PC1     199      7943.     39.9  < 0.001 ***   PC22    0.542
+# 4 realistic GrainYield  PC1     185  79435444. 429381.   < 0.001 ***   PC9     0.546
+# 5 realistic HeadingDate PC1     187      1689.      9.03 < 0.001 ***   PC12    0.275
+# 6 realistic PlantHeight PC1     186      3200.     17.2  < 0.001 ***   PC12    0.593
 
 
 
 year_levels <- c(unique(tp_BLUEs$year), "Genotype")
 
 ## Plot the AMMI axes and the proportion of variance explained
-g_ammi <- ammi_out %>%
+g_ammi <- ammi_out1 %>%
   # filter(set == "complete") %>%
   group_by(set, trait) %>%
   do(plot = {
     df <- .
   
     out <- df$ammi[[1]]
+    res <- df$results[[1]]
     trait <- df$trait
     
     ## Combine the g and e scores into one DF
-    scores_df <- map_df(out[-1], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
+    scores_df <- map_df(out[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
     
     # Create a renaming vector
-    propvar_rename <- setNames(paste0(str_replace_all(out$results$term, "PC", "IPCA"), " (", round(out$results$prop_var, 2) * 100, "%)"), 
-                               as.character(out$results$term))
+    res1 <- mutate(res, annotation = paste0(str_replace_all(term, "PC", "IPCA"), " (", round(cumprop, 2) * 100, "%)"))
+    propvar_rename <- setNames(object = res1$term, nm = res1$annotation)
+      
     # Renaming function
     label_rename <- function(x) str_replace_all(x, propvar_rename)
     
@@ -1290,10 +1373,10 @@ g_ammi <- ammi_out %>%
       ggplot(aes(x = effect, y = PC1, color = year)) + 
       geom_point() +
       geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term)) +
-      scale_color_manual(values = year_color, name = NULL) + 
+      scale_color_manual(values = year_color, name = NULL, guide = guide_legend(override.aes = list(size = 3))) + 
       scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
       scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
-      ylab(propvar_rename[2]) +
+      ylab(names(propvar_rename)[1]) +
       xlab(expression("Effect (deviation from"~mu*")")) +
       facet_grid(~ trait) + 
       theme_presentation2() +
@@ -1335,20 +1418,21 @@ ggsave(filename = "ammi_biplots_realistic.jpg", plot = ammi_grid1, path = fig_di
 
 
 
-g_ammi <- ammi_out %>%
+g_ammi <- ammi_out1 %>%
   group_by(trait) %>%
   do(plot = {
     df <- .
     
-    trait <- df$trait
+    trait <- unique(df$trait)
     
     ## Combine the g and e scores into one DF
     scores_df <- df %>% 
-      mutate(out = map(ammi, ~map_df(.[-1], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1]))))) %>%
+      mutate(out = map(ammi, ~map_df(.[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1]))))) %>%
       unnest(out)
     
+    # Create a renaming vector
     propvar_rename_df <- df %>% 
-      mutate(propvar = map(ammi, "results") %>% map(~mutate(., propvar = paste0(term, " (", formatC(prop_var * 100, 2, 2), "%)")) %>% select(term, propvar))) %>%
+      mutate(propvar = map(results, ~mutate(., propvar = paste0(str_replace_all(term, "PC", "IPCA"), " (", round(cumprop, 2) * 100, "%)")))) %>%
       unnest(propvar)
     
     scores_toplot <- scores_df %>%
@@ -1379,7 +1463,7 @@ g_ammi <- ammi_out %>%
       theme(legend.position = "bottom")
     # theme(legend.position = "right", legend.direction = "vertical")
     
-    if (trait == levels(as.factor(ammi_out$trait))[1]) {
+    if (trait == levels(as.factor(ammi_out1$trait))[1]) {
       g + facet_grid(trait ~ set + propvar, switch = "y") 
     } else {
       g + facet_grid(trait ~ propvar, switch = "y") 
@@ -1404,9 +1488,11 @@ ggsave(filename = "ammi_biplots_combined.jpg", plot = ammi_grid1, path = fig_dir
 
 
 
+# Rename an object
+ammi_out <- ammi_out1
 
 ## Save all of this
-save_file <-  
+save_file <- file.path(result_dir, "genotype_environment_phenotypic_analysis.RDAta")
 save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_GE", file = save_file)
 
     

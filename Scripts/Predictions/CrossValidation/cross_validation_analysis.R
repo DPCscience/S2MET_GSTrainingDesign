@@ -24,8 +24,8 @@ library(car)
 load(file.path(result_dir, "distance_method_results.RData"))
 
 # Load results
-cv_results <- list.files(result_dir, full.names = TRUE, pattern = "cross_validation_")
-lapply(cv_results, load, envir = .GlobalEnv)
+cv_files <- list.files(result_dir, full.names = TRUE, pattern = "cross_validation_")
+lapply(cv_files, load, envir = .GlobalEnv)
 
 
 ## Significant level
@@ -67,6 +67,8 @@ model_replace <- c("M2" = "M1 (Main effect)", "M3" = "M2 (GxE)", "M4" = "M1 (Mai
 ### 
 
 # Regular cross-validation
+
+
 
 ## CV1 and CV2 - predicting untested genotypes or partially tested genotypes
 cv12_accuracy <- cv12_prediction %>% 
@@ -120,6 +122,8 @@ cv12_summ %>%
 
 
 ## CV0 and CV00 - predicting future years
+cv_zero_future_prediction %>% split(.$cv) %>% map(~group_by(., trait, model) %>% summarize(n = n())) 
+
 
 # Calculate accuracy
 cv_zero_future_acc <- cv_zero_future_prediction %>% 
@@ -178,7 +182,10 @@ cv00_future_summ <- cv00_future_tomodel %>%
 
 
 ## Combine and plot
-bind_rows(cv0_future_summ, cv00_future_summ) %>%
+cv_future_combine <- bind_rows(cv0_future_summ, cv00_future_summ) %>%
+  mutate(cv = paste0(cv, "_future"))
+
+cv_future_combine %>% 
   mutate(cv = toupper(cv)) %>%
   ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
   geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
@@ -189,7 +196,13 @@ bind_rows(cv0_future_summ, cv00_future_summ) %>%
 
 
 
-## CV0 and CV00 - leave one environment out 
+## CV0 and CV00 - leave one environment out
+cases <- cv_zero_loeo_prediction %>% 
+  unnest(prediction) %>%
+  distinct(cv, trait, .id, model, environment) %>%
+  split(.$cv) %>%
+  map(~group_by(., trait, model, environment) %>% summarize(n = n())) 
+
 
 # Calculate accuracy
 cv_zero_loeo_acc <- cv_zero_loeo_prediction %>% 
@@ -201,31 +214,31 @@ cv_zero_loeo_acc <- cv_zero_loeo_prediction %>%
   mutate_at(vars(model, environment), as.factor)
 
 ## Summarize for CV0
-cv0_future_summ <- cv_zero_future_acc %>% 
+cv0_loeo_summ <- cv_zero_loeo_acc %>% 
   filter(cv == "cv0") %>% 
   group_by(cv, trait, model) %>% 
   summarize(fit = mean(accuracy)) %>%
   ungroup()
 
-# trait       model accuracy
-# 1 GrainYield  M4       0.486
-# 2 GrainYield  M5_PD    0.469
-# 3 HeadingDate M4       0.822
-# 4 HeadingDate M5_PD    0.815
-# 5 PlantHeight M4       0.497
-# 6 PlantHeight M5_PD    0.489
+# cv    trait       model   fit
+# 1 cv0   GrainYield  M4    0.406
+# 2 cv0   GrainYield  M5_PD 0.353
+# 3 cv0   HeadingDate M4    0.832
+# 4 cv0   HeadingDate M5_PD 0.803
+# 5 cv0   PlantHeight M4    0.544
+# 6 cv0   PlantHeight M5_PD 0.514
 
 
 ## Fit a model for CV00
-cv00_future_tomodel <- cv_zero_future_acc %>%
+cv00_loeo_tomodel <- cv_zero_loeo_acc %>%
   filter(cv == "cv00") %>%
   group_by(cv, trait) %>%
   nest() %>%
   mutate(out = list(NULL))
 
-for (i in seq(nrow(cv00_future_tomodel))) {
+for (i in seq(nrow(cv00_loeo_tomodel))) {
   
-  df <- unnest(cv00_future_tomodel[i,], data)
+  df <- unnest(cv00_loeo_tomodel[i,], data)
   
   # Fit a model
   fit <- lmer(zscore ~ model + (1|environment) + (1|model:environment), data = df)
@@ -235,11 +248,11 @@ for (i in seq(nrow(cv00_future_tomodel))) {
   ranova_df <- tidy(ranova(fit))
   effects_df <- as.data.frame(Effect("model", fit))
   
-  cv00_future_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
+  cv00_loeo_tomodel$out[[i]] <- data_frame(anova = list(anova_df), ranova = list(ranova_df), effects = list(effects_df))
   
 }
 
-cv00_future_summ <- cv00_future_tomodel %>% 
+cv00_loeo_summ <- cv00_loeo_tomodel %>% 
   unnest(out) %>% 
   select(-data) %>%
   unnest(effects) %>%
@@ -247,7 +260,10 @@ cv00_future_summ <- cv00_future_tomodel %>%
 
 
 ## Combine and plot
-bind_rows(cv0_future_summ, cv00_future_summ) %>%
+cv_loeo_combine <- bind_rows(cv0_loeo_summ, cv00_loeo_summ) %>%
+  mutate(cv = paste0(cv, "_loeo"))
+
+cv_loeo_combine %>%
   mutate(cv = toupper(cv)) %>%
   ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
   geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
@@ -256,8 +272,7 @@ bind_rows(cv0_future_summ, cv00_future_summ) %>%
 
 
 
-cv_combine <- bind_rows(cv12_summ, cv0_future_summ, cv00_future_summ) %>%
-  mutate(cv_class = "cv")
+cv_combine <- bind_rows(cv12_summ, cv_loeo_combine, cv_future_combine) %>% mutate(cv_class = "cv")
 
 
 
@@ -275,6 +290,9 @@ cv_combine <- bind_rows(cv12_summ, cv0_future_summ, cv00_future_summ) %>%
 ##### Parent-offspring validation
 ##### 
 
+
+
+
 pov1_summ <- pov1_prediction %>% 
   unnest() %>%
   group_by(trait, model, environment) %>% 
@@ -283,17 +301,30 @@ pov1_summ <- pov1_prediction %>%
   ungroup() %>%
   mutate(cv = "pov1")
 
+
 ## Summarize for POV0
 pov0_future_summ <- pov0_future_prediction %>%
-  unnest() %>%
+  bind_rows() %>%
+  unnest(out) %>% unnest() %>%
   group_by(trait, model, environment) %>% 
   summarize(accuracy = cor(value, pred_value)) %>%
   summarize(fit = mean(accuracy)) %>%
   ungroup() %>%
   mutate(cv = "pov0_future")
 
+
+
+cases <- pov0_loeo_prediction %>%
+  bind_rows() %>%
+  unnest(out) %>% 
+  group_by(., trait, model) %>% 
+  summarize(n = n())
+
+
+
 pov0_loeo_summ <- pov0_loeo_prediction %>%
-  unnest() %>%
+  bind_rows() %>%
+  unnest(out) %>% unnest(prediction) %>%
   group_by(trait, model, environment) %>%
   summarize(accuracy = cor(value, pred_value)) %>%
   summarize(fit = mean(accuracy)) %>%
@@ -301,12 +332,17 @@ pov0_loeo_summ <- pov0_loeo_prediction %>%
   mutate(cv = "pov0_loeo")
 
 
+pov00_future_tomodel <- pov00_future_prediction %>%
+  bind_rows() %>% 
+  unnest(out) %>% unnest(prediction)
+
+pov00_loeo_tomodel <- pov00_loeo_prediction %>%
+  bind_rows() %>% 
+  unnest(out) %>% unnest(prediction)
+
 
 ## Fit models to POV00
-pov00_tomodel <- bind_rows(
-  unnest(pov00_future_prediction) %>% mutate(cv = "pov00_future"),
-  unnest(pov00_loeo_prediction) %>% mutate(cv = "pov00_loeo")
-) %>%
+pov00_tomodel <- bind_rows(mutate(pov00_future_tomodel, cv = "pov00_future"), mutate(pov00_loeo_tomodel, cv = "pov00_loeo")) %>%
   group_by(cv, trait, model, environment) %>%
   summarize(accuracy = cor(value, pred_value)) %>%
   ungroup() %>%
@@ -341,13 +377,14 @@ pov00_summ <- pov00_tomodel %>%
 
 
 pov_combine <- bind_rows(pov1_summ, pov0_future_summ, pov0_loeo_summ, pov00_summ) %>%
-  mutate(cv_class = "pov") %>%
-  separate(cv, c("cv", "type"), sep = "_") %>%
-  mutate(cv_ann = ifelse(!is.na(type), paste0(toupper(cv), "\n(", str_to_title(type), ")"), toupper(cv)))
+  mutate(cv_class = "pov")
+
 
 
 ## Combine and plot
 pov_combine %>%
+  separate(cv, c("cv", "type"), sep = "_") %>%
+  mutate(cv_ann = ifelse(!is.na(type), paste0(toupper(cv), "\n(", str_to_title(type), ")"), toupper(cv))) %>%
   ggplot(aes(x = cv_ann, y = fit, ymin = lower, ymax = upper, shape = model, color = model)) +
   geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
   geom_point(position = position_dodge(0.9), size = 2) +
@@ -364,18 +401,17 @@ pov_combine %>%
 ## Combine all CV and POV results
 ## 
 
-all_val_combine <- bind_rows(cv_combine, pocv_combine, pov_combine)
+all_val_combine <- bind_rows(cv_combine, pov_combine) %>%
+  separate(cv, c("cv", "type"), sep = "_") %>%
+  mutate(cv_ann = ifelse(!is.na(type), paste0(toupper(cv), "\n(", str_to_title(type), ")"), toupper(cv)),
+         cv_class = toupper(cv_class))
 
 
 g_all_cv <- all_val_combine %>%
-  mutate_at(vars(cv, cv_class), toupper) %>%
-  mutate(model = str_extract(model, "M[0-9]"),
-         model = str_replace_all(model, model_replace),
-         cv = str_replace_all(cv, "_", "\n")) %>%
-  ggplot(aes(x = cv, y = fit, ymin = lower, ymax = upper, color = model, shape = model)) +
+  ggplot(aes(x = cv_ann, y = fit, ymin = lower, ymax = upper, color = model, shape = model)) +
   geom_errorbar(position = position_dodge(0.9), width = 0.5, color = "black") +
-  geom_point(position = position_dodge(0.9)) +
-  facet_wrap(~ trait + cv_class, scales = "free_x") +
+  geom_point(position = position_dodge(0.9), size = 2) +
+  facet_grid(trait ~ cv_class, scales = "free_x", space = "free_x") +
   scale_y_continuous(name = "Prediction accuracy", breaks = pretty) +
   scale_color_discrete(name = "Model") +
   scale_shape_discrete(name = "Model") +
@@ -383,21 +419,11 @@ g_all_cv <- all_val_combine %>%
   theme(axis.title.x = element_blank(), legend.position = "bottom")
 
 
-ggsave(filename = "all_cross_validation_accuracy.jpg", plot = g_all_cv, path = fig_dir, width = 7, height = 9, dpi = 1000)
+ggsave(filename = "all_cross_validation_accuracy.jpg", plot = g_all_cv, path = fig_dir, width = 6, height = 5, dpi = 1000)
+
 
 
 #
-
-
-
-
-
-
-
-
-
-
-
 
 
 
