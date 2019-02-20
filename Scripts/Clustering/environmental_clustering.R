@@ -24,7 +24,7 @@ source(file.path(repo_dir, "source.R"))
 load(file.path(result_dir, "environmental_covariable_distance_mat.RData"))
 # Load the genetic correlation estimates
 load(file.path(result_dir, "environmental_genetic_correlations.RData"))
-# Load the two-way geno/env tables
+# Load the two-way geno/env tables and AMMI results
 load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 # # Create a new data.frame to hold the different datasets
@@ -32,6 +32,96 @@ load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 #   group_by(trait) %>%
 #   nest() %>%
 #   mutate(data = map(data, droplevels))
+
+
+
+## Use fitted values of AMMI model to cluster environments based on the best lines in each
+ammi_fitted <- ammi_out %>%
+  group_by(set, trait) %>% 
+  do({
+    df <- .
+    
+    ## Filter for PC1
+    scores <- df$ammi[[1]][c("escores", "gscores")] %>%
+      map(filter, PC == "PC1")
+    
+    # Create matrices of genotype and environment effects
+    g_effect <- scores$gscores %>% 
+      select(line_name, effect) %>% 
+      as.data.frame() %>% 
+      column_to_rownames("line_name") %>% 
+      as.matrix()
+    
+    e_effect <- scores$escores %>% 
+      select(environment, effect) %>% 
+      as.data.frame() %>% 
+      column_to_rownames("environment") %>% 
+      as.matrix()
+    
+    
+    g_effect1 <- replicate(nrow(e_effect), g_effect[,1])
+    e_effect1 <- replicate(nrow(g_effect), e_effect[,1])
+    
+    main_effect <- g_effect1 + t(e_effect1)
+    colnames(main_effect) <- row.names(e_effect1)
+    
+    # Create interaction scores from the PC
+    g_scores <- scores$gscores %>% 
+      select(line_name, score) %>%
+      as.data.frame() %>% 
+      column_to_rownames("line_name") %>% 
+      as.matrix()
+    
+    e_scores <- scores$escores %>% 
+      select(environment, score) %>% 
+      as.data.frame() %>% 
+      column_to_rownames("environment") %>% 
+      as.matrix()
+    
+    int_effect <- tcrossprod(g_scores, e_scores)
+
+    ## Calculate fitted values
+    fitted_effect <- main_effect + int_effect
+    
+    ## Determine the best (and worst) in each environment
+    top <- apply(X = fitted_effect, MARGIN = 2, FUN = function(x) row.names(fitted_effect)[order(x, decreasing = TRUE)[1:5]])
+    bottom <- apply(X = fitted_effect, MARGIN = 2, FUN = function(x) row.names(fitted_effect)[order(x, decreasing = FALSE)[1:5]])
+    
+    ## Return the fitted values, the top, and bottom
+    fitted_effect1 <- as.data.frame(fitted_effect) %>% rownames_to_column("line_name") %>% gather(environment, fitted, -line_name)
+    data_frame(fitted = list(fitted_effect1), top = list(top), bottom = list(bottom))
+    
+  })
+    
+
+
+## How many mega-environments per trait and set
+ammi_fitted %>% 
+  mutate(favorable = ifelse(trait == "GrainYield", top, bottom)) %>% 
+  summarize(n_cluster = map_dbl(favorable, ~n_distinct(.[1,])))
+    
+# set       trait       n_cluster
+# 1 complete  GrainYield          2
+# 2 complete  HeadingDate         2
+# 3 complete  PlantHeight         2
+# 4 realistic GrainYield          2
+# 5 realistic HeadingDate         1
+# 6 realistic PlantHeight         1
+
+
+## Create clusters
+ammi_clusters <- ammi_fitted1 %>%
+  ungroup() %>%
+  mutate(cluster = map(favorable, ~as.data.frame(.[1,]) %>% rownames_to_column("environment") %>% 
+                          mutate_at(vars(-environment), funs(cluster = as.numeric(as.factor(.)))) %>% select(environment, cluster)) ) %>%
+  ungroup() %>%
+  select(set, trait, cluster) %>%
+  mutate(model = "AMMI")
+
+
+
+
+
 
 
 
@@ -189,7 +279,7 @@ ec_sim_mat_df1 <- sim_mat_group %>%
 dist_method_df_complete <- ec_sim_mat_df1 %>% 
   filter(set == "complete", trait %in% traits) %>% 
   add_row(trait = traits, model = "great_circle_dist", dist = great_circle_dist_list, cov = map(great_circle_dist_list, ~1 - as.matrix(.))) %>% 
-  add_row(trait = traits, model = "pheno_dist", dist = ge_mean_D, cov = env_cor_all[-3]) %>% 
+  add_row(trait = traits, model = "pheno_dist", dist = ge_mean_D, cov = env_cor_all) %>% 
   add_row(trait = traits, model = "pheno_loc_dist", dist = gl_mean_D_complete, cov = loc_cor_complete) %>%
   mutate(set = "complete")
   
@@ -250,7 +340,7 @@ ec_mat_complete <- ec_mats %>%
 
 
 # Combine
-cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_complete, ec_mat_complete)
+cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_complete, ec_mat_complete, filter(ammi_clusters, set == "complete"))
 
   
 
@@ -261,12 +351,12 @@ cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_comp
 ## Realistic
 # GCD
 gcd_mat_realistic <- data_frame(set = "realistic", model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list,
-                               test_env = map(complete_train_env[-3], ~str_subset(., "17"))) %>%
+                               test_env = map(complete_train_env, ~str_subset(., "17"))) %>%
   mutate(cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)))
 
 # Location dist
 pld_mat_realistic  <- data_frame(set = "realistic", model = "pheno_location_dist", trait = names(gl_mean_D_realistic), data = gl_mean_D_realistic,
-                               test_env = map(complete_train_env[-3], ~str_subset(., "17"))) %>%
+                               test_env = map(complete_train_env, ~str_subset(., "17"))) %>%
   mutate(data = map(data, cmdscale),
          test_env = map2(.x = data, .y = test_env, ~intersect(row.names(.x), .y)),
          cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)))
@@ -277,7 +367,7 @@ ec_mat_realistic  <- ec_mats %>%
   rename(data = mat) %>%
   left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% # filter out undesired environments
   mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,, drop = FALSE])) %>%
-  left_join(., map(complete_train_env[-3], ~str_subset(., "17")) %>% data_frame(trait = names(.), test_env = .)) %>%
+  left_join(., map(complete_train_env, ~str_subset(., "17")) %>% data_frame(trait = names(.), test_env = .)) %>%
   mutate(cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)),
          model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group)) %>%
@@ -285,12 +375,21 @@ ec_mat_realistic  <- ec_mats %>%
   
 
 # Combine
-cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic)
+cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic, filter(ammi_clusters, set == "realistic"))
 
 
 ## Combine all
 cluster_df <- bind_rows(cluster_df_complete, cluster_df_realistic) %>%
   select(-test_env)
+
+
+
+
+
+
+
+
+
 
 
 

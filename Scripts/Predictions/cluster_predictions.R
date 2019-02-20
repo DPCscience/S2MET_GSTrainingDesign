@@ -36,6 +36,10 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
 
 # Number of random cluster assignments
 n_random <- 25
+# Number of CV iterations
+nCV <- 10
+# CV folds
+k <- 5
 
 ## Subset the modeling data to exclude the VP
 S2_MET_BLUEs_tomodel_train <- S2_MET_BLUEs_tomodel %>%
@@ -190,28 +194,45 @@ cluster_predictions <- bind_rows(cluster_predictions)
 
 
 ## Cross-validation predictions
-# First generate test/train sets
-n_train <- length(vp_geno)
-reps <- 10
 
-cv_test_sets <- replicate(n = reps, sort(sample(tp_geno, size = n_train)), simplify = FALSE)
-cv_train_sets <- map(cv_test_sets, ~setdiff(tp_geno, .))
-
-## Create a data.frame
-cv_sets <- data_frame(cv_rep = seq_along(cv_test_sets), cv_train = cv_train_sets, cv_test = cv_test_sets)
+# Generate train/test/validation sets
+cv_train_test <- replicate(n = nCV, crossv_kfold(data = data_frame(line_name = tp_geno), k = k) %>% mutate(val = list(vp_geno)) %>% 
+                             mutate_at(vars(train, test), ~map(., ~pull(as.data.frame(.)))), simplify = FALSE) %>%
+  map2_df(.x = ., .y = seq_along(.), ~mutate(.x, .id = paste0(.y, "_", .id)))
 
 
-cluster_cv_train_test <- cluster_train_test %>%
-  unnest(data) %>%
-  left_join(., nest(group_by(S2_MET_BLUEs_tomodel_train, environment, trait)), by = c("val_environment" = "environment", "trait")) %>%
-  crossing(., cv_sets) %>%
-  mutate(cv_train = map2(.x = train, .y = cv_train, ~filter(.x, line_name %in% .y)),
-         cv_test = map2(.x = data, .y = cv_test, ~filter(.x, line_name %in% .y))) %>%
-  select(set:val_environment, nTrainEnv, cluster, cv_rep, cv_train, cv_test, vp_test = test)
+## Edit trhe cluster_train_test df
+cluster_cv_train_test <- cluster_train_test 
+
+for (i in seq(nrow(cluster_cv_train_test))) {
+  
+  # Note the trait
+  tr <- cluster_cv_train_test$trait[i]
+  # Pull out blues for the trait
+  tr_blues <- filter(S2_MET_BLUEs_tomodel, trait == tr)
+  # Pull out data
+  dat <- cluster_cv_train_test$data[[i]]
+  
+  # Create new train/test/val sets
+  dat2 <- crossing(dat, cv_train_test) %>%
+    mutate(train = map2(train, train1, ~filter(.x, line_name %in% .y)),
+           val = test,
+           test = map2(test1, val_environment, ~filter(tr_blues, environment == .y, line_name %in% .x))) %>%
+    select(val_environment, train, test, val, nTrainEnv, cluster, .id)
+  
+  # Add dat2 back to the set
+  cluster_cv_train_test$data[[i]] <- dat2
+  
+}
+
 
 
 ## Split
 clusters_cv_split <- cluster_cv_train_test %>%
+  unnest(data) %>%
+  # Nest within ID
+  group_by(set, model, trait, val_environment, cluster, nClusters, nTrainEnv) %>%
+  nest(train, test, val, .id) %>%
   assign_cores(n_core = n_core) %>%
   split(.$core)
 
@@ -222,7 +243,6 @@ cluster_cv_predictions <- mclapply(X = clusters_cv_split, FUN = function(core_df
   # #
   # r = 1
   # core_df <- clusters_cv_split[[r]]
-  # core_df <- clusters_cv_split[[r]] %>% sample_n(size = 200)
   # #
   
   results_out <- vector("list", nrow(core_df))
@@ -247,27 +267,52 @@ cluster_cv_predictions <- mclapply(X = clusters_cv_split, FUN = function(core_df
 
     ##
     
-    ## Run the base predictions
-    base_pred_cv <- gblup(K = K, train = row$cv_train[[1]], test = row$cv_test[[1]], fit.env = TRUE)$accuracy
-    base_pred_vp <- gblup(K = K, train = row$cv_train[[1]], test = row$vp_test[[1]], fit.env = TRUE)$accuracy
+    ## Unnest the data
+    row1 <- unnest(row, data)
+    
+    # Generate predicted values of the test/validation set set
+    row1_test_val <- map2(row1$test, row1$val, bind_rows)
+    test_val_pred <- map2(.x = row1$train, .y = row1_test_val, ~gblup(K = K, train = .x, test = .y, fit.env = TRUE)) %>% map("pgv")
+    
+    ## Add results to the row
+    row2 <- row1 %>%
+      mutate(test_out = map(test_val_pred, ~filter(., !line_name %in% vp)),
+             val_out = map(test_val_pred, ~filter(., line_name %in% vp))) %>%
+      select(.id, test_out, val_out) %>%
+      # Split ID
+      separate(.id, c("rep", ".id"))
+
+    ## Calculate test accuracy
+    row2_test_acc <- row2 %>%
+      unnest(test_out) %>% 
+      group_by(rep) %>%
+      summarize(cv_accuracy = cor(value, pred_value))
+    
+    ## Calculate average val accuracy
+    row2_val_acc <- row2 %>%
+      unnest(val_out) %>% 
+      group_by(rep, .id) %>%
+      summarize(accuracy = cor(value, pred_value)) %>%
+      summarize(vp_accuracy = mean(accuracy))
+    
+
     
     ##
 
-#     data.frame(cluster = row$cluster, nTrainEnv = row$nTrainEnv, base_pred_cv, base_vp = base_pred_vp, random = random_pred, 
-#                stringsAsFactors = FALSE)
+#     full_join(row2_test_acc, row2_val_acc, by= "rep")
 # 
 # }) %>% ungroup()
 
     ##
 
-    # Add predictions to the list
-    results_out[[i]] <- list(base_cv = base_pred_cv, base_vp = base_pred_vp)
+    ## Merge and add to results_out
+    results_out[[i]] <- full_join(row2_test_acc, row2_val_acc, by= "rep")
 
     }
 
   core_df %>%
     mutate(out = results_out) %>%
-    select(-core, -cv_train, -cv_test, -vp_test)
+    select(-core, -data)
 
 }, mc.cores = n_core) # Close the parallel operation
 

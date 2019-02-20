@@ -181,4 +181,6 @@ realistic_test_env <- tp_vp_env_trait %>%
   map(~str_subset(., "17"))
 
 
+## Final filter of BLUEs
+S2_MET_BLUEs <- filter(S2_MET_BLUEs, environment %in% tp_vp_env)
 

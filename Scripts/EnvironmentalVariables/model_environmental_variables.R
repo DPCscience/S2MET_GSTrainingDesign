@@ -173,7 +173,7 @@ ec_env_df1 <- ec_env_df %>%
 
 
 
-
+## Re-organization and removal of some covariates
 ec_env_df2 <- ec_env_df1 %>%
   left_join(env_means_all, .) %>%
   mutate(EC_type = "summary") %>%
@@ -182,6 +182,7 @@ ec_env_df2 <- ec_env_df1 %>%
   filter(!variable %in% c("claytotal_r_topsoil", "sandtotal_r_subsoil", "sandtotal_r_topsoil", "silttotal_r_subsoil",
                           "om_r_subsoil"))
 
+## Correlate covariates with the environmental mean
 env_mean_cor <- ec_env_df2 %>%
   group_by(set, trait, ec_group, variable) %>% 
   do(test = cor.test(.$h, .$value)) %>%
@@ -200,8 +201,6 @@ ec_env_df3 <- ec_env_df2 %>%
   filter(!(trait == "GrainYield" & h > 3000),
          !(trait == "PlantHeight" & h > 25))
 
-
-
 env_mean_cor1 <- ec_env_df3 %>%
   group_by(set, trait, ec_group, variable) %>% 
   do(test = cor.test(.$h, .$value)) %>%
@@ -210,6 +209,8 @@ env_mean_cor1 <- ec_env_df3 %>%
          pvalue = map_dbl(test, "p.value"),
          df = map_dbl(test, "parameter")) %>%
   select(-test)
+
+
 
 
 ## Try multiple regression, where ECs are added in order of correlation
@@ -336,7 +337,6 @@ g_mean_cor <- env_mean_cor_sig %>%
     
 
     
-  ec_env_df3
 
 
 
@@ -561,7 +561,7 @@ for (i in seq(nrow(env_ipca_mr))) {
   grp <- env_ipca_mr$ec_group[i]
   
   df <- ec_score_df %>% 
-    filter(trait == tr, set == st, ec_group == grp)
+    filter(trait == tr, set == st, ec_group == grp, PC == "PC1")
   
   ## Run correlations and rank the ECs by correlation
   cors <- df %>% 
@@ -720,7 +720,7 @@ ec_env_ipca_sig <- select(env_ipca_cor_sig, set, trait, ec_group, variable) %>%
 env_mean_cor_top <- env_mean_cor_sig %>%
   filter(set == "complete", ec_group == "multi_year", variable != "ph1to1h2o_r_subsoil") %>%
   left_join(., ec_env_df3) %>%
-  mutate(variable = case_when(
+  mutate(variable1 = case_when(
     variable == "interval_2_PPT" ~ "Month 2 Precipitation",
     variable == "interval_2_TMIN" ~ "Month 2 Average Min. Temp.",
     variable == "annual_TSEASON" ~ "Annual Temperature Seasonality (Max. - Min.)"
@@ -741,17 +741,25 @@ env_mean_cor_top <- env_mean_cor_sig %>%
 ggsave(filename = "env_mean_cor_top_poster.jpg", plot = env_mean_cor_top, path = fig_dir, width = 5, height = 10, dpi = 1000)
 
 
-env_ipca_cor_top <- env_ipca_cor_sig %>%
+## Subset the most important covariates
+env_ipca_cor_sig_plot <-  env_ipca_cor_sig %>%
   filter(set == "complete", ec_group == "multi_year") %>%
-  left_join(., ec_score_df) %>%
-  left_join(., unnest(env_ipca_mr1, cors)) %>%
-  mutate(variable = case_when(
-    variable == "max_PPT" ~ "Max. Monthly Precipitation",
-    variable == "interval_1_TMAX" ~ "Month 1 Average Max. Temp.",
-    variable == "annual_TSEASON" ~ "Annual Temperature Seasonality (Max. - Min.)"
-  )) %>%
   group_by(trait) %>% 
   top_n(n = 1, wt = -p_value) %>%
+  ungroup() %>%
+  left_join(., filter(ec_score_df, PC == "PC1")) %>%
+  left_join(., unnest(env_ipca_mr1, cors)) %>%
+  mutate(variable1 = case_when(
+    # variable == "max_PPT" ~ "Max. Monthly Precipitation",
+    variable == "interval_2_PPT" ~ "Month 2 Precip.",
+    variable == "interval_1_TMAX" ~ "Month 1 Average Max. Temp.",
+    variable == "isothermality" ~ "Annual Isothermality"
+  )) 
+
+
+
+
+env_ipca_cor_top <-env_ipca_cor_sig_plot %>%
   ggplot(aes(x = value, y = score)) + 
   geom_smooth(method = "lm", se = FALSE) + 
   geom_point() + 
@@ -826,8 +834,8 @@ env_variable_combine <- bind_rows(
   mutate(ec_env_mean_sig, group = "EC_Mean"),
   mutate(ec_env_ipca_sig, group = "EC_IPCA"),
   ec_all %>% select(-h) %>% mutate(group = "EC_All")) %>%
-  ## Remove one-year covariates with the realistic scenario
-  filter(!(set == "realistic" & ec_group == "one_year"))
+    ## Remove one-year covariates with the realistic scenario
+    filter(!(set == "realistic" & ec_group == "one_year"))
 
 
 ## Compare the overlap of variables that are significantly correlated with the mean
@@ -925,7 +933,6 @@ ec_mats_pca <- ec_mats %>%
 
 ## Plot
 g_ec_pca <- ec_mats_pca %>%
-  filter(population == "tp") %>%
   split(.$ec_group) %>%
   map(~{
     unnest(., pca) %>%
