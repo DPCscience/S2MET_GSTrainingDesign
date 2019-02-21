@@ -412,22 +412,27 @@ cluster_varcomp <- cluster_df_tomodel %>%
     # Print message
     print(paste(unique(df$trait), unique(df$model)))
     
-    # Fit a model
-    # Random effects of genotype, cluster, environment in cluster, G x cluster, and g x environment in cluster
-    fit <- lmer(value ~ (1|line_name) + (1|cluster) + (1|cluster:environment) + (1|line_name:cluster) + (1|line_name:cluster:environment), 
+    # # Fit a model
+    # # Random effects of genotype, cluster, environment in cluster, G x cluster, and g x environment in cluster
+    # fit <- lmer(value ~ (1|line_name) + (1|cluster) + (1|cluster:environment) + (1|line_name:cluster) + (1|line_name:cluster:environment), 
+    #             data = df, control = control)
+    
+    ## Alternative model
+    fit <- lmer(value ~ (1|line_name) + (1|cluster) + (1|cluster:location) + (1|cluster:year) + (1|cluster:location:year) + (1|line_name:cluster) + 
+                  (1|line_name:cluster:location) + (1|line_name:cluster:year) + (1|line_name:cluster:location:year), 
                 data = df, control = control)
     
-    # Random anova
-    fit_ranova <- ranova(model = fit) %>%
-      broom::tidy() %>% 
-      filter(!str_detect(term, "none")) %>% 
-      mutate(term = str_remove_all(term, "\\(1 \\| |\\)"))
+    # # Random anova
+    # fit_ranova <- ranova(model = fit) %>%
+    #   broom::tidy() %>% 
+    #   filter(!str_detect(term, "none")) %>% 
+    #   mutate(term = str_remove_all(term, "\\(1 \\| |\\)"))
     
     # Combine and tidy, then return
     as.data.frame(VarCorr(fit)) %>% 
-      select(term = grp, variance = vcov) %>% 
-      left_join(., fit_ranova, by = "term") %>%
-      select(term, variance, LRT, df, p.value)
+      select(term = grp, variance = vcov) # %>% 
+      # left_join(., fit_ranova, by = "term") %>%
+      # select(term, variance, LRT, df, p.value)
     
   })
     
@@ -452,8 +457,9 @@ ggsave(filename = "cluster_varcomp.jpg", plot = g_cluster_varcomp, path = fig_di
 # Save a table
 cluster_varcomp_table <- cluster_varcomp %>%
   group_by(set, model, trait) %>%
-  mutate(varprop = variance / sum(variance), 
-         annotation = paste0(formatC(x = varprop, digits = 2), ifelse(p.value < 0.05, "*", "")), 
+  mutate(varprop = variance / sum(variance)) %>%
+  mutate(annotation = list(NULL)) %>%
+  mutate(annotation = paste0(formatC(x = varprop, digits = 2)),
          annotation = str_remove_all(annotation, "NA")) %>%
   select(set, trait, model, term, annotation) %>%
   spread(term, annotation)

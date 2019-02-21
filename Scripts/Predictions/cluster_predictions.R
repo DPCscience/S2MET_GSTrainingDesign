@@ -35,7 +35,7 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
   mutate(line_name = as.factor(line_name))
 
 # Number of random cluster assignments
-n_random <- 25
+n_random <- 10
 # Number of CV iterations
 nCV <- 10
 # CV folds

@@ -3,6 +3,9 @@
 ## A script that automatically loads the data relevant for the S2MET project
 
 
+## Change the library paths
+if (version$minor == "5.2") .libPaths() <- gsub(pattern = "lab_library", replacement = "mesabi_library", x = .libPaths())
+
 # Load packages
 packages <- c("dplyr", "tidyr", "tibble", "stringr", "readxl", "readr", "parallel",
               "rrBLUP", "purrr", "boot", "pbr", "lme4", "modelr")
