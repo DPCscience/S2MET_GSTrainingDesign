@@ -184,3 +184,7 @@ realistic_test_env <- tp_vp_env_trait %>%
 ## Final filter of BLUEs
 S2_MET_BLUEs <- filter(S2_MET_BLUEs, environment %in% tp_vp_env)
 
+
+## Remove
+rm(S2_MET_BLUEs_temp)
+rm(S2_MET_BLUEs_temp1)

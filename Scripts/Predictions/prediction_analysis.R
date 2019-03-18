@@ -19,47 +19,224 @@ library(ggridges)
 library(gridExtra)
 library(broom)
 library(car)
+library(cowplot)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
 
 # Load results
-load(file.path(result_dir, "distance_rank_predictions.RData"))
-# Load the cluster results
-load(file.path(result_dir, "cluster_predictions.RData"))
-# Load the cross-validation results
-load(file.path(result_dir, "cross_validation.RData"))
+# load(file.path(result_dir, "all_predictions.RData"))
+load(file.path(result_dir, "all_predictions_00.RData"))
+
 
 
 ## Significant level
 alpha <- 0.05
 
-## Cutoff of prediction accuracy to remove an environment
-env_cutoff <- 0.1
-env_cutoff <- -Inf
-
-environment_rank_pred_out <- bind_rows(environment_rank_pred_out)
-environment_window_pred_out <- bind_rows(environment_window_pred_out)
-
-## Unique models
-unique(environment_rank_pred_out$model)
-
-
 ## Create a factor for the distance methods
 dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" = "Location Phenotypic Distance",  "great_circle_dist" = "Great Circle Distance", 
                          "OYEC_All" = "One Year All ECs", "OYEC_Mean" = "One Year Mean Cor EC", "OYEC_IPCA" = "One Year IPCA Cor EC", 
                          "MYEC_All" = "Multi Year All ECs", "MYEC_Mean" = "Multi Year Mean Cor EC", "MYEC_IPCA" = "Multi Year IPCA Cor EC",
-                         "sample" = "Random")
+                         "AMMI" = "AMMI", "sample" = "Random")
 dist_method_abbr <- abbreviate(dist_method_replace)
 
 ## Alternative abbreviations
-dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "Random"),
+dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
                              names(dist_method_replace))
 
 colors <- umn_palette(3)
-colors_use <- c(colors[2], "#FFDE7A", colors[c(1, 3, 8, 4, 9, 5, 10)], "grey75")
+colors2 <- umn_palette(2)
+colors3 <- umn_palette(4)
+
+colors_use <- c("#FFB71E", "#FFDE7A", colors[1], colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
+
+# colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
+# colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")
+# colors_use <- c(colors[c(1:3, 5:7)], colors2[2:4], colors[4], "grey75")
+
 dist_colors <- setNames(colors_use, dist_method_abbr)
 
+## Subset for use
+dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA", "sample")]
+dist_colors_use <- dist_colors[dist_method_abbr_use]
+
+
+
+# ## Replacement vector for CV
+cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0", "cv00", "pov00", "pocv00") %>%
+  setNames(object = toupper(.), .)
+
+
+## Shorten the heritability results
+env_herit <- stage_one_data %>% 
+  filter(!str_detect(trial, "S2C1")) %>% 
+  distinct(trait, val_environment = environment, heritability)
+
+
+
+
+
+
+#### Cross-validation / POV using all data #####
+
+
+## Combine the all-data prediction results
+all_data_preds <- ls(pattern = "[0-9]{1,2}_predictions$") %>% 
+  subset(., map_lgl(., ~inherits(get(.), "data.frame")))
+
+
+cv_pov_results <- map(all_data_preds, get) %>%
+  map(., ~rename_at(., vars(which(names(.) %in% "environment")), ~str_replace(., pattern = "environment", "val_environment"))) %>%
+  map_df(., ~mutate_at(., vars(which(names(.) %in% "rep")), as.character)) %>%
+  mutate(scheme = ifelse(scheme == "pcv00", "pocv0", scheme)) %>%
+  ## Add CV/POV number
+  mutate(scheme_number = as.character(str_extract(scheme, "[0-9]{1,2}")))
+
+
+
+## Analyze together?
+all_cv_pov_predictions_out <- cv_pov_results %>%
+  left_join(., env_herit) %>%
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
+         set = ifelse(is.na(set), "complete", set)) %>%
+  mutate_at(vars(scheme, val_environment), as.factor)
+
+## Test for homogeneity of variance across all schemes
+homo_var_tests_schemes <- all_cv_pov_predictions_out %>% 
+  group_by(set, trait) %>% 
+  do(test = tidy(leveneTest(y = .$accuracy, group = .$scheme))) %>% 
+  ungroup() %>%
+  mutate(p_value = map_dbl(test, ~subset(., term == "group", p.value, drop = T)))
+
+## Test for homogeneity of variance across scheme numbers
+homo_var_tests_scheme_num <- all_cv_pov_predictions_out %>% 
+  group_by(set, trait, scheme_number) %>% 
+  do(test = tidy(leveneTest(y = .$accuracy, group = .$scheme))) %>% 
+  ungroup() %>%
+  mutate(p_value = map_dbl(test, ~subset(., term == "group", p.value, drop = T)))
+
+### Evidence suggests testing each individually
+
+
+# all_cv_pov_predictions_analysis <- all_cv_pov_predictions_out %>%
+#   group_by(set, trait) %>%
+#   nest() %>%
+#   mutate(out = list(NULL))
+# 
+# 
+# 
+# ## Loop for each row
+# for (i in seq(nrow(all_cv_pov_predictions_analysis))) {
+#   
+#   df <- all_cv_pov_predictions_analysis$data[[i]]
+#   
+#   ## Model
+#   fit <- lmer(accuracy ~ scheme + (1|val_environment) + (1|val_environment:scheme), data = df)
+#   
+#   effects_keep <- list(as_data_frame(Effect(focal.predictors = "scheme", fit)))
+#   
+#   fit_summary <- data_frame(
+#     fitted = list(fit),
+#     scheme_effects = effects_keep,
+#     anova = list(tidy(anova(fit))),
+#     ranova = list(tidy(ranova(fit)))
+#   )
+#   
+#   all_cv_pov_predictions_analysis$out[[i]] <- fit_summary
+#   
+#   
+# }
+
+
+
+## Separately
+separate_cv_pov_predictions_analysis <- all_cv_pov_predictions_out %>%
+  # group_by(set, trait, scheme) %>%
+  group_by(set, trait, scheme_number) %>%
+  nest() %>%
+  mutate(model_rep = map(data, "rep") %>% map_lgl(~!all(is.na(.)))) %>%
+  mutate(out = list(NULL))
+
+## Loop for each row
+for (i in seq(nrow(separate_cv_pov_predictions_analysis))) {
+   
+  df <- separate_cv_pov_predictions_analysis$data[[i]]
+  
+  ## If model_rep is FALSE, just take the mean
+  if (!separate_cv_pov_predictions_analysis$model_rep[i]) {
+    
+    # boot_mean <- replicate(1000, mean(sample(df$accuracy, replace = TRUE)))
+    # effects_keep <- summarize(df, accuracy = mean(accuracy)) %>%
+    #   cbind(., matrix(quantile(x = boot_mean, c(alpha / 2, 1 - (alpha / 2))), ncol = 2)) %>% 
+    #   rename_at(vars(-accuracy), ~c("lower", "upper"))
+    # 
+    # fit_summary <- data_frame(
+    #   fitted = list(NULL),
+    #   scheme_effects = list(effects_keep),
+    #   anova = list(NULL),
+    #   ranova = list(NULL)
+    # )
+    
+    
+    fit <- lmer(accuracy ~ 1 + scheme + (1|val_environment), data = df)
+    
+    effects_keep <- as.data.frame(Effect(focal.predictors = "scheme", fit))
+    
+    fit_summary <- data_frame(
+      fitted = list(fit),
+      scheme_effects = list(effects_keep),
+      anova = list(tidy(anova(fit))),
+      ranova = list(tidy(ranova(fit)))
+    )
+    
+  } else {
+    
+    # ## Model
+    # fit <- lmer(accuracy ~ 1 + (1|val_environment), data = df)
+    # 
+    # effects_keep <- cbind(data_frame(accuracy = fixef(fit)[1]), confint(fit, parm = "(Intercept)", method = "Wald")) %>%
+    #   rename_at(vars(-accuracy), ~c("lower", "upper")) %>%
+    #   as_data_frame()
+    
+    
+    ## Model
+    fit <- lmer(accuracy ~ 1 + scheme + (1|val_environment) + (1|val_environment:scheme), data = df)
+    
+    effects_keep <- as.data.frame(Effect(focal.predictors = "scheme", fit))
+    
+    fit_summary <- data_frame(
+      fitted = list(fit),
+      scheme_effects = list(effects_keep),
+      anova = list(tidy(anova(fit))),
+      ranova = list(tidy(ranova(fit)))
+    )
+    
+  }
+  
+  separate_cv_pov_predictions_analysis$out[[i]] <- fit_summary
+  
+  
+}
+
+
+## Plot all
+separate_cv_pov_predictions_analysis1 <- separate_cv_pov_predictions_analysis %>%
+  mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
+  unnest(effects) %>%
+  mutate(scheme = factor(toupper(scheme), levels = cv_replace)) %>%
+  rename(accuracy = fit)
+
+g_cv_pov_all_data <- separate_cv_pov_predictions_analysis1 %>%
+  ggplot(aes(x = scheme, y = accuracy, ymin = lower, ymax = upper)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  xlab("Validation scheme") +
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(filename = "all_cv_pov_predictions.jpg", plot = g_cv_pov_all_data, path = fig_dir, width = 5, height = 7, dpi = 1000)
 
 
 
@@ -67,398 +244,265 @@ dist_colors <- setNames(colors_use, dist_method_abbr)
 
 
 
+#### Random environment subset predictions #####
+
+random_pred <- ls(pattern = "[0-9]{1,2}_predictions_random") %>% 
+  subset(., map_lgl(., ~inherits(get(.), "data.frame")))
 
 
-#### Leave-one-environment-out predictions ####
+cv_pov_random_results <- map(random_pred, get) %>%
+  map(., ~rename_at(., vars(which(names(.) %in% "environment")), ~str_replace(., pattern = "environment", "val_environment"))) %>%
+  map_df(., ~mutate_at(., vars(which(names(.) %in% "rep")), as.character)) %>%
+  ## Add CV/POV number
+  mutate(scheme_number = as.character(str_extract(scheme, "[0-9]{1,2}")),
+         nTrainEnv = as.factor(nTrainEnv))
 
 
-environment_loeo_predictions_analysis <- environment_loeo_predictions_geno_mean %>% 
-  group_by(trait, set) %>% 
-  summarize(accuracy = mean(accuracy)) %>%
-  ungroup()
+
+## Analyze together?
+all_cv_pov_random_predictions_out <- cv_pov_random_results %>%
+  left_join(., env_herit) %>%
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
+         set = ifelse(is.na(set), "complete", set)) %>%
+  mutate_at(vars(scheme, val_environment), as.factor)
 
 
-# trait       set       accuracy
-# 1 GrainYield  complete     0.281
-# 2 GrainYield  realistic    0.321
-# 3 HeadingDate complete     0.421
-# 4 HeadingDate realistic    0.418
-# 5 PlantHeight complete     0.396
-# 6 PlantHeight realistic    0.383
+## Separately
+separate_cv_pov_random_predictions_analysis <- all_cv_pov_random_predictions_out %>%
+  # group_by(set, trait, scheme) %>%
+  group_by(set, trait, scheme_number) %>%
+  nest() %>%
+  mutate(model_rep = map(data, "rep") %>% map_lgl(~!all(is.na(.)))) %>%
+  mutate(out = list(NULL))
+
+## Loop for each row
+for (i in seq(nrow(separate_cv_pov_random_predictions_analysis))) {
+  
+  df <- separate_cv_pov_random_predictions_analysis$data[[i]]
+    
+  fit <- lmer(accuracy ~ 1 + nTrainEnv + scheme + nTrainEnv:scheme + (1|val_environment) + (1|val_environment:scheme) + (1|val_environment:nTrainEnv), data = df)
+  
+  effects_keep <- as.data.frame(Effect(focal.predictors = c("scheme", "nTrainEnv"), fit))
+  
+  fit_summary <- data_frame(
+    fitted = list(fit),
+    scheme_effects = list(effects_keep),
+    anova = list(tidy(anova(fit))),
+    ranova = list(tidy(ranova(fit)))
+  )
+    
+  separate_cv_pov_random_predictions_analysis$out[[i]] <- fit_summary
+  
+  
+}
 
 
-## Min, max, mean
-environment_loeo_predictions_geno_mean %>% 
-  group_by(trait, set) %>% 
-  summarize_at(vars(accuracy), funs(min, max, mean)) 
+## Plot all
+separate_cv_pov_random_predictions_analysis1 <- separate_cv_pov_random_predictions_analysis %>%
+  mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
+  unnest(effects) %>%
+  mutate(scheme = ifelse(scheme == "pov0", "pocv0", scheme),
+         scheme = factor(toupper(scheme), levels = cv_replace)) %>%
+  rename(accuracy = fit)
 
-# trait       set           min   max  mean
-# 1 GrainYield  complete  -0.187  0.504 0.281
-# 2 GrainYield  realistic  0.0456 0.494 0.321
-# 3 HeadingDate complete   0.104  0.646 0.421
-# 4 HeadingDate realistic  0.235  0.614 0.418
-# 5 PlantHeight complete   0.0686 0.621 0.396
-# 6 PlantHeight realistic  0.0362 0.589 0.383
+g_cv_pov_random_data <- separate_cv_pov_random_predictions_analysis1 %>%
+  ggplot(aes(x = nTrainEnv, y = accuracy, ymin = lower, ymax = upper)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  xlab("Number of training environments") +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(filename = "all_cv_pov_random_predictions.jpg", plot = g_cv_pov_random_data, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+
+## Add the accuracy when using all environments
+g_cv_pov_random_data1 <- separate_cv_pov_random_predictions_analysis1 %>%
+  left_join(., select(separate_cv_pov_predictions_analysis1, set, trait, scheme, fit = accuracy)) %>%
+  ggplot(aes(x = nTrainEnv, y = accuracy, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = fit, lty = "All data")) +
+  geom_point() +
+  geom_errorbar(width = 0.5) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_linetype_manual(values = 2, name = NULL) +
+  xlab("Number of training environments") +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.05, 0.05), legend.margin = margin())
+
+ggsave(filename = "all_cv_pov_random_predictions1.jpg", plot = g_cv_pov_random_data1, path = fig_dir, width = 10, height = 5, dpi = 1000)
+
+
+
+
+
+
+
 
 
 
 
 #### Environmental distance predictions ####
 
-
-
 ## Predictions when adding one environment at a time
+
+
+## Summarize the random results
+environment_rank_random_summary <- environment_rank_random_predictions %>% 
+  unnest(accuracy) %>%   
+  left_join(., env_herit) %>% 
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
+  group_by(set, trait, nTrainEnv, val_environment) %>%
+  summarize_at(vars(accuracy, heritability, ability), mean) %>%
+  ## Calculate mean and confidence interval
+  summarize_at(vars(accuracy), funs(mean, sd, n())) %>%
+  ungroup() %>%
+  mutate(stat = (sd / sqrt(n)) * qt(p = alpha / 2, df = n - 1, lower.tail = FALSE), lower = mean - stat, upper = mean + stat,
+         model = "sample")
+
+
 
 
 # Convert the accuracies to z scores
 # Adjust the names of the distance models
-environment_rank_pred_out1 <- environment_rank_pred_out %>%
-  unnest(out) %>% 
-  left_join(., distinct(environment_loeo_predictions_geno_mean, set, trait, nTrainEnv)) %>% # Filter out results for the max nEnv
-  # filter(n_e < nTrainEnv) %>%
-  mutate(zscore = ztrans(accuracy),
-         nEnv = as.factor(n_e),
-         environment = as.factor(validation_environment),
-         model = ifelse(str_detect(model, "sample"), "sample", model),
-         model = str_replace_all(model, dist_method_abbr),
-         model = factor(model, levels = dist_method_abbr)) %>%
-  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>% # Filter out the relationship matrices
-  # unite(model, model, mat_set, sep = "_") %>% 
-  mutate(model = as.factor(str_remove_all(model, "_NA"))) %>%
-  group_by(trait, set, environment, model, nEnv, n_e) %>% 
-  summarize(zscore = mean(zscore)) %>%
-  ungroup()
-
+environment_rank_predictions_out <- environment_rank_predictions %>%
+  unnest(accuracy) %>% 
+  left_join(., env_herit) %>% 
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
+  # bind_rows(., environment_rank_random_summary) %>%
+  mutate(model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr),
+         zscore = accuracy) %>%
+  # zscore = ztrans(accuracy)) %>% 
+  mutate_at(vars(nTrainEnv, val_environment), as.factor) %>%
+  filter(model %in% dist_method_abbr_use)
 
 
 ## Fit a model per trait
 
 # Fit a model per trait
-environment_rank_pred_fit <- environment_rank_pred_out1 %>%
+environment_rank_predictions_analysis <- environment_rank_predictions_out %>%
   group_by(set, trait) %>%
   nest() %>%
   mutate(out = list(NULL))
 
 ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(environment_rank_pred_fit))) {
-  df <- environment_rank_pred_fit$data[[i]] %>%
+for (i in seq(nrow(environment_rank_predictions_analysis))) {
+  
+  df <- environment_rank_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
     droplevels()
   
-  fit <- lmer(formula = zscore ~ 1 + model + nEnv + model:nEnv + (1|environment) + (1|environment:model) + (1|environment:nEnv), data = df)
+  fit <- lmer(formula = zscore ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
+                (1|val_environment:nTrainEnv), data = df)
   
   fit_summary <- data_frame(
     fitted = list(fit),
-    nEnv_effects = list(Effect(focal.predictors = "nEnv", fit)),
-    model_nEnv_effects = list(Effect(focal.predictors = c("model", "nEnv"), fit))) %>% 
+    nTrainEnv_effects = list(Effect(focal.predictors = "nTrainEnv", fit)),
+    model_nEnv_effects = list(Effect(focal.predictors = c("model", "nTrainEnv"), fit))) %>% 
     mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
   
   # Add the summary to the DF
-environment_rank_pred_fit$out[[i]] <- fit_summary
+  environment_rank_predictions_analysis$out[[i]] <- fit_summary
   
 }
 
-environment_rank_pred_fit <- unnest(environment_rank_pred_fit, out)
+environment_rank_predictions_analysis <- unnest(environment_rank_predictions_analysis, out)
+
+
 
 # Quick anova scan
-environment_rank_pred_fit$fitted %>% map(anova)
+environment_rank_predictions_analysis$fitted %>% map(anova)
 
 
 
-## Collect the effects
-environment_rank_pred_fit_effects <- environment_rank_pred_fit %>% 
-  filter(! str_detect(trait, "AGDD")) %>%
-  mutate_at(vars(contains("effects")), ~map(., as.data.frame))
+## Sample of all data to use as comparisons
+loeo_predictions_analysis <- separate_cv_pov_predictions_analysis1 %>%
+  filter(scheme == "POV00") %>%
+  mutate(set = str_to_title(set))
 
 
-
-
-
-
-## Plot the effect of model at an early number of training environments
-## Highlight 1, 5, and 10 environments
-nEnv_select <- c("1", "5", "10")
-  
-g_model_effect_nenv_list <-  environment_rank_pred_fit_effects %>% 
-  split(.$set) %>%
-  map(~{
-    df <- unnest(., model_nEnv_effects)
-    # Results for the maximum number of envs
-    max_env <- mutate(df, nEnv = parse_number(nEnv)) %>% 
-      group_by(trait) %>% 
-      filter(nEnv == max(nEnv)) %>%
-      slice(1) %>% 
-      select(set, trait, fit) %>%
-      mutate(mean_effects = zexp(fit))
-    
-    df %>%
-      filter(nEnv %in% nEnv_select) %>%
-      mutate_at(vars(fit, se, lower, upper), zexp) %>%
-      mutate(model = factor(model, levels = dist_method_abbr),
-             nEnv = factor(nEnv, levels = nEnv_select)) %>%
-      ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-      geom_hline(data = max_env, aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
-      geom_point() + 
-      geom_errorbar(width = 0.5) +
-      facet_grid(trait ~ nEnv, scales = "free") +
-      scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-      scale_linetype_manual(values = 2, name = NULL) + 
-      scale_y_continuous(breaks = pretty) +
-      ylab("Prediction accuracy") +
-      theme_presentation2() +
-      theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
-  })
-
-## Plot this differently
-g_model_effect_nenv_list <-  environment_rank_pred_fit_effects %>% 
-  split(.$set) %>%
-  map(~{
-    df <- unnest(., model_nEnv_effects)
-    # Results for the maximum number of envs
-    max_env <- mutate(df, nEnv = parse_number(nEnv)) %>% 
-      group_by(trait) %>% 
-      filter(nEnv == max(nEnv)) %>%
-      slice(1) %>% 
-      select(set, trait, fit) %>%
-      mutate(mean_effects = zexp(fit))
-    
-    df %>%
-      filter(nEnv %in% nEnv_select) %>%
-      mutate_at(vars(fit, se, lower, upper), zexp) %>%
-      mutate(model = factor(model, levels = dist_method_abbr),
-             nEnv = factor(nEnv, levels = nEnv_select)) %>%
-      ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-      geom_hline(data = max_env, aes(yintercept = mean_effects, lty = "Accuracy using\nall data" )) +
-      geom_point() + 
-      geom_errorbar(width = 0.5) +
-      facet_grid(trait ~ nEnv, scales = "free") +
-      scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-      scale_linetype_manual(values = 2, name = NULL) + 
-      scale_y_continuous(breaks = pretty) +
-      ylab("Prediction accuracy") +
-      theme_presentation2() +
-      theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
-  })
-
-
-
-
-# Save
-for (i in seq_along(g_model_effect_nenv_list)) {
-  filename <- paste0("cumulative_pred_model_effect_envselect_", names(g_model_effect_nenv_list)[i], ".jpg")
-  ggsave(filename = filename, plot = g_model_effect_nenv_list[[i]], path = fig_dir, height = 8, width = 8, dpi = 1000)
-}
-
-
-
-## Plot the interaction effect of model and number of environment
-environment_rank_pred_fit_effects1 <- environment_rank_pred_fit_effects %>%
+environment_rank_predictions_analysis_toplot <- environment_rank_predictions_analysis %>%
   unnest(model_nEnv_effects) %>%
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(nEnv = parse_number(nEnv), 
-         model = factor(model, levels = dist_method_abbr), 
-         set = str_to_title(set))
+  mutate(model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set),
+         nTrainEnv = parse_number(nTrainEnv))
 
 
-g_model_nenv_effect <- environment_rank_pred_fit_effects1 %>% 
-  ggplot(aes(x = nEnv, y = fit, color = model, fill = model)) +
-  geom_hline(data = group_by(environment_rank_pred_fit_effects1, set, trait) %>% filter(nEnv == max(nEnv)) %>% slice(1), 
-             aes(yintercept = fit, lty = "Accuracy using\nall data")) +
-  geom_point(size = 0.5) +
-  geom_line(lwd = 0.5) +
-  # geom_ribbon(aes(ymin = lower, ymax = upper),color = "grey75", alpha = 0.2) +
+## Plot the effect of model and number of training environments
+g_rank_model_effect <- environment_rank_predictions_analysis_toplot %>%
+  # mutate_at(vars(fit, lower, upper), zexp) %>%
+  ## Plot
+  ggplot(aes(x = nTrainEnv, y = fit, group = model, color = model)) +
+  geom_hline(data = loeo_predictions_analysis, aes(yintercept = accuracy, lty = "Accuracy using\nall data"), color = "black") +
+  # geom_point() +
+  geom_ribbon(data = subset(environment_rank_predictions_analysis_toplot, model == "Random"), 
+              aes(ymin = lower, ymax = upper, fill = model), color = 0, lwd = 0, alpha = 0.1) +
+  geom_line() +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = guide_legend(nrow = 2)) +
+  scale_fill_manual(values = dist_colors_use, name = "Distance\nmethod", guide = guide_legend(nrow = 2)) +
+  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
+  scale_y_continuous(breaks = pretty) + 
+  scale_x_continuous(breaks = pretty) +
   facet_grid(trait ~ set, scales = "free", space = "free_x", switch = "y") +
-  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = guide_legend(nrow = 3)) +
-  scale_fill_manual(values = dist_colors, name = "Distance\nmeasure") +
-  scale_y_continuous(breaks = pretty) +
-  scale_x_continuous(breaks = function(x) seq(1, x[2], by = 5)) + 
-  scale_linetype_manual(values = 2, name = NULL) +
-  ylab("Prediction accuracy") +
-  xlab("Number of training environments") +
+  ylab("Prediction accuracy") + 
+  xlab("Number of training set environments") +
   theme_presentation2(base_size = 10) +
-  theme(legend.position = "bottom", legend.spacing.x = unit(x = 0.2, units = "line"), legend.key.height = unit(1, "line"))
+  theme(legend.position = "bottom",legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
 
 # Save
-ggsave(filename = "cumulative_pred_model_nEnv_effect.jpg", plot = g_model_nenv_effect, path = fig_dir, height = 5, width = 4, dpi = 1000)
+ggsave(filename = "cumulative_pred_model_nEnv_effect.jpg", plot = g_rank_model_effect, path = fig_dir, 
+       height = 6, width = 5, dpi = 1000)
 
 
 
 
 
 
+#### Look at 3 levels of random environments ####
+n_rand <- c(5, 10, 15)
+# n_rand <- seq(3, 15, 3)
+
+
+random_env_out <- environment_rank_random_predictions %>% 
+  unnest(accuracy) %>%   
+  left_join(., env_herit) %>% 
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability), nTrainEnv = as.factor(nTrainEnv)) %>%
+  filter(nTrainEnv %in% n_rand)
+
+## Fit model
+random_env_analysis <- random_env_out %>%
+  group_by(set, trait) %>%
+  nest() %>%
+  mutate(out = list(NULL))
+
+for (i in seq(nrow(random_env_analysis))) {
+  df <- random_env_analysis$data[[i]]
+  
+  fit <- lmer(accuracy ~ nTrainEnv + (1|val_environment) + (1|val_environment:nTrainEnv), df)
+  
+  fit_summary <- data_frame(
+    fitted = list(fit),
+    nTrainEnv_effects = list(Effect(focal.predictors = "nTrainEnv", fit))) %>%
+    mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
+  
+  # Add the summary to the DF
+  random_env_analysis$out[[i]] <- fit_summary
+  
+  
+}
 
 
 
-
-
-
-
-
-#### Window predictions
-
-# Convert the accuracies to z scores
-cluster_pred_out_window1 <- cluster_pred_out_window %>% 
+## Plot
+random_env_analysis %>%
   unnest(out) %>%
-  group_by(trait, set, validation_environment, model) %>% mutate(window = seq(n())) %>% ungroup() %>%
-  mutate(model = ifelse(str_detect(model, "sample"), "sample", model),
-         zscore = ztrans(accuracy),
-         # window = as.factor(window), # As a numeric, estimate a regression slope
-         environment = as.factor(validation_environment),
-         model = abbreviate(str_replace_all(model, dist_method_replace)),
-         model = factor(model, levels = dist_method_abbr)) %>%
-  group_by(trait, set, environment, model, window) %>%
-  summarize(zscore = mean(zscore)) %>%
-  ungroup()
-
-## Fit a model per triat
-## The accuracy is a function of:
-## 1. Environment
-## 2. Model
-## 3. Number of training environments
-## 4. Interactions
-
-cluster_pred_window_fit <- cluster_pred_out_window1 %>%
-  group_by(set, trait) %>% 
-  do(fit = lm(zscore ~ environment + model + window + environment:window + model:window, data = .)) %>%
-  ungroup() %>%
-  mutate(model_effects = map(fit, ~Effect(focal.predictors = "model", .)),
-         environment_effects = map(fit, ~Effect(focal.predictors = "environment", .)),
-         window_effects = map(fit, ~Effect(focal.predictors = "window", .)),
-         model_window_effects = map(fit, ~Effect(focal.predictors = c("model", "window"), .)),
-         model_environment_window_effects = map(fit, ~Effect(focal.predictors = c("environment", "model", "window"), .)))
-
-# Quick anova scan
-cluster_pred_window_fit$fit %>% map(anova)
-
-## Output the variance proportion table
-cluster_pred_window_fit %>% 
-  mutate(anova = map(fit, ~anova(.) %>% broom::tidy())) %>% 
-  unnest(anova) %>% 
-  group_by(set, trait) %>% 
-  mutate(varprop = sumsq / sum(sumsq)) %>%
-  select(trait, term, varprop) %>% 
-  spread(term, varprop)
-
-# set       trait           environment `environment:window`    model `model:window` Residuals   window
-# 1 complete  GrainYield            0.821              0.00904 0.000179        0.00302    0.160  0.00678 
-# 2 complete  HeadingDate           0.903              0.00716 0.000438        0.00280    0.0864 0.000525
-# 3 complete  HeadingDateAGDD       0.903              0.00640 0.000618        0.00183    0.0874 0.000723
-# 4 complete  PlantHeight           0.763              0.0231  0.000495        0.00850    0.201  0.00454 
-# 5 realistic GrainYield            0.662              0.0727  0.000818        0.00783    0.253  0.00359 
-# 6 realistic HeadingDate           0.890              0.0136  0.000900        0.00790    0.0874 0.000130
-# 7 realistic HeadingDateAGDD       0.898              0.0144  0.000550        0.00599    0.0793 0.00162 
-# 8 realistic PlantHeight           0.765              0.0438  0.00156         0.0129     0.166  0.0107
-
-
-
-
-## Collect the effects
-cluster_pred_window_fit_effects <- cluster_pred_window_fit %>% 
-  filter(! str_detect(trait, "AGDD")) %>%
-  mutate_at(vars(contains("effects")), ~map(., as.data.frame))
-
-
-
-
-
-
-
-## Plot the effect of model at an early number of training environments
-g_model_effect1 <- cluster_pred_window_fit_effects %>% 
-  filter(set == "complete") %>%
-  left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>% # Add results when using all data
-  unnest(model_window_effects) %>% 
-  filter(window == 1) %>%
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data")) +
-  geom_point() + 
-  geom_errorbar(width = 0.5) +
-  facet_wrap(~trait) +
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  theme_presentation2() +
-  theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
-
-# Save
-ggsave(filename = "window_pred_model_effect_window1.jpg", plot = g_model_effect1, path = fig_dir, height = 5, width = 8, dpi = 1000)
-
-
-
-
-## Plot the effect of window
-g_window_effect <- cluster_pred_window_fit_effects %>% 
-  filter(set == "complete") %>%
-  unnest(window_effects) %>% 
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  ggplot(aes(x = window, y = fit, ymin = lower, ymax = upper)) + 
-  # geom_point() + 
-  geom_line() +
-  # geom_errorbar(width = 0.5) +
-  geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_wrap(~trait) +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  xlab("Sliding window interval") +
-  theme_presentation2()
-
-# Save
-ggsave(filename = "window_pred_window_effect.jpg", plot = g_window_effect, path = fig_dir, height = 5, width = 8, dpi = 1000)
-
-## Overall, what is the percent change in prediction accuracy over the sliding windows?
-cluster_pred_window_fit_effects %>% 
-  filter(set == "complete") %>%
-  unnest(window_effects) %>% 
-  filter(window %in% c(min(window), max(window))) %>% 
-  group_by(trait) %>%
-  summarize(acc_per_change = (fit[1] - fit[2]) / fit[1])
-
-
-# trait       acc_per_change
-# 1 GrainYield          0.156 
-# 2 HeadingDate         0.0314
-# 3 PlantHeight         0.0820
-
-
-## Plot the interaction effect of model and number of environment
-g_model_window_effect <- cluster_pred_window_fit_effects %>% 
-  filter(set == "complete") %>%
-  unnest(model_window_effects) %>% 
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
-  ggplot(aes(x = window, y = fit, ymin = lower, ymax = upper, fill = model)) + 
-  # geom_point() + 
-  geom_line() +
-  # geom_errorbar(width = 0.5) +
-  geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_wrap(~trait, scales = "free") +
-  scale_color_manual(values = dist_colors, name = "Model") +
-  scale_fill_manual(values = dist_colors, name = "Model") +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  xlab("Sliding window interval") +
-  theme_presentation2() +
-  theme(legend.position = "bottom")
-
-# Save
-ggsave(filename = "window_pred_model_window_effect.jpg", plot = g_model_window_effect, path = fig_dir, height = 5, width = 8, dpi = 1000)
-
-
-## Overall, what is the percent change in prediction accuracy over the sliding windows, for each model?
-cluster_pred_window_fit_effects %>% 
-  filter(set == "complete") %>%
-  unnest(model_window_effects) %>% 
-  filter(window %in% c(min(window), max(window))) %>% 
-  group_by(trait, model) %>%
-  summarize(acc_per_change = (fit[1] - fit[2]) / fit[1]) %>%
-  spread(model, acc_per_change)
-
-# trait          GrCD  LcPD  MYAE   MYICE   MYMCE    OYAE   OYICE   OYMCE   PhnD
-# 1 GrainYield   0.205  0.276 0.106  0.174   0.114  0.198   -0.0700  0.158  0.340 
-# 2 HeadingDate -0.0577 0.115 0.123 -0.0619 -0.0813 0.00948  0.0330  0.116  0.0822
-# 3 PlantHeight  0.0877 0.154 0.106  0.107   0.0461 0.0641  -0.0662 -0.0738 0.333
+  unnest(nTrainEnv_effects) %>%
+  mutate(nTrainEnv = factor(nTrainEnv, levels = n_rand)) %>%
+  ggplot(aes(x = nTrainEnv, y = fit, ymin = lower, ymax = upper)) +
+  geom_point() +
+  geom_errorbar() +
+  facet_grid(trait ~ set)
 
 
 
@@ -467,107 +511,6 @@ cluster_pred_window_fit_effects %>%
 
 
 
-#### Realistic results
-
-
-## Plot the effect of model at an early number of training environments
-g_model_effect1 <- cluster_pred_window_fit_effects %>% 
-  filter(set == "realistic") %>%
-  left_join(., select(cluster_pred_fit_effects_all, set, trait, mean_effects)) %>% # Add results when using all data
-  unnest(model_window_effects) %>% 
-  filter(window == 1) %>%
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) + 
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data")) +
-  geom_point() + 
-  geom_errorbar(width = 0.5) +
-  facet_wrap(~trait) +
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 2)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty, limits = c(0.25, 0.45)) +
-  ylab("Accuracy") +
-  theme_presentation2() +
-  theme(axis.text.x = element_blank(), axis.title.x = element_blank(), legend.position = "bottom")
-
-# Save
-ggsave(filename = "window_pred_model_effect_window1_realistic.jpg", plot = g_model_effect1, path = fig_dir, height = 5, width = 8, dpi = 1000)
-
-
-
-
-## Plot the effect of window
-g_window_effect <- cluster_pred_window_fit_effects %>% 
-  filter(set == "realistic") %>%
-  unnest(window_effects) %>% 
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  ggplot(aes(x = window, y = fit, ymin = lower, ymax = upper)) + 
-  # geom_point() + 
-  geom_line() +
-  # geom_errorbar(width = 0.5) +
-  geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_wrap(~trait) +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  xlab("Sliding window interval") +
-  theme_presentation2()
-
-# Save
-ggsave(filename = "window_pred_window_effect_realistic.jpg", plot = g_window_effect, path = fig_dir, height = 5, width = 8, dpi = 1000)
-
-## Overall, what is the percent change in prediction accuracy over the sliding windows?
-cluster_pred_window_fit_effects %>% 
-  filter(set == "realistic") %>%
-  unnest(window_effects) %>% 
-  filter(window %in% c(min(window), max(window))) %>% 
-  group_by(trait) %>%
-  summarize(acc_per_change = (fit[1] - fit[2]) / fit[1])
-
-
-# trait       acc_per_change
-# 1 GrainYield          0.136 
-# 2 HeadingDate         0.0295
-# 3 PlantHeight         0.259 
-
-
-## Plot the interaction effect of model and number of environment
-g_model_window_effect <- cluster_pred_window_fit_effects %>% 
-  filter(set == "realistic") %>%
-  unnest(model_window_effects) %>% 
-  mutate_at(vars(fit, se, lower, upper), zexp) %>%
-  mutate(model = factor(model, levels = dist_method_abbr)) %>%
-  ggplot(aes(x = window, y = fit, ymin = lower, ymax = upper, fill = model)) + 
-  # geom_point() + 
-  geom_line() +
-  # geom_errorbar(width = 0.5) +
-  geom_ribbon(color = "grey75", alpha = 0.2) +
-  facet_wrap(~trait, scales = "free") +
-  scale_color_manual(values = dist_colors, name = "Model") +
-  scale_fill_manual(values = dist_colors, name = "Model") +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Accuracy") +
-  xlab("Sliding window interval") +
-  theme_presentation2() +
-  theme(legend.position = "bottom")
-
-# Save
-ggsave(filename = "window_pred_model_window_effect_realistic.jpg", plot = g_model_window_effect, path = fig_dir, 
-       height = 5, width = 8, dpi = 1000)
-
-
-## Overall, what is the percent change in prediction accuracy over the sliding windows, for each model?
-cluster_pred_window_fit_effects %>% 
-  filter(set == "realistic") %>%
-  unnest(model_window_effects) %>% 
-  filter(window %in% c(min(window), max(window))) %>% 
-  group_by(trait, model) %>%
-  summarize(acc_per_change = (fit[1] - fit[2]) / fit[1]) %>%
-  spread(model, acc_per_change)
-
-# trait         GrCD   LcPD  MYAE  MYICE  MYMCE
-# 1 GrainYield   0.127  0.494 0.184 -0.292  0.267
-# 2 HeadingDate -0.313  0.222 0.205  0.217 -0.269
-# 3 PlantHeight  0.290 -0.168 0.742  0.220  0.270
 
 
 
@@ -585,20 +528,312 @@ cluster_pred_window_fit_effects %>%
 
 #### Environmental cluster predictions ####
 
-## Re-organize, extract the random results
-cluster_predictions_out <- cluster_predictions %>% 
-  mutate(accuracy = map_dbl(out, "base"),
-         random = map(out, "random") %>% map(~data_frame(rep = paste0("rep", seq_along(.)), accuracy = .)),
-         model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model)) %>%
-  select(-out)
+cluster_pred <- ls(pattern = "[0-9]{1,2}_cluster_predictions") %>% 
+  subset(., map_lgl(., ~inherits(get(.), "data.frame")))
+
+cv00_cluster_predictions <- cv00_cluster_predictions %>%
+  gather(scheme, accuracy, cv00, pocv00)
+
+## Get and tidy
+cluster_pred_df <- map(cluster_pred, get) %>%
+  map(., ~mutate_at(., vars(which(names(.) %in% "rep")), as.character)) %>%
+  map(., ~mutate_at(., vars(which(names(.) %in% "environment")), as.character))
+
+cluster_pred_df[map_lgl(cluster_pred_df, ~"out" %in% names(.))] <- cluster_pred_df[map_lgl(cluster_pred_df, ~"out" %in% names(.))] %>%
+  map(~mutate(., accuracy = map_dbl(out, "base")) %>% select(., -out))
+
+## Add CV/POV number
+cluster_pred_df <- bind_rows(cluster_pred_df) %>% 
+  mutate(scheme_number = as.character(str_extract(scheme, "[0-9]{1,2}")),
+         model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model))
+
 
   
-cluster_predictions_base <- cluster_predictions_out %>%
-  select(-random) %>%
+cluster_predictions_base <- cluster_pred_df %>%
+  left_join(., env_herit) %>% 
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
   mutate(model = str_replace_all(model, dist_method_abbr),
          model = factor(model, levels = dist_method_abbr),
-         zscore = ztrans(accuracy)) %>% 
-  mutate_at(vars(cluster, val_environment), as.factor)
+         zscore = accuracy) %>%
+         # zscore = ztrans(accuracy)) %>% 
+  mutate_at(vars(cluster, val_environment, scheme), as.factor) %>%
+  filter(model %in% dist_method_abbr_use)
+
+
+## Model formula
+## Models fitted individually for each set and trait
+## Fixed effect of model and number of training environments
+## zscore ~ model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster)
+## 
+
+
+
+## Analyze separately
+separate_cv_pov_cluster_predictions_analysis <- cluster_predictions_base %>%
+  # group_by(set, trait, scheme) %>%
+  group_by(set, trait, scheme_number) %>%
+  nest() %>%
+  mutate(model_rep = map_lgl(data, ~!all(is.na(.$rep)))) %>%
+  mutate(out = list(NULL))
+
+## Loop for each row
+for (i in seq(nrow(separate_cv_pov_cluster_predictions_analysis))) {
+  
+  df <- separate_cv_pov_cluster_predictions_analysis$data[[i]]
+  
+  ## One model
+  ## Model
+  fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), data = df)
+  
+  effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
+  
+  
+  
+  # ## If model_rep is FALSE, just take the mean
+  # if (!separate_cv_pov_cluster_predictions_analysis$model_rep[i]) {
+  #   
+  #   # ## Model
+  #   # fit <- lmer(accuracy ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster) + (1|nTrainEnv:cluster:model), data = df)
+  #   # 
+  #   # effects_keep <- as.data.frame(Effect("model", fit))
+  #   
+  #   
+  #   ## Model
+  #   fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), data = df)
+  #   
+  #   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
+  #   
+  #   
+  # } else {
+  #   
+  #   # ## Model
+  #   # fit <- lmer(accuracy ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), 
+  #   #             data = df)
+  #   # 
+  #   # effects_keep <- as.data.frame(Effect(c("model"), fit))
+  #   
+  #   ## Model
+  #   fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), 
+  #               data = df)
+  #   
+  #   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
+  #   
+  # 
+  # }
+  
+  fit_summary <- data_frame(
+    fitted = list(fit),
+    scheme_effects = list(effects_keep),
+    anova = list(tidy(anova(fit))),
+    ranova = list(tidy(ranova(fit)))
+  )
+  
+  separate_cv_pov_cluster_predictions_analysis$out[[i]] <- fit_summary
+  
+  
+}
+
+
+## What random effects are significant?
+separate_cv_pov_cluster_predictions_analysis %>% 
+  mutate(ranova = map(out, "ranova")) %>% 
+  unnest(ranova) %>% 
+  unnest(ranova) %>%
+  select(set, trait, scheme_number, term, LRT, p.value) %>%
+  filter(term != "<none>") %>% 
+  as.data.frame() %>%
+  filter(p.value <= alpha)
+
+
+
+
+
+## Plot all
+separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predictions_analysis %>%
+  mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
+  unnest(effects) %>%
+  mutate(scheme = factor(toupper(scheme), levels = cv_replace),
+         model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set)) %>%
+  left_join(., select(mutate(separate_cv_pov_predictions_analysis1, set = str_to_title(set)), -lower, -upper, -se))
+           
+
+g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model)) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_color_manual(values = dist_colors_use, guide = FALSE) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  xlab("Distance method") +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(filename = "all_cv_pov_cluster_predictions.jpg", plot = g_cv_pov_cluster, path = fig_dir, width = 10, height = 7, dpi = 1000)
+
+
+
+### Add predictions with random environmental subsets
+separate_cv_pov_random_predictions_analysis2 <- separate_cv_pov_random_predictions_analysis1 %>%
+  select(set, trait, scheme, nTrainEnv, accuracy) %>% 
+  mutate(nTrainEnv = paste0("accuracy", nTrainEnv),
+         set = str_to_title(set)) %>%
+  spread(nTrainEnv, accuracy)
+
+
+dist_colors_random <- wesanderson::wes_palette(name = "Darjeeling1", 3)
+dist_colors_use_random <- c(dist_colors_use, "2 env" = dist_colors_random[1], "5 env" = dist_colors_random[2], "8 env" = dist_colors_random[3])
+
+g_cv_pov_cluster1 <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  left_join(., separate_cv_pov_random_predictions_analysis2) %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
+  geom_hline(aes(yintercept = accuracy2, lty = "2 env"), color = "black") +
+  geom_hline(aes(yintercept = accuracy5, lty = "5 env"), color = "black") +
+  geom_hline(aes(yintercept = accuracy8, lty = "8 env"), color = "black") +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model)) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_color_manual(values = dist_colors_use_random, guide = FALSE) +
+  scale_linetype_manual(values = seq(2, 5), name = NULL) +
+  xlab("Distance method") +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(filename = "all_cv_pov_cluster_predictions_with_random.jpg", plot = g_cv_pov_cluster1, path = fig_dir, width = 10, height = 7, dpi = 1000)
+
+
+
+## Paper version
+g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  mutate(scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
+         scheme = factor(scheme, levels = cv_replace)) %>%
+  filter(!str_detect(scheme, "POCV")) %>%
+  split(.$set) %>%
+  map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+        geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "black") +
+        geom_errorbar(width = 0.5) +
+        geom_point(aes(color = model)) +
+        scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+        scale_color_manual(values = dist_colors_use, guide = FALSE) +
+        scale_linetype_manual(values = 2, name = NULL) +
+        xlab("Distance method") +
+        facet_grid(trait ~ scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+        theme_presentation2(base_size = 10) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") )
+
+g_cv_pov_cluster2 <- plot_grid(g_cv_pov_cluster_list[[1]] + theme(legend.position = "none"), g_cv_pov_cluster_list[[2]], 
+                               nrow = 2, labels = LETTERS[seq_along(g_cv_pov_cluster_list)], rel_heights = c(0.9, 1))
+
+ggsave(filename = "all_cv_pov_cluster_predictions_paper.jpg", plot = g_cv_pov_cluster2, path = fig_dir, width = 5, height = 8, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+### Select CV00 and PV00
+
+# Create a legend key
+legend_key <- paste0(names(dist_colors_use), ": ", c("", "Phenotypic distance", "Location PD", "Geographic distance", "All covariates", "Mean-correlated ECs", "IPCA-correlated ECs"))
+
+
+
+g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  filter(scheme %in% c("CV00", "POV00"), set == "Complete") %>%
+  mutate(scheme = str_replace_all(scheme, c("CV00" = "Cross-validation", "POV00" = "Parent-offspring validation"))) %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model), size = 2) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_color_manual(values = dist_colors_use, name = "Custer method", labels = legend_key) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  xlab("Cluster method") +
+  # facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "right", legend.margin = margin())
+
+
+ggsave(filename = "cv00_pov00_cluster_predictions.jpg", plot = g_cv00_pov00_cluster, path = fig_dir, width = 7, height = 5, dpi = 1000)
+
+
+
+##
+
+
+
+
+
+
+
+
+
+
+
+
+##### Random cluster prediction #####
+##### 
+
+# This will be analyzed by calculating the difference between the cluster prediction accuracy 
+# and each replicate of the reandom cluster prediction accuracy, then modeling that difference
+
+## Edit, then combine df
+cv00_cluster_random_predictions <- cv00_cluster_random_predictions %>%
+  gather(scheme, accuracy, cv00, pocv00)
+
+
+random_cluster_pred <- ls(pattern = "[0-9]{1,2}_cluster_random_predictions") %>% 
+  subset(., map_lgl(., ~inherits(get(.), "data.frame")))
+
+## Get and tidy
+random_cluster_pred_df <- map(random_cluster_pred, get) %>%
+  map(., ~mutate_at(., vars(which(names(.) %in% "rep")), as.character)) %>%
+  map(., ~mutate_at(., vars(which(names(.) %in% "environment")), as.character)) %>%
+  bind_rows() %>% 
+  mutate(scheme_number = as.character(str_extract(scheme, "[0-9]{1,2}")),
+         model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model))
+
+## Calculate prediction accuracy
+random_cluster_predictions_base <- random_cluster_pred_df %>%
+  left_join(., env_herit) %>% 
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
+  mutate(model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr),
+         zscore = accuracy) %>%
+  # zscore = ztrans(accuracy)) %>% 
+  mutate_at(vars(cluster, val_environment, scheme), as.factor) %>%
+  filter(model %in% dist_method_abbr_use)
+
+## Combine with the original clustering predictions, then calculate the advantage in accuracy
+## First calculate averages over reps for the original predictions
+random_base_cluster_predictions_base <- cluster_predictions_base %>% 
+  group_by(set, trait, model, val_environment, nTrainEnv, cluster, scheme, scheme_number) %>% 
+  summarize(base_accuracy = mean(accuracy)) %>%
+  ungroup() %>%
+  left_join(random_cluster_predictions_base,  by = c("set", "trait", "model", "val_environment", "cluster", "scheme", "scheme_number")) %>%
+  mutate(advantage = base_accuracy - accuracy,
+         scheme = as.factor(scheme)) %>%
+  rename(nTrainEnv = nTrainEnv.x)
+
+
+
+
+## Visualize
+random_base_cluster_predictions_base %>%
+  ggplot(aes(x = advantage, fill = model)) +
+  geom_density() +
+  facet_grid(trait ~ set)
+
+
+
 
 
 
@@ -609,479 +844,103 @@ cluster_predictions_base <- cluster_predictions_out %>%
 ## 
 
 
-# Fit a model per trait
-cluster_predictions_base_analysis <- cluster_predictions_base %>%
-  group_by(set, trait) %>%
+
+## Analyze separately
+random_cluster_predictions_analysis <- random_base_cluster_predictions_base %>%
+  # group_by(set, trait, scheme) %>%
+  group_by(set, trait, scheme_number) %>%
   nest() %>%
+  filter(!map_lgl(data, ~all(is.na(.$advantage)))) %>%
   mutate(out = list(NULL))
+
+## Loop for each row
+for (i in seq(nrow(random_cluster_predictions_analysis))) {
   
-## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(cluster_predictions_base_analysis))) {
-  df <- cluster_predictions_base_analysis$data[[i]] %>%
-    droplevels()
+  df <- random_cluster_predictions_analysis$data[[i]]
   
-  fit <- lmer(formula = zscore ~ 1 + model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster), data = df,
-              contrasts = list(model = "contr.sum"))
+  ## Model
+  fit <- lmer(advantage ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model), data = df)
+  
+  effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
+    
   
   fit_summary <- data_frame(
-        fitted = list(fit),
-        mean_accuracy = fixef(fit)[1],
-        model_effects = list(Effect("model", fit)),
-        nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
-        fixef_test = list(tidy(anova(fit))),
-        ranef_test = list(tidy(ranova(fit)))
-      ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
-
-  # Add the summary to the DF
-  cluster_predictions_base_analysis$out[[i]] <- fit_summary
+    fitted = list(fit),
+    scheme_effects = list(effects_keep),
+    anova = list(tidy(anova(fit))),
+    ranova = list(tidy(ranova(fit)))
+  )
+  
+  random_cluster_predictions_analysis$out[[i]] <- fit_summary
+  
   
 }
-  
-cluster_predictions_base_analysis <- cluster_predictions_base_analysis %>%
-  select(-data) %>% 
-  unnest(out)
-
-## ANOVAs
-unnest(cluster_predictions_base_analysis, fixef_test)
-
-## Model was significant only for heading date and realistic
-
-
-## RANOVAs
-unnest(cluster_predictions_base_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
-
-## Environment %in% cluster and cluster %in% model was usually significant
-## Not for heading date realistic
 
 
 
 
+## Plot all
+random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
+  mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
+  unnest(effects) %>%
+  mutate(scheme = factor(toupper(scheme), levels = cv_replace),
+         model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set))
 
-## Plot the effect of model
-g_cluster_model_effect <- cluster_predictions_base_analysis %>%
-  unnest(model_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set)) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_hline(data = group_by(environment_rank_pred_fit_effects1, set, trait) %>% filter(nEnv == max(nEnv)) %>% slice(1),
-             aes(yintercept = fit, lty = "Accuracy using\nall data"), color = "black") +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
+
+g_random_cv_pov_cluster <- random_cluster_predictions_analysis1 %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(yintercept = 0) +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model)) +
+  scale_y_continuous(breaks = pretty, name = "Advantage of clustering over random environments") +
+  scale_color_manual(values = dist_colors_use, guide = FALSE) +
   scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y") +
-  ylab("Prediction accuracy") + 
+  xlab("Distance method") +
+  facet_grid(trait ~ set + scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
   theme_presentation2(base_size = 10) +
-  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
-  
-## Save
-ggsave(filename = "cluster_model_effect.jpg", plot = g_cluster_model_effect, path = fig_dir, width = 4.5, height = 5, dpi = 1000)
-
-
-
-
-
-
-## Subset for poster
-dist_method_poster <- dist_method_abbr[c(1:3,7:9)]
-# Rename the prediction scenario
-set_replace <- c("complete" = "Leave-One-Out", "realistic" = "Time-Forward" )
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-environment_rank_pred_fit_effects1_use <- environment_rank_pred_fit_effects1 %>%
-  mutate(set = str_to_lower(set),
-         set = str_replace_all(set, set_replace)) %>%
-  group_by(set, trait) %>% 
-  filter(nEnv == max(nEnv)) %>% 
-  slice(1)
-
-
-g_cluster_model_effect_poster <- cluster_predictions_base_analysis %>%
-  unnest(model_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr),
-         set = str_replace_all(set, set_replace)) %>%
-  filter(model %in% dist_method_poster) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_hline(data = environment_rank_pred_fit_effects1_use, aes(yintercept = fit, lty = "Accuracy using\nall data"), color = "black") +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = guide_legend(ncol = 1)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
-  ylab("Prediction accuracy") + 
-  labs(title = "Genomewide prediction accuracy") +
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "left", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
-
-## Save
-ggsave(filename = "cluster_model_effect_poster.jpg", plot = g_cluster_model_effect_poster, path = fig_dir, width = 8.5, height = 6, dpi = 1000)
-
-
-## Another version
-g_cluster_model_effect_poster <- cluster_predictions_base_analysis %>%
-  unnest(model_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr),
-         set = str_replace_all(set, set_replace)) %>%
-  filter(model %in% dist_method_poster) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_hline(data = environment_rank_pred_fit_effects1_use, aes(yintercept = fit, lty = "Accuracy using all data"), color = "black") +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Distance\nmeasure", guide = FALSE) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
-  ylab("Prediction accuracy") + 
-  xlab("Distance measure") +
-  # labs(title = "Genomewide prediction accuracy") +
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1), legend.justification = "right",
-        legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
-
-## Save
-ggsave(filename = "cluster_model_effect_poster2.jpg", plot = g_cluster_model_effect_poster, path = fig_dir, width = 7, height = 7, dpi = 1000)
-
-
-
-
-
-
-## Output a table
-cluster_model_table <- cluster_predictions_base_analysis %>%
-  unnest(model_effects) %>% 
-  mutate_at(vars(fit, lower, upper), funs(formatC(., digits = 2))) %>% 
-  mutate(annotation = paste0(fit, " (", lower, ", ", upper, ")")) %>% 
-  bind_rows(., mutate(environment_loeo_predictions_analysis, annotation = formatC(accuracy, digits = 2), model = "AllData")) %>%
-  select(trait, set, model, annotation) %>% 
-  spread(model, annotation) %>%
-  arrange(set)
-
-write_csv(x = cluster_model_table, path = file.path(fig_dir, "cluster_model_predictions_table.csv"))
-
-
-
-
-## Effect of n of training environments
-cluster_predictions_base_analysis %>% 
-  unnest(nTrainEnv_effects) %>%
-  ggplot(aes(x = nTrainEnv, y = fit, ymin = lower, ymax = upper)) +
-  geom_line() +
-  geom_ribbon(color = "grey", alpha = 0.2) +
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x") +
-  ylab("Prediction accuracy") + 
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "bottom", legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
-
-
-
-
-
-
-# ## Model the random iterations
-# ## This analysis will model the difference between the base accuracy and the random accuracy
-# cluster_predictions_random <- cluster_predictions_out %>%
-#   unnest(random) %>%
-#   rename(base_accuracy = accuracy, accuracy = accuracy1) %>%
-#   mutate(dist_method = str_replace_all(model, dist_method_replace),
-#          model = factor(abbreviate(dist_method), levels = dist_method_abbr)) %>%
-#   mutate_at(vars(contains("accuracy")), funs(zscore = ztrans)) %>%
-#   mutate(zscore_difference = base_accuracy_zscore - accuracy_zscore,
-#          zscore_difference = ifelse(is.na(zscore_difference), 0, zscore_difference)) %>%
-#   mutate_at(vars(cluster, val_environment), as.factor)
-# 
-# ## There will be some NAs from these conditions:
-# ## 
-# # 1 complete  MYICE PlantHeight
-# # 2 complete  OYICE PlantHeight
-# # 3 realistic LcPD  HeadingDate
-# # 4 realistic MYICE GrainYield 
-# # 
-# # This is due to there being only one cluster - fill with zero
-# 
-# 
-# ## Model formula
-# ## Models fitted individually for each set and trait
-# ## zscore ~ model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster)
-# ## 
-# 
-# 
-# # Fit a model per trait
-# cluster_predictions_random_analysis <- cluster_predictions_random %>%
-#   group_by(set, trait) %>%
-#   nest() %>%
-#   mutate(out = list(NULL))
-# 
-# ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-# for (i in seq(nrow(cluster_predictions_random_analysis))) {
-#   df <- cluster_predictions_random_analysis$data[[i]] %>%
-#     droplevels()
-#   
-#   fit <- lmer(formula = zscore_difference ~ 1 + model + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster) + (1|model:val_environment:cluster), 
-#               data = df, contrasts = list(model = "contr.sum"))
-#   
-#   fit_summary <- data_frame(
-#     fitted = list(fit),
-#     mean_accuracy = fixef(fit)[1],
-#     model_effects = list(Effect("model", fit)),
-#     nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
-#     fixef_test = list(tidy(anova(fit))),
-#     ranef_test = list(tidy(ranova(fit)))
-#   ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
-#   
-#   # Add the summary to the DF
-#   cluster_predictions_random_analysis$out[[i]] <- fit_summary
-#   
-# }
-# 
-# cluster_predictions_random_analysis <- cluster_predictions_random_analysis %>%
-#   select(-data) %>% 
-#   unnest(out)
-# 
-# 
-# ## ANOVAs
-# unnest(cluster_predictions_random_analysis, fixef_test)
-# 
-# ## Model was sometimes significant
-# 
-# 
-# ## RANOVAs
-# unnest(cluster_predictions_random_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
-# 
-# ## Environment %in% cluster and cluster %in% model was more often not significant,
-# ## which should be expected under random conditions
-
-
-
-## Alternatively, analyze the accuracy of only the 2017 environments
-# Fit a model per trait
-cluster_predictions_analysis2017 <- cluster_predictions_out1 %>%
-  filter(str_detect(val_environment, "17"), set != "realistic") %>%
-  mutate(set = "complete2017") %>%
-  droplevels() %>%
-  group_by(set, trait) %>%
-  nest() %>%
-  mutate(out = list(NULL))
-
-## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(cluster_predictions_analysis2017))) {
-  df <- cluster_predictions_analysis2017$data[[i]] %>%
-    droplevels()
-  
-  fit <- lmer(formula = zscore ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster), data = df,
-              contrasts = list(model = "contr.sum"))
-  
-  fit_summary <- data_frame(
-    fitted = list(fit),
-    mean_accuracy = fixef(fit)[1],
-    model_effects = list(Effect("model", fit)),
-    fixef_test = list(tidy(anova(fit))),
-    ranef_test = list(tidy(ranova(fit)))
-  ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.) %>% mutate(model = as.character(model))))
-  
-  # Add the summary to the DF
-  cluster_predictions_analysis2017$out[[i]] <- fit_summary
-  
-}
-
-cluster_predictions_analysis2017 <- cluster_predictions_analysis2017 %>%
-  select(-data) %>% unnest(out)
-
-## ANOVAs
-unnest(cluster_predictions_analysis2017, fixef_test)
-
-## Model was never significant
-
-## RANOVAs
-unnest(cluster_predictions_analysis2017, ranef_test) %>% filter(!str_detect(term, "none"))
-
-## Environment %in% cluster and cluster %in% model was usually significant
-
-
-
-## Plot the effect of model
-g_cluster_model_effect1 <- bind_rows(cluster_predictions_analysis, cluster_predictions_analysis2017) %>%
-  left_join(., bind_rows(environment_loeo_predictions_analysis, filter(environment_loeo_predictions_analysis2017, set == "complete2017"))) %>% # Add the all-data results
-  rename(mean_effects = accuracy) %>%
-  unnest(model_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set)) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_hline(aes(yintercept = mean_effects, lty = "Accuracy using\nall data"), color = "grey75") +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 3)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x") +
-  ylab("Prediction accuracy") + 
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
-
-## Save
-ggsave(filename = "cluster_model_effect_2017.jpg", plot = g_cluster_model_effect1, path = fig_dir, width = 8, height = 8, dpi = 1000)
-
-
-
-
-
-
-
-## Cross validation cluster predictions
-cluster_cv_predictions_out <- cluster_cv_predictions %>%
-  mutate(cv_accuracy = map_dbl(out, 1),
-         vp_accuracy = map_dbl(out, "base_vp")) %>%
-  gather(design, accuracy, cv_accuracy, vp_accuracy) %>%
-  mutate(zscore = ztrans(accuracy),
-         model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model),
-         dist_method = str_replace_all(model, dist_method_replace),
-         model = factor(abbreviate(dist_method), levels = dist_method_abbr),
-         design = as.factor(design)) %>%
-  select(-out)
-  
-
-
-## Model formula
-## Models fitted individually for each set and trait
-## zscore ~ model + design + model:design + (1|cluster:model) + (1|val_environment:cluster)
-## 
-
-
-# Fit a model per trait
-cluster_cv_predictions_analysis <- cluster_cv_predictions_out %>%
-  group_by(set, trait) %>%
-  nest() %>%
-  mutate(out = list(NULL))
-
-## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(cluster_cv_predictions_analysis))) {
-  df <- cluster_cv_predictions_analysis$data[[i]] %>%
-    droplevels()
-  
-  fit <- lmer(formula = zscore ~ model + design + model:design + nTrainEnv + (1|cluster:model) + (1|val_environment:cluster) + 
-                (1|cv_rep:val_environment), 
-              data = df, contrasts = list(model = "contr.sum", design = "contr.sum"))
-
-  fit_summary <- data_frame(
-    fitted = list(fit),
-    mean_accuracy = fixef(fit)[1],
-    model_design_effects = list(Effect(c("model", "design"), fit)),
-    design_effects = list(Effect("design", fit)),
-    nTrainEnv_effects = list(Effect("nTrainEnv", fit)),
-    fixef_test = list(tidy(anova(fit))),
-    ranef_test = list(tidy(ranova(fit)))
-  ) %>% mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
-  
-  # Add the summary to the DF
-  cluster_cv_predictions_analysis$out[[i]] <- fit_summary
-  
-}
-
-cluster_cv_predictions_analysis <- cluster_cv_predictions_analysis %>%
-  select(-data) %>% 
-  unnest(out)
-
-
-## ANOVAs
-unnest(cluster_cv_predictions_analysis, fixef_test)
-
-## Model was never significant
-## Design was always signficiant
-## Model x design was sometimes significant
-
-
-## RANOVAs
-unnest(cluster_cv_predictions_analysis, ranef_test) %>% filter(!str_detect(term, "none"))
-
-## Environment %in% cluster and cluster %in% model was more often not significant,
-## which should be expected under random conditions
-
-## Plot the effect of model and prediction design
-g_cluster_cv_model_effect_complete <- cluster_cv_predictions_analysis %>%
-  filter(set == "complete") %>%
-  unnest(model_design_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set),
-         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 2)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ design, scales = "free", space = "free_x") +
-  ylab("Prediction accuracy") + 
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
-
-g_cluster_cv_model_effect_realistic <- cluster_cv_predictions_analysis %>%
-  filter(set == "realistic") %>%
-  unnest(model_design_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr), set = str_to_title(set),
-         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper, color = model)) +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_manual(values = dist_colors, name = "Model", guide = guide_legend(nrow = 1)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ design, scales = "free", space = "free_x") +
-  ylab("Prediction accuracy") + 
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
-        legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
-
-
-
-## Save
-ggsave(filename = "cluster_cv_model_design_effect_complete.jpg", plot = g_cluster_cv_model_effect_complete, path = fig_dir, 
-       width = 6, height = 8, dpi = 1000)
-
-## Save
-ggsave(filename = "cluster_cv_model_design_effect_realistic.jpg", plot = g_cluster_cv_model_effect_realistic, path = fig_dir, 
-       width = 6, height = 8, dpi = 1000)
-
-
-
-## Plot the effect of design
-
-g_cluster_cv_design_effect <- cluster_cv_predictions_analysis %>%
-  unnest(design_effects) %>%
-  mutate(set = str_to_title(set),
-         design = str_replace_all(design, c("vp_accuracy" = "POV", "cv_accuracy" = "CV"))) %>%
-  mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = design, y = fit, ymin = lower, ymax = upper, color = design)) +
-  geom_point() +
-  geom_errorbar(width = 0.5) + 
-  scale_color_brewer(name = "Prediction design", palette = "Set1", guide = FALSE) +
-  scale_y_continuous(breaks = pretty) + 
-  facet_grid(trait ~ set, scales = "free_y", space = "free_x") +
-  ylab("Prediction accuracy") + 
-  xlab("Design") + 
-  theme_presentation2(base_size = 16) +
-  theme(legend.position = "bottom", legend.box.margin = margin(), legend.spacing.x = unit(0.5, "lines"))
-
-
-## Save
-ggsave(filename = "cluster_cv_design_effect.jpg", plot = g_cluster_cv_design_effect, path = fig_dir, 
-       width = 6, height = 8, dpi = 1000)
+ggsave(filename = "random_cv_pov_cluster_predictions.jpg", plot = g_random_cv_pov_cluster, path = fig_dir, width = 10, height = 7, dpi = 1000)
+
+
+
+## Publication version is just CV and POV
+g_random_cv_pov_cluster_list <- random_cluster_predictions_analysis1 %>%
+  mutate(scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
+         scheme = factor(scheme, levels = cv_replace)) %>%
+  filter(!str_detect(scheme, "POCV")) %>%
+  split(.$set) %>%
+  map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+        geom_hline(yintercept = 0) +
+        geom_errorbar(width = 0.5) +
+        geom_point(aes(color = model)) +
+        scale_y_continuous(breaks = pretty, name = "Prediction accuracy advantage") +
+        scale_color_manual(values = dist_colors_use, guide = FALSE) +
+        scale_linetype_manual(values = 2, name = NULL) +
+        xlab("Distance method") +
+        facet_grid(trait ~ scheme, scales = "free", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+        theme_presentation2(base_size = 10) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside") )
+
+g_random_cv_pov_cluster1 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, nrow = 2, labels = LETTERS[seq_along(g_random_cv_pov_cluster_list)])
+
+ggsave(filename = "random_cv_pov_cluster_predictions_paper.jpg", plot = g_random_cv_pov_cluster1, path = fig_dir, width = 5, height = 8, dpi = 1000)
+
+
+
+
+
+
+
+##
+
+
+
+
+
+
+
+
 
 
 
@@ -1326,7 +1185,7 @@ g_all_cv <- all_pred_accuracy_effect %>%
 ggsave(filename = "all_cross_validation_accuracy.jpg", plot = g_all_cv, path = fig_dir, width = 4, height = 4, dpi = 1000)
 
 
-#
+##
 
 
 

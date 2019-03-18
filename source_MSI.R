@@ -4,7 +4,7 @@
 
 
 ## Change the library paths
-if (version$minor == "5.2") .libPaths() <- gsub(pattern = "lab_library", replacement = "mesabi_library", x = .libPaths())
+if (version$minor == "5.2") .libPaths(gsub(pattern = "lab_library", replacement = "mesabi_library", x = .libPaths()))
 
 # Load packages
 packages <- c("dplyr", "tidyr", "tibble", "stringr", "readxl", "readr", "parallel",
