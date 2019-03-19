@@ -27,6 +27,7 @@ load(file.path(result_dir, "distance_method_results.RData"))
 # Load results
 # load(file.path(result_dir, "all_predictions.RData"))
 load(file.path(result_dir, "all_predictions_00.RData"))
+load(file.path(result_dir, "distance_rank_predictions.RData"))
 
 
 
@@ -346,164 +347,101 @@ ggsave(filename = "all_cv_pov_random_predictions1.jpg", plot = g_cv_pov_random_d
 
 #### Environmental distance predictions ####
 
-## Predictions when adding one environment at a time
+pov00_environment_rank_predictions %>%
+  distinct(trait, set, val_environment, model, nTrainEnv, scheme) %>%
+  split(list(.$set, .$trait)) %>%
+  map(~mutate_all(., as.factor) %>% complete_(names(.)))
 
-
-## Summarize the random results
-environment_rank_random_summary <- environment_rank_random_predictions %>% 
-  unnest(accuracy) %>%   
-  left_join(., env_herit) %>% 
-  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
-  group_by(set, trait, nTrainEnv, val_environment) %>%
-  summarize_at(vars(accuracy, heritability, ability), mean) %>%
-  ## Calculate mean and confidence interval
-  summarize_at(vars(accuracy), funs(mean, sd, n())) %>%
-  ungroup() %>%
-  mutate(stat = (sd / sqrt(n)) * qt(p = alpha / 2, df = n - 1, lower.tail = FALSE), lower = mean - stat, upper = mean + stat,
-         model = "sample")
+## Determine missing observations
+pov00_environment_rank_predictions %>% 
+  distinct(trait, set, val_environment, nTrainEnv, scheme) %>%
+  
 
 
 
+## Analyze pov00 first
 
-# Convert the accuracies to z scores
-# Adjust the names of the distance models
-environment_rank_predictions_out <- environment_rank_predictions %>%
-  unnest(accuracy) %>% 
-  left_join(., env_herit) %>% 
-  mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
-  # bind_rows(., environment_rank_random_summary) %>%
-  mutate(model = str_replace_all(model, dist_method_abbr),
-         model = factor(model, levels = dist_method_abbr),
-         zscore = accuracy) %>%
-  # zscore = ztrans(accuracy)) %>% 
-  mutate_at(vars(nTrainEnv, val_environment), as.factor) %>%
+pov00_predictions_out <- bind_rows(pov00_environment_rank_predictions, pov00_environment_rank_random_predictions) %>%
+  mutate(model = ifelse(str_detect(model, "sample"), "sample", model)) %>%
+  select(-train, -test) %>%
+  left_join(., env_herit) %>%
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
+         model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, dist_method_abbr)) %>%
+  mutate_at(vars(scheme, val_environment, nTrainEnv), as.factor) %>%
   filter(model %in% dist_method_abbr_use)
 
 
 ## Fit a model per trait
 
 # Fit a model per trait
-environment_rank_predictions_analysis <- environment_rank_predictions_out %>%
+pov00_predictions_analysis <- pov00_predictions_out %>%
   group_by(set, trait) %>%
   nest() %>%
   mutate(out = list(NULL))
 
 ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
-for (i in seq(nrow(environment_rank_predictions_analysis))) {
+for (i in seq(nrow(pov00_predictions_analysis))) {
   
-  df <- environment_rank_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
+  df <- pov00_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
     droplevels()
   
-  fit <- lmer(formula = zscore ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
-                (1|val_environment:nTrainEnv), data = df)
+  fit <- lmer(formula = accuracy ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
+                (1|val_environment:nTrainEnv) + (1|val_environment:nTrainEnv:model), data = df)
   
   fit_summary <- data_frame(
     fitted = list(fit),
-    nTrainEnv_effects = list(Effect(focal.predictors = "nTrainEnv", fit)),
     model_nEnv_effects = list(Effect(focal.predictors = c("model", "nTrainEnv"), fit))) %>% 
     mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
   
   # Add the summary to the DF
-  environment_rank_predictions_analysis$out[[i]] <- fit_summary
+  pov00_predictions_analysis$out[[i]] <- fit_summary
   
 }
 
-environment_rank_predictions_analysis <- unnest(environment_rank_predictions_analysis, out)
+pov00_predictions_analysis <- unnest(pov00_predictions_analysis, out)
 
 
 
-# Quick anova scan
-environment_rank_predictions_analysis$fitted %>% map(anova)
+## Cross-validation prediction
+cv00_predictions_out <- bind_rows(cv00_environment_rank_predictions, cv00_environment_rank_random_predictions) %>%
+  mutate(model = ifelse(str_detect(model, "sample"), "sample", model)) %>%
+  left_join(., env_herit) %>%
+  mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
+         model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, dist_method_abbr)) %>%
+  mutate_at(vars(scheme, val_environment, nTrainEnv), as.factor) %>%
+  filter(model %in% dist_method_abbr_use)
 
 
+## Fit a model per trait
 
-## Sample of all data to use as comparisons
-loeo_predictions_analysis <- separate_cv_pov_predictions_analysis1 %>%
-  filter(scheme == "POV00") %>%
-  mutate(set = str_to_title(set))
-
-
-environment_rank_predictions_analysis_toplot <- environment_rank_predictions_analysis %>%
-  unnest(model_nEnv_effects) %>%
-  mutate(model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set),
-         nTrainEnv = parse_number(nTrainEnv))
-
-
-## Plot the effect of model and number of training environments
-g_rank_model_effect <- environment_rank_predictions_analysis_toplot %>%
-  # mutate_at(vars(fit, lower, upper), zexp) %>%
-  ## Plot
-  ggplot(aes(x = nTrainEnv, y = fit, group = model, color = model)) +
-  geom_hline(data = loeo_predictions_analysis, aes(yintercept = accuracy, lty = "Accuracy using\nall data"), color = "black") +
-  # geom_point() +
-  geom_ribbon(data = subset(environment_rank_predictions_analysis_toplot, model == "Random"), 
-              aes(ymin = lower, ymax = upper, fill = model), color = 0, lwd = 0, alpha = 0.1) +
-  geom_line() +
-  scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = guide_legend(nrow = 2)) +
-  scale_fill_manual(values = dist_colors_use, name = "Distance\nmethod", guide = guide_legend(nrow = 2)) +
-  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
-  scale_y_continuous(breaks = pretty) + 
-  scale_x_continuous(breaks = pretty) +
-  facet_grid(trait ~ set, scales = "free", space = "free_x", switch = "y") +
-  ylab("Prediction accuracy") + 
-  xlab("Number of training set environments") +
-  theme_presentation2(base_size = 10) +
-  theme(legend.position = "bottom",legend.box.margin = margin(), legend.spacing.x = unit(0.2, "lines"))
-
-# Save
-ggsave(filename = "cumulative_pred_model_nEnv_effect.jpg", plot = g_rank_model_effect, path = fig_dir, 
-       height = 6, width = 5, dpi = 1000)
-
-
-
-
-
-
-#### Look at 3 levels of random environments ####
-n_rand <- c(5, 10, 15)
-# n_rand <- seq(3, 15, 3)
-
-
-random_env_out <- environment_rank_random_predictions %>% 
-  unnest(accuracy) %>%   
-  left_join(., env_herit) %>% 
-  mutate(ability = accuracy, accuracy = ability / sqrt(heritability), nTrainEnv = as.factor(nTrainEnv)) %>%
-  filter(nTrainEnv %in% n_rand)
-
-## Fit model
-random_env_analysis <- random_env_out %>%
+# Fit a model per trait
+cv00_predictions_analysis <- cv00_predictions_out %>%
   group_by(set, trait) %>%
   nest() %>%
   mutate(out = list(NULL))
 
-for (i in seq(nrow(random_env_analysis))) {
-  df <- random_env_analysis$data[[i]]
+## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
+for (i in seq(nrow(cv00_predictions_analysis))) {
   
-  fit <- lmer(accuracy ~ nTrainEnv + (1|val_environment) + (1|val_environment:nTrainEnv), df)
+  df <- cv00_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
+    droplevels()
+  
+  fit <- lmer(formula = accuracy ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
+                (1|val_environment:nTrainEnv) + (1|val_environment:nTrainEnv:model), data = df)
   
   fit_summary <- data_frame(
     fitted = list(fit),
-    nTrainEnv_effects = list(Effect(focal.predictors = "nTrainEnv", fit))) %>%
+    model_nEnv_effects = list(Effect(focal.predictors = c("model", "nTrainEnv"), fit))) %>% 
     mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
   
   # Add the summary to the DF
-  random_env_analysis$out[[i]] <- fit_summary
-  
+  cv00_predictions_analysis$out[[i]] <- fit_summary
   
 }
 
-
-
-## Plot
-random_env_analysis %>%
-  unnest(out) %>%
-  unnest(nTrainEnv_effects) %>%
-  mutate(nTrainEnv = factor(nTrainEnv, levels = n_rand)) %>%
-  ggplot(aes(x = nTrainEnv, y = fit, ymin = lower, ymax = upper)) +
-  geom_point() +
-  geom_errorbar() +
-  facet_grid(trait ~ set)
-
+cv00_predictions_analysis <- unnest(cv00_predictions_analysis, out)
 
 
 

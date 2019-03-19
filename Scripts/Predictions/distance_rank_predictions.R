@@ -198,7 +198,7 @@ pov00_environment_rank_random_df <- environment_rank_df %>%
               map(~geno_means(data = .)) )
       
       out[[i]] <- train %>% 
-        map(~data_frame(train = ., nTrainEnv = seq_along(.))) %>% 
+        map(~tibble(train = ., nTrainEnv = seq_along(.))) %>% 
         map2_df(.x = ., .y = seq_along(.), ~mutate(.x, model = paste0("sample", .y))) %>%
         mutate(test = list(filter(pheno_use, environment == row$val_environment, line_name %in% vp_geno)))
       
@@ -243,7 +243,7 @@ pov00_environment_rank_random_predictions <- pov00_environment_rank_random_df %>
     
     core_df %>%
       mutate(pov00 = out) %>%
-      select(-core) %>%
+      select(-core, -train, -test) %>%
       unnest(pov00) %>%
       gather(scheme, accuracy, pov00)
     
@@ -264,20 +264,20 @@ pov00_environment_rank_random_predictions <- pov00_environment_rank_random_df %>
 # cv00_environment_rank_train_test <- environment_rank_df %>%
 #   group_by(set, trait, model, val_environment) %>%
 #   do({
-#     
+# 
 #     row <- .
 
 
 ## Cross-validation (CV00) with adding environments
 ## Create training and test sets
 cv00_environment_rank_train_test <- environment_rank_df %>%
-  assign_cores(n_core) %>% 
+  assign_cores(n_core) %>%
   split(.$core) %>%
   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-    
+
     out <- vector("list", nrow(core_df))
     for (i in seq_along(out)) {
-      
+
       row <- core_df[i,]
     
       ## Filter phenotypes for that trait
@@ -285,14 +285,14 @@ cv00_environment_rank_train_test <- environment_rank_df %>%
       
       ## Create CV randomizations
       cv_rand <- replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
-        map(~mutate_at(., vars(-.id), funs(map(., as.data.frame)))) %>%
+        map(~mutate_at(., vars(-.id), funs(map(., ~as.data.frame(.)[[1]])))) %>%
         map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y)) %>%
         crossing(., tibble(train_env = accumulate(row$rank[[1]], c)))
       
       # Then create training sets
       out[[i]] <- cv_rand %>%
-        mutate(train = map2(train, train_env, ~filter(pheno_use, environment %in% .y, line_name %in% .x[[1]])),
-               test = map(test, ~filter(pheno_use, environment %in% row$val_environment, line_name %in% c(.[[1]], vp_geno))),
+        mutate(train = map2(train, train_env, ~filter(pheno_use, environment %in% .y, line_name %in% .x)),
+               test = map(test, ~filter(pheno_use, environment %in% row$val_environment, line_name %in% c(., vp_geno))),
                nTrainEnv = map_dbl(train_env, length))
       
     }

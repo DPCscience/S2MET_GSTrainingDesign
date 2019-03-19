@@ -186,5 +186,4 @@ S2_MET_BLUEs <- filter(S2_MET_BLUEs, environment %in% tp_vp_env)
 
 
 ## Remove
-rm(S2_MET_BLUEs_temp)
-rm(S2_MET_BLUEs_temp1)
+rm(S2_MET_BLUEs_temp, S2_MET_BLUEs_temp1, s2_discrete_mat, s2_imputed_mat, s2_imputed_mat_use)
