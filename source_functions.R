@@ -313,7 +313,6 @@ geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
   
   # Check the levels of these terms
   terms_levels <- sapply(data[term_labels], n_distinct)
-  
   ## Drop terms that only have 1 level
   terms_drop <- which(terms_levels <= 1)
   
@@ -332,7 +331,7 @@ geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
   
   # Extract the blues
   coef(fit) %>%
-  data_frame(line_name = names(.), value = .) %>%
+    data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
     filter(str_detect(line_name, "line_name")) %>%
     mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
            environment = "blue", std_error = 0)

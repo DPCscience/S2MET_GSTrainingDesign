@@ -89,23 +89,25 @@ S2_MET_BLUEs_use %>%
         map_df(~{
           droplevels(.) %>%
             complete(trait, environment, line_name, fill = list(observed = FALSE)) %>%
-            summarize(trait = unique(trait), prop_obs = mean(observed))
+            summarize(trait = unique(trait), prop_obs = mean(observed), n_obs = sum(observed), n_total = n(), n_pred = n_total - n_obs)
         })
     }))
 
-# $tp
-# # A tibble: 3 x 2
-# trait       prop_obs
-# 1 GrainYield     0.984
-# 2 HeadingDate    0.989
-# 3 PlantHeight    0.989
+# $`tp`
+# # A tibble: 3 x 4
+# trait       prop_obs n_obs n_total
+# 1 GrainYield     0.984  4140    4209
+# 2 HeadingDate    0.989  4704    4758
+# 3 PlantHeight    0.989  4888    4941
 # 
 # $tp_geno
-# # A tibble: 3 x 2
-# trait       prop_obs
-# 1 GrainYield     0.984
-# 2 HeadingDate    0.989
-# 3 PlantHeight    0.989
+# # A tibble: 3 x 4
+# trait       prop_obs n_obs n_total
+# 1 GrainYield     0.984  3960    4025
+# 2 HeadingDate    0.989  4500    4550
+# 3 PlantHeight    0.989  4675    4725
+
+
 
 ## Create a table with the proportions of observed combinations for the TP and VP
 prop_observed_table <- data_frame(population = c("tp", "vp"), line_name = list(tp, vp)) %>%
