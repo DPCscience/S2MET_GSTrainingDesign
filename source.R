@@ -187,3 +187,46 @@ S2_MET_BLUEs <- filter(S2_MET_BLUEs, environment %in% tp_vp_env)
 
 ## Remove
 rm(S2_MET_BLUEs_temp, S2_MET_BLUEs_temp1, s2_discrete_mat, s2_imputed_mat, s2_imputed_mat_use)
+
+
+### Colors, abbreviations, etc.
+
+## Significant level
+alpha <- 0.05
+
+## Create a factor for the distance methods
+dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" = "Location Phenotypic Distance",  "great_circle_dist" = "Great Circle Distance", 
+                         "OYEC_All" = "One Year All ECs", "OYEC_Mean" = "One Year Mean Cor EC", "OYEC_IPCA" = "One Year IPCA Cor EC", 
+                         "MYEC_All" = "Multi Year All ECs", "MYEC_Mean" = "Multi Year Mean Cor EC", "MYEC_IPCA" = "Multi Year IPCA Cor EC",
+                         "AMMI" = "AMMI", "sample" = "Random")
+dist_method_abbr <- abbreviate(dist_method_replace)
+
+## Alternative abbreviations
+dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
+                             names(dist_method_replace))
+
+colors <- umn_palette(3)
+colors2 <- umn_palette(2)
+colors3 <- umn_palette(4)
+
+colors_use <- c("#FFB71E", "#FFDE7A", colors[1], colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
+
+# colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
+# colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")
+# colors_use <- c(colors[c(1:3, 5:7)], colors2[2:4], colors[4], "grey75")
+
+dist_colors <- setNames(colors_use, dist_method_abbr)
+
+## Subset for use
+dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA", "sample")]
+dist_colors_use <- dist_colors[dist_method_abbr_use]
+
+
+
+# ## Replacement vector for CV
+cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0", "cv00", "pov00", "pocv00") %>%
+  setNames(object = toupper(.), .)
+
+## Set replacement
+set_replace <- c("complete" = "Leave-one-out", "realistic" = "Time-forward")
+

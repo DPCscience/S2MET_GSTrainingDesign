@@ -31,41 +31,6 @@ load(file.path(result_dir, "distance_rank_predictions.RData"))
 
 
 
-## Significant level
-alpha <- 0.05
-
-## Create a factor for the distance methods
-dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" = "Location Phenotypic Distance",  "great_circle_dist" = "Great Circle Distance", 
-                         "OYEC_All" = "One Year All ECs", "OYEC_Mean" = "One Year Mean Cor EC", "OYEC_IPCA" = "One Year IPCA Cor EC", 
-                         "MYEC_All" = "Multi Year All ECs", "MYEC_Mean" = "Multi Year Mean Cor EC", "MYEC_IPCA" = "Multi Year IPCA Cor EC",
-                         "AMMI" = "AMMI", "sample" = "Random")
-dist_method_abbr <- abbreviate(dist_method_replace)
-
-## Alternative abbreviations
-dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
-                             names(dist_method_replace))
-
-colors <- umn_palette(3)
-colors2 <- umn_palette(2)
-colors3 <- umn_palette(4)
-
-colors_use <- c("#FFB71E", "#FFDE7A", colors[1], colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
-
-# colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
-# colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")
-# colors_use <- c(colors[c(1:3, 5:7)], colors2[2:4], colors[4], "grey75")
-
-dist_colors <- setNames(colors_use, dist_method_abbr)
-
-## Subset for use
-dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA", "sample")]
-dist_colors_use <- dist_colors[dist_method_abbr_use]
-
-
-
-# ## Replacement vector for CV
-cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0", "cv00", "pov00", "pocv00") %>%
-  setNames(object = toupper(.), .)
 
 
 ## Shorten the heritability results
@@ -224,7 +189,8 @@ for (i in seq(nrow(separate_cv_pov_predictions_analysis))) {
 separate_cv_pov_predictions_analysis1 <- separate_cv_pov_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
-  mutate(scheme = factor(toupper(scheme), levels = cv_replace)) %>%
+  mutate(scheme = factor(toupper(scheme), levels = cv_replace),
+         set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
   rename(accuracy = fit)
 
 g_cv_pov_all_data <- separate_cv_pov_predictions_analysis1 %>%
@@ -347,20 +313,7 @@ ggsave(filename = "all_cv_pov_random_predictions1.jpg", plot = g_cv_pov_random_d
 
 #### Environmental distance predictions ####
 
-pov00_environment_rank_predictions %>%
-  distinct(trait, set, val_environment, model, nTrainEnv, scheme) %>%
-  split(list(.$set, .$trait)) %>%
-  map(~mutate_all(., as.factor) %>% complete_(names(.)))
-
-## Determine missing observations
-pov00_environment_rank_predictions %>% 
-  distinct(trait, set, val_environment, nTrainEnv, scheme) %>%
-  
-
-
-
 ## Analyze pov00 first
-
 pov00_predictions_out <- bind_rows(pov00_environment_rank_predictions, pov00_environment_rank_random_predictions) %>%
   mutate(model = ifelse(str_detect(model, "sample"), "sample", model)) %>%
   select(-train, -test) %>%
@@ -376,18 +329,17 @@ pov00_predictions_out <- bind_rows(pov00_environment_rank_predictions, pov00_env
 
 # Fit a model per trait
 pov00_predictions_analysis <- pov00_predictions_out %>%
-  group_by(set, trait) %>%
+  group_by(set, trait, scheme) %>%
   nest() %>%
   mutate(out = list(NULL))
 
 ## Iterate over sets and traits - the summaries of LMER don't work using do() or map(), so we have to use a loop
 for (i in seq(nrow(pov00_predictions_analysis))) {
   
-  df <- pov00_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
-    droplevels()
+  df <- pov00_predictions_analysis$data[[i]] %>% droplevels()
   
   fit <- lmer(formula = accuracy ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
-                (1|val_environment:nTrainEnv) + (1|val_environment:nTrainEnv:model), data = df)
+                (1|val_environment:nTrainEnv), data = df)
   
   fit_summary <- data_frame(
     fitted = list(fit),
@@ -400,6 +352,39 @@ for (i in seq(nrow(pov00_predictions_analysis))) {
 }
 
 pov00_predictions_analysis <- unnest(pov00_predictions_analysis, out)
+
+
+## Plot
+pov00_predictions_analysis_toplot <- pov00_predictions_analysis %>%
+  unnest(model_nEnv_effects) %>%
+  mutate(set = factor(str_replace_all(set, set_replace), levels = set_replace),
+         model = factor(model, levels = dist_method_abbr_use),
+         nTrainEnv = parse_number(nTrainEnv),
+         scheme = toupper(scheme),
+         size = model == "Random") %>%
+  ## Add results from all environment predictions
+  left_join(., select(separate_cv_pov_predictions_analysis1, set, trait, scheme, accuracy))
+  
+g_pov00_rank_pred <- pov00_predictions_analysis_toplot %>%
+  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy\nusing\nall data")) + 
+  geom_line(aes(size = size)) +
+  facet_grid(trait ~ set, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free") +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure", guide = guide_legend(nrow = 3)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_x_continuous(breaks = pretty, name = "Number of training set environments") +
+  theme_presentation2(base_size = 10) +
+  theme(legend.position = "bottom")
+
+ggsave(filename = "cumulative_env_pred_pov00.jpg", plot = g_pov00_rank_pred, path = fig_dir, width = 4.5, height = 6, dpi = 1000)
+
+
+
+
+
+
 
 
 

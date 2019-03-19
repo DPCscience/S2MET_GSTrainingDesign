@@ -514,23 +514,30 @@ cluster_compare <- cluster_df %>%
   do({
     df <- .
     comparison <- select(df, model, cluster) %>% 
-      crossing(., .) %>% filter(model1 != model)
+      crossing(., .) %>% 
+      filter(model1 != model)
     
     comparison1 <- map2_dbl(.x = comparison$cluster, .y = comparison$cluster1, ~{
-      # Iterate over environments in .x
-      prop_shared_env <- numeric(nrow(.x)); names(prop_shared_env) <- .x$environment
-      for (env in .x$environment) {
-        clu1 <- subset(.x, environment == env, cluster, drop = T)
-        shared_env1 <- subset(.x, cluster == clu1, environment, drop = T)
-        clu2 <- subset(.y, environment == env, cluster, drop = T)
-        shared_env2 <- subset(.y, cluster == clu2, environment, drop = T)
-        ## Calculate proportion of common envs
+      
+      # This calculate the proportion of pairs of environments assigned to the same cluster
+      comp1 <- crossing(environment = .x[[1]], environment1 = .y[[1]]) %>%
+        filter(environment != environment1) %>%
+        mutate(same_cluster_x = NA, same_cluster_y = NA)
+      
+      for (i in seq(nrow(comp1))) {
+        e1 <- comp1$environment[[i]]
+        e2 <- comp1$environment1[[i]]
         
-        prop_shared_env[env] <- mean(shared_env1 %in% shared_env2)
+        comp1$same_cluster_x[[i]] <- n_distinct(subset(.x, environment %in% c(e1, e2), cluster, drop = T)) == 1
+        comp1$same_cluster_y[[i]] <- n_distinct(subset(.y, environment %in% c(e1, e2), cluster, drop = T)) == 1
+        
       }
       
-      # Return the mean
-      mean(prop_shared_env)
+      comp2 <- comp1 %>%
+        mutate(same_cluster = same_cluster_x == same_cluster_y)
+      
+      mean(comp2$same_cluster)
+
     })
     
     ## Add the mean
@@ -545,12 +552,12 @@ cluster_compare <- cluster_df %>%
 cluster_compare1 <- cluster_compare %>%
   mutate_at(vars(model, model1), funs(ifelse(. == "pheno_location_dist", "pheno_loc_dist", .))) %>%
   mutate_at(vars(model, model1), funs(str_replace_all(., dist_method_abbr))) %>%
-  filter_at(vars(model1, model), all_vars(. %in% dist_method_abbr_use))
-
-cluster_compare1 %>% 
-  ggplot(aes(x = model, y = model1, fill = prop_common)) + 
-  geom_tile() +  
-  facet_wrap(~ set + trait)
+  filter_at(vars(model1, model), all_vars(. %in% dist_method_abbr_use)) %>%
+  mutate_at(vars(model, model1), funs(factor(., levels = dist_method_abbr_use))) %>%
+  arrange(set, trait, model, model1) %>%
+  # Designate upper or lower triangle
+  split(list(.$set, .$trait)) %>%
+  map_df(~mutate(., lower_triangle = duplicated(map2_chr(.x = model, .y = model1, ~paste(sort(c(as.character(.x), as.character(.y))), collapse = "_")))))
 
 
 cluster_compare1 %>% group_by(set, model) %>% summarize(mean = mean(prop_common))
@@ -564,6 +571,29 @@ cluster_compare1 %>%
   filter_at(vars(model, model1), all_vars(. %in% c("All-EC", "Mean-EC", "IPCA-EC"))) %>%
   group_by(set, model) %>% 
   summarize(mean = mean(prop_common))
+
+
+## Plot heatmaps
+heat_colors <- wesanderson::wes_palette("Zissou1")
+
+cluster_compare_hm_list <- cluster_compare1 %>% 
+  filter(!lower_triangle) %>%
+  split(.$set) %>%
+  map(~ggplot(data = ., aes(x = model, y = model1, fill = prop_common)) + 
+        geom_tile() +  
+        geom_text(aes(label = round(prop_common, 2)), size = 2) + 
+        scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], midpoint = 0.5, limits = c(0, 1),
+                             name = "Proportion of overlap") +
+        facet_wrap(~ trait, labeller = labeller(trait = str_add_space)) +
+        theme_presentation2(base_size = 10) +
+        theme(axis.title = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") )
+
+g_cluster_compare <- plot_grid(plotlist = map(cluster_compare_hm_list, ~. + theme(legend.position = "none")), ncol = 1, 
+                               labels = LETTERS[seq_along(cluster_compare_hm_list)], align = "hv")
+g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+
+ggsave(filename = "cluster_compare_heatmap.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6, height = 6, dpi = 1000)
+
 
 
 
