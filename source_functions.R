@@ -139,50 +139,6 @@ fwr <- function(formula, data, gen = "line_name", env = "environment") {
 
 
 
-### Function that computes the significance of principal components via permutation.
-## This function will first run a principal component analysis using data,
-## then it will permute the order of the data and for each permutation re-run
-## the PCA. PCs will be retained if their proportion of variance is significant when
-## compared to the distribution of variance proportion under permutation
-## Note that the test is one-sided, since the variance cannot be negative.
-prcomp_perm <- function(x, scale = TRUE, permutations = 1000, level = 0.95) {
-  
-  # Scale the data, if called
-  x1 <- if (scale) scale(x) else x
-  
-  # Fit the original PCA
-  pc_fit <- prcomp(x = x1, center = FALSE, scale. = FALSE)
-  # Summarize
-  pc_fit_summ <- summary(pc_fit)
-  
-  ## Permute the data
-  data_permute <- replicate(n = permutations, t(apply(X = x1, MARGIN = 1, FUN = sample)), simplify = FALSE)
-  
-  # Run the PCA
-  pc_perm_fit_list <- map(data_permute, ~prcomp(x = ., center = FALSE, scale. = FALSE)) %>%
-    map(summary) %>%
-    # Pull out the variance explained
-    map(~.$importance[2,])
-  
-  pc_perm_var <- do.call("rbind", pc_perm_fit_list)
-  
-  ## Compare to the original variance to get a p-value
-  pvalues <- rowMeans(apply(X = pc_perm_var, MARGIN = 1, FUN = function(x) x >= pc_fit_summ$importance[2,]))
-  
-  # Get a confidence interval
-  var_ci <- apply(X = pc_perm_var, MARGIN = 2, FUN = quantile, probs = c((1 - level) / 2, 1 - ((1 - level) / 2)))
-  
-  # Return a list
-  list(
-    tidy = tidy(pc_fit),
-    summary = data.frame(PC = colnames(pc_fit$x), var_exp = pc_fit_summ$importance[2,], as.data.frame(t(var_ci)), 
-                         p_value = pvalues, row.names = NULL, stringsAsFactors = FALSE, check.names = FALSE)
-  )
-  
-}
-
-
-
 
 
 
@@ -195,6 +151,9 @@ subset_env <- function(dist, envs) {
     .[envs, envs] %>%
     as.dist()
 }
+
+
+
 
 ## Define a function to find the harmonic mean of a variable given an xtabs object
 ## 'adjust' is used for reps
@@ -218,121 +177,6 @@ harm_mean.xtabs <- function(x, variable, adjust = FALSE) {
   }
 }
 
-
-# Function to calculate heritability across clusters of environments
-cluster_heritability <- function(object, breakup_env = TRUE) {
-  # Extract the data from the model object
-  mf <- model.frame(object)
-  # Get the names of the mf and remove the reponse and weights
-  varnames_random <- setdiff(names(mf), attr(terms(mf), "varnames.fixed"))
-  
-  # If breakup_env is TRUE, but location + year are not in the names, error out
-  # Also set the formula for the xtabs
-  if (breakup_env) {
-    stopifnot(all(c("location", "year") %in% varnames_random))
-  } else {
-    stopifnot("environment" %in% varnames_random)
-  }
-  
-  # Set the formula for the xtabs
-  xtabs_form <- as.formula(paste("~", paste(varnames_random, collapse = " + ")))
-  plot_table <- xtabs(formula = xtabs_form, data = mf)
-  
-  # Calculate the harmonic mean of each of location, year, cluster, and rep
-  variable_harm_mean <- lapply(setdiff(varnames_random, "line_name"), FUN = harm_mean.xtabs, x = plot_table)
-  variable_harm_mean <- setNames(variable_harm_mean, setdiff(varnames_random, "line_name"))
-  
-  # Now for reps
-  rep_harm_mean <- harm_mean.xtabs(x = plot_table, variable = names(variable_harm_mean), adjust = T)
-  
-  ## Set the expressions to use in calculating across- and within-cluster heritability
-  if (breakup_env) {
-    exp_a <- "line_name / (line_name + (line_name:cluster / n_c) + (line_name:location:cluster / n_l) + (line_name:year / n_y) + (line_name:year:cluster / (n_c * n_y)) + (line_name:location:year:cluster / (n_l * n_y)) + (Residual / (n_r * n_l * n_y)))"
-    exp_w <- "(line_name + line_name:cluster) / (line_name + line_name:cluster + (n_c * ( (line_name:location:cluster / n_l) + (line_name:location:year:cluster / (n_l * n_y)) +
-    (Residual / (n_r * n_l * n_y)) )) + (line_name:year / n_y) + (line_name:year:cluster / (n_c * n_y)))"
-    
-    # Calculate heritability
-    herit_list = list(across = exp_a, within = exp_w) %>%
-      map_df(~herit(object = object, exp = ., n_l = variable_harm_mean$location,
-                    n_y = variable_harm_mean$year, n_c = variable_harm_mean$cluster,
-                    n_r = rep_harm_mean))
-    
-  } else {
-    exp_a <- "line_name / (line_name + (line_name:cluster / n_c) + (line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))"
-    
-    exp_w <- "(line_name + line_name:cluster) / (line_name +  line_name:cluster + (n_c * ((line_name:environment:cluster / n_e) + (Residual / (n_r * n_e)))))"
-    
-    # Calculate heritability
-    herit_list = list(across = exp_a, within = exp_w) %>%
-      map_df(~herit(object = object, exp = ., n_e = variable_harm_mean$environment,
-                    n_c = variable_harm_mean$cluster, n_r = rep_harm_mean))
-    
-  }
-  
-  # Return the heritability
-  return(herit_list) 
-  
-}
-
-
-## Function for calculating heritability in a training set
-training_heritability <- function(object) {
-  # Extract the data from the model object
-  mf <- model.frame(object)
-  # Get the names of the mf and remove the reponse and weights
-  varnames_random <- setdiff(names(mf), attr(terms(mf), "varnames.fixed"))
-  
-  # Set the formula for the xtabs
-  xtabs_form <- as.formula(paste("~", paste(varnames_random, collapse = " + ")))
-  plot_table <- xtabs(formula = xtabs_form, data = mf)
-
-  # Calculate the harmonic mean of reps
-  rep_harm_mean <- harm_mean.xtabs(x = plot_table, variable = setdiff(varnames_random, "line_name"), adjust = TRUE)
-  
-  # Calculate the harmonic mean of environment, if present
-  if ("environment" %in% varnames_random) {
-    variable_harm_mean <- lapply(setdiff(varnames_random, "line_name"), FUN = harm_mean.xtabs, x = plot_table)
-    variable_harm_mean <- setNames(variable_harm_mean, setdiff(varnames_random, "line_name"))
-    
-    exp <- "line_name / (line_name + (line_name:environment / n_e) + (Residual / (n_e * n_r)))"
-    # Calculate heritability
-    heritability <- herit(object = object, exp = exp, n_e = variable_harm_mean$environment, n_r = rep_harm_mean)
-    
-  } else {
-    exp <- "line_name / (line_name + (Residual / (n_r)))"
-    # Calculate heritability
-    heritability <- herit(object = object, exp = exp, n_r = rep_harm_mean)
-
-  }
-  
-  # Return the heritability
-  return(heritability)
-  
-}
-
-
-
-## Prediction functions
-
-## A function to model variance components
-calc_variance <- function(data, random_effect = c("line_name", "environment", "line_name:environment")) {
-  
-  # Get the weights
-  wts <- data$std_error^2
-  # Set the control
-  control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-  
-  # Write the formula
-  form <- as.formula(str_c("value ~ ", str_c(str_c("(1|", random_effect), ")", collapse = " + ")))
-  
-  # Fit the model
-  fit <- lmer(formula = form, data = data, control = control, weights = wts)
-  
-  # Extract the variance components
-  VarCorr(fit) %>% 
-    as.data.frame() %>% 
-    select(var_comp = grp, variance = vcov)
-}
 
 
 
@@ -373,7 +217,6 @@ gblup <- function(formula, random, K, train, test, fun = c("rrblup", "sommer"), 
     
   }
    
-  
   
   fun <- match.arg(fun)
   
@@ -492,7 +335,7 @@ geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
   data_frame(line_name = names(.), value = .) %>%
     filter(str_detect(line_name, "line_name")) %>%
     mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-           env = "mean", std_error = 0)
+           environment = "blue", std_error = 0)
   
 }
 

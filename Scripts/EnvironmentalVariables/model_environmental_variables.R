@@ -31,6 +31,15 @@ load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 alpha <- 0.05
 
 
+## Character replacement for covariates
+ec_type_replace <- c("PPT" = "Prcp", "TAVG" = "AvgTemp", "TMAX" = "MaxTemp", "TMIN" = "MinTemp", "annual_TRANGE_max" = "AnnoRangeTemp",
+                     "annual_TRANGE" = "AvgRangeTemp", "TRANGE" = "RangeTemp", "TSEASON" = "SeasTemp", "isothermality" = "IsoTemp", "subsoil" = "SS", "topsoil" = "TS", 
+                     "claytotal_r_" = "Clay", "om_r_" = "OrgMat", "sandtotal_r_" = "Sand", "silttotal_r_" = "Silt",
+                     "ph1to1h2o_r_" = "SoilpH", "latitude" = "Latitude", "longitude" = "Longitude", "elevation" = "Elevation")
+ec_date_replace <- c("annual_" = "Anno", "max_" = "Max", "min_" = "Min", "interval_" = "Int")
+
+
+
 ### Fit a joint regression model
 ##
 ## Models are fitted using all data or using just 2015 - 2016 data
@@ -138,10 +147,18 @@ data_to_model %>%
 
 ## Correlate environmental variables with the mean
 
-# For each summarized environmental covariable, find the correlation with the environmental mean
-
+## First combine one-year with multi-year ECs
 ec_env_df <- bind_rows(mutate(one_year_env_df, ec_group = "one_year"),
-                       mutate(multi_year_env_df, ec_group = "multi_year"))
+                       mutate(multi_year_env_df, ec_group = "multi_year")) %>%
+  ## Adjust names
+  mutate(variable_newname = str_replace_all(variable, ec_type_replace) %>% str_replace_all(ec_date_replace))
+
+
+## A separate DF of variable names and new names
+ec_names <- distinct(ec_env_df, variable, variable_newname)
+
+## Write a csv
+write_csv(x = ec_names, path = file.path(fig_dir, "env_covariate_names.csv"))
 
 
 ## A functio to scale a vector to dot product sum = 1
@@ -177,12 +194,14 @@ ec_env_df1 <- ec_env_df %>%
 ec_env_df2 <- ec_env_df1 %>%
   left_join(env_means_all, .) %>%
   mutate(EC_type = "summary") %>%
-  filter(! variable %in% c("elevation", "latitude", "longitude")) %>%
+  # filter(! variable %in% c("elevation", "latitude", "longitude")) %>%
+  filter(! variable %in% c("elevation")) %>%
   # Remove some variables that are not well distributed
   filter(!variable %in% c("claytotal_r_topsoil", "sandtotal_r_subsoil", "sandtotal_r_topsoil", "silttotal_r_subsoil",
                           "om_r_subsoil"))
 
 ## Correlate covariates with the environmental mean
+## Here we used the actual value of the covariates
 env_mean_cor <- ec_env_df2 %>%
   group_by(set, trait, ec_group, variable) %>% 
   do(test = cor.test(.$h, .$value)) %>%
@@ -209,6 +228,22 @@ env_mean_cor1 <- ec_env_df3 %>%
          pvalue = map_dbl(test, "p.value"),
          df = map_dbl(test, "parameter")) %>%
   select(-test)
+
+
+
+## Top 5 coviarates for each trait
+env_mean_top5_cor <- env_mean_cor1 %>%
+  group_by(set, trait, ec_group) %>% 
+  top_n(n = 5, wt = abs(cor)) %>%
+  arrange(set, ec_group, trait, desc(abs(cor))) %>%
+  mutate(top = seq(5)) %>%
+  ungroup() %>%
+  mutate(test = "env_mean") %>%
+  left_join(., ec_names)
+
+## 
+
+
 
 
 
@@ -294,12 +329,21 @@ env_mean_mr1 <- unnest(env_mean_mr) %>%
 #   summarize(n_var = n_distinct(variable), min_cor = min(cor), max_cor = max(cor))
 
 env_mean_cor_sig <- env_mean_mr1 %>%
-  unnest(tidy)
+  unnest(tidy) %>%
+  left_join(ec_names) %>%
+  left_join(., env_mean_cor1)
+
+## Summarize number of ECs per trait
+env_mean_cor_sig %>% 
+  filter(ec_group == "multi_year") %>% 
+  mutate(nEC = n_distinct(variable)) %>% 
+  group_by(trait, set, nEC) %>% 
+  summarize(nEC_group = n_distinct(variable))
 
 
+## Note if the top 5 
 
-## ggforce
-library(ggforce)
+
 
 
 ## Plot the significant results
@@ -309,29 +353,35 @@ g_mean_cor <- env_mean_cor_sig %>%
     
     df <- .
     
+    print(unique(df$ec_group))
+    
     set <- unique(df$set)
     group <- unique(df$ec_group)
     
-    ## Determine the number of pages
-    n_page <- ceiling(nrow(df) / (4 * 3))
-    
-    for (i in seq(n_page)) {
+    ## Determine the image size
+    n_col <- 4
+    n_row <- ceiling(nrow(df) / n_col)
 
-      g <- df %>%
-        select(trait, set, ec_group, variable) %>%
-        left_join(., ec_env_df3, by = c("set", "trait", "ec_group", "variable")) %>%
-        ggplot(aes(x = value, y = h)) + 
-        geom_smooth(method = "lm", se = FALSE) + 
-        geom_point() + 
-        facet_wrap_paginate( ~ trait + variable, scale = "free", nrow = 3, ncol = 4, page = i) + 
-        ylab("Environmental mean") +
-        xlab("Covariate value") +
-        theme_acs()
+    ## image height / width
+    width <- 8
+    height <- 6 * (n_row / (6/2))
 
-      ggsave(filename = paste0("env_mean_cor_sig_", group, "_", set, "_page", i, ".jpg"), path = fig_dir, plot = g, 
-             width = 8, height = 6, dpi = 1000)
-    
-    }
+    ## Create a facet annotation
+    df1 <- mutate(df, annotation = paste0(variable_newname, " (r = ", round(cor, 2), ")"))
+
+    g <- df1 %>%
+      select(trait, set, ec_group, variable, annotation) %>%
+      left_join(., ec_env_df3, by = c("set", "trait", "ec_group", "variable")) %>%
+      ggplot(aes(x = value, y = h)) + 
+      geom_smooth(method = "lm", se = FALSE) + 
+      geom_point() + 
+      facet_wrap( ~ trait + annotation, scale = "free", nrow = n_row, ncol = n_col) + 
+      scale_y_continuous(breaks = pretty, name = "Environmental mean") +
+      scale_x_continuous(breaks = pretty, name = "Covariate value") +
+      theme_acs()
+
+      ggsave(filename = paste0("env_mean_cor_sig_", group, "_", set, ".jpg"), path = fig_dir, plot = g, 
+             width = width, height = height, dpi = 1000)
     
   })
     
@@ -343,7 +393,7 @@ g_mean_cor <- env_mean_cor_sig %>%
 ## Find overlapping variables between sets and plot
 env_mean_cor_set_overlap <- env_mean_cor_sig %>% 
   split(.$set) %>% 
-  map(~select(., trait, ec_group, variable)) %>% 
+  map(~select(., trait, ec_group, variable, variable_names)) %>% 
   reduce(., dplyr::intersect)
 
 # trait       ec_group   variable          
@@ -356,37 +406,6 @@ env_mean_cor_set_overlap <- env_mean_cor_sig %>%
 # 7 PlantHeight one_year   interval_1_TRANGE 
 # 8 PlantHeight one_year   interval_1_TSEASON
 
-
-## Plot the overlapping results
-g_mean_cor <- env_mean_cor_set_overlap %>% 
-  split(., .$ec_group) %>%
-  map(~{
-    
-    df <- .
-    
-    group <- unique(df$ec_group)
-    
-    ## Determine the number of pages
-    n_page <- ceiling(nrow(df) / (4 * 3))
-    
-    for (i in seq(n_page)) {
-      
-      g <- df %>%
-        left_join(., ec_env_df3, by = c("trait", "ec_group", "variable")) %>%
-        ggplot(aes(x = value, y = h)) + 
-        geom_smooth(method = "lm", se = FALSE) + 
-        geom_point() + 
-        facet_wrap_paginate( ~ trait + variable + set, scale = "free", nrow = 3, ncol = 4, page = i) + 
-        ylab("Environmental mean") +
-        xlab("Covariate value") +
-        theme_acs()
-      
-      ggsave(filename = paste0("env_mean_cor_sig_overlap_", group, "_page", i, ".jpg"), path = fig_dir, plot = g, 
-             width = 8, height = 6, dpi = 1000)
-      
-    }
-    
-  })
 
 
 
@@ -475,11 +494,11 @@ g_mean_cor <- env_mean_cor_set_overlap %>%
 ## Then select those variables that are significant
 env_combine <- ec_env_df2 %>%
   # bind_rows(env_interval_use) %>%
-  select(set, trait, ec_group, environment, h, variable, value)
+  select(set, trait, ec_group, environment, h, variable_newname, value)
 
 ## Merge not based on set - we want the ECs that were determined significant using a subset of data
-ec_env_mean_sig <- select(env_mean_cor_sig, set, trait, ec_group, variable) %>%
-  left_join(., distinct(env_combine, trait, ec_group, environment, variable, value), by = c("trait", "ec_group", "variable"))
+ec_env_mean_sig <- select(env_mean_cor_sig, set, trait, ec_group, variable_newname) %>%
+  left_join(., distinct(env_combine, trait, ec_group, environment, variable_newname, value), by = c("trait", "ec_group", "variable_newname"))
 
 
 
@@ -547,6 +566,21 @@ env_ipca_cor1 <- ec_score_df %>%
 
 
 
+env_ipca_top5_cor <- env_ipca_cor1 %>%
+  filter(PC == "PC1") %>%
+  group_by(set, trait, ec_group) %>%
+  top_n(n = 5, wt = abs(cor)) %>%
+  arrange(set, ec_group, trait, desc(abs(cor))) %>%
+  mutate(top = seq(5)) %>%
+  ungroup() %>%
+  mutate(test = "env_ipca") %>%
+  left_join(., ec_names)
+  
+
+
+
+
+
 
 ## Try multiple regression, where ECs are added in order of correlation
 env_ipca_mr <- ec_score_df %>%
@@ -592,7 +626,7 @@ for (i in seq(nrow(env_ipca_mr))) {
     filter(term != "Residuals") %>%
     select(variable = term, sumsq, p_value = p.value)
   
-  ## Get predictions of the environmental mean
+  ## Get predictions of the environmental score
   df2 <- df1 %>% 
     add_predictions(fit_step) %>% 
     select(trait, environment, score, pred)
@@ -611,7 +645,19 @@ env_ipca_mr1 <- unnest(env_ipca_mr) %>%
 
 
 env_ipca_cor_sig <- env_ipca_mr1 %>%
-  unnest(tidy)
+  unnest(tidy) %>% 
+  left_join(ec_names) %>%
+  left_join(., filter(env_ipca_cor1, PC == "PC1"))
+
+
+## Summarize number of ECs per trait
+env_ipca_cor_sig %>% 
+  filter(ec_group == "multi_year") %>% 
+  mutate(nEC = n_distinct(variable)) %>% 
+  group_by(trait, set, nEC) %>% 
+  summarize(nEC_group = n_distinct(variable))
+
+
 
 
 ## Plot the significant results
@@ -621,32 +667,38 @@ g_ipca_cor <- env_ipca_cor_sig %>%
     
     df <- .
     
+    print(unique(df$ec_group))
+    
     set <- unique(df$set)
     group <- unique(df$ec_group)
     
-    ## Determine the number of pages
-    n_page <- ceiling(nrow(df) / (4 * 3))
+    ## Determine the image size
+    n_col <- 4
+    n_row <- ceiling(nrow(df) / n_col)
     
-    for (i in seq(n_page)) {
-      
-      g <- df %>%
-        select(trait, set, ec_group, variable) %>%
-        left_join(., ec_score_df, by = c("set", "trait", "ec_group", "variable")) %>%
-        filter(PC == "PC1") %>%
-        ggplot(aes(x = value, y = score)) + 
-        geom_smooth(method = "lm", se = FALSE) + 
-        geom_point() + 
-        facet_wrap_paginate( ~ trait + variable, scale = "free", nrow = 3, ncol = 4, page = i) + 
-        ylab("Environmental IPCA1 score") +
-        xlab("Covariate value") +
-        theme_acs()
-      
-      ggsave(filename = paste0("env_ipca_cor_sig_", group, "_", set, "_page", i, ".jpg"), path = fig_dir, plot = g, 
-             width = 8, height = 6, dpi = 1000)
-      
-    }
+    ## image height / width
+    width <- 8
+    height <- 6 * (n_row / (6/2))
+    
+    ## Create a facet annotation
+    df1 <- mutate(df, annotation = paste0(variable_newname, " (r = ", round(cor, 2), ")"))
+    
+    g <- df1 %>%
+      select(trait, set, ec_group, variable, annotation) %>%
+      left_join(., filter(ec_score_df, PC == "PC1"), by = c("set", "trait", "ec_group", "variable")) %>%
+      ggplot(aes(x = value, y = score)) + 
+      geom_smooth(method = "lm", se = FALSE) + 
+      geom_point() + 
+      facet_wrap( ~ trait + annotation, scale = "free", nrow = n_row, ncol = n_col) + 
+      scale_y_continuous(breaks = pretty, name = "Environmental mean") +
+      scale_x_continuous(breaks = pretty, name = "Covariate value") +
+      theme_acs()
+    
+    ggsave(filename = paste0("env_ipca_cor_sig_", group, "_", set, ".jpg"), path = fig_dir, plot = g, 
+           width = width, height = height, dpi = 1000)
     
   })
+
 
 
 
@@ -660,40 +712,6 @@ env_ipca_cor_set_overlap <- env_ipca_cor_sig %>%
   reduce(., dplyr::intersect)
 
 
-## Plot the overlapping results
-g_ipca_cor <- env_ipca_cor_set_overlap %>% 
-  split(., .$ec_group) %>%
-  map(~{
-    
-    df <- .
-    
-    set <- unique(df$set)
-    group <- unique(df$ec_group)
-    
-    ## Determine the number of pages
-    n_page <- ceiling(nrow(df) / (4 * 3))
-    
-    for (i in seq(n_page)) {
-      
-      g <- df %>%
-        select(trait, set, ec_group, variable) %>%
-        left_join(., ec_score_df, by = c("trait", "ec_group", "variable")) %>%
-        filter(PC == "PC1") %>%
-        ggplot(aes(x = value, y = score)) + 
-        geom_smooth(method = "lm", se = FALSE) + 
-        geom_point() + 
-        facet_wrap_paginate( ~ trait + variable, scale = "free", nrow = 3, ncol = 4, page = i) + 
-        ylab("Environmental IPCA1 score") +
-        xlab("Covariate value") +
-        theme_acs()
-      
-      ggsave(filename = paste0("env_ipca_cor_sig_overlap_", group, "_page", i, ".jpg"), path = fig_dir, plot = g, 
-             width = 8, height = 6, dpi = 1000)
-      
-    }
-    
-  })
-
 
 
 ## Combine the summary variables with the interval variables
@@ -701,15 +719,106 @@ g_ipca_cor <- env_ipca_cor_set_overlap %>%
 env_ipca_combine <- ec_score_df_use %>%
   filter(PC == "PC1") %>%
   # bind_rows(env_interval_use) %>%
-  select(set, trait, ec_group, environment, score, variable, value)
+  select(set, trait, ec_group, environment, score, variable, variable_newname, value)
 
 ## Merge not based on set - we want the ECs that were determined significant using a subset of data
 ec_env_ipca_sig <- select(env_ipca_cor_sig, set, trait, ec_group, variable) %>%
-  left_join(., distinct(env_ipca_combine, trait, ec_group, environment, variable, value), by = c("trait", "ec_group", "variable"))
+  left_join(., distinct(env_ipca_combine, trait, ec_group, environment, variable, value), by = c("trait", "ec_group", "variable")) %>%
+  left_join(ec_names)
 
 
 
 
+## Combine mean-correlated and ipca-correlated variables and output a table
+## Also note which ones were used in MR
+ec_top5_cor_towrite <- bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  select(set, trait, top, variable_newname, test, cor) %>%
+  # mutate(annotation = test) %>%
+  mutate(annotation = paste0(variable_newname, " (", round(cor, 2), ")")) %>%
+  select(set, trait, top, test, annotation) %>%
+  spread(test, annotation) %>%
+  rename(Set = set, Trait = trait, Rank = top, IPCA = env_ipca, Mean = env_mean)
+
+write_csv(x = ec_top5_cor, path = file.path(fig_dir, "top5_correlated_ecs.csv"))
+
+
+## Kable extra
+library(kableExtra)
+
+ec_top5_cor_towrite <- bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  select(set, trait, top, variable_newname, test, cor) %>%
+  # mutate(annotation = test) %>%
+  mutate(annotation = paste0(variable_newname, " (", round(cor, 2), ")")) %>%
+  select(set, trait, top, test, annotation) %>%
+  unite("test", trait, test, sep = ":") %>%
+  spread(test, annotation) %>%
+  rename_all(~str_replace_all(string = ., pattern = "([A-Za-z]*:)([a-z_]*)", "\\2"))
+
+kable(ec_top5_cor_towrite, escape = TRUE, format = "html") %>%
+  kable_styling("hover", full_width = F) %>%
+  add_header_above(c(" " = 2, "Grain Yield" = 2, "Heading Date" = 2, "Plant Height" = 2)) %>%
+  column_spec(column = 3:8, width = "10em") %>%
+  # Save
+  save_kable(file = file.path(fig_dir, "top5_correlated_ecs.html"), self_contained = T)
+
+
+
+
+## Group by trait and find number of common ECs between env_mean and IPCA
+bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  select(set, trait, test, variable) %>%
+  group_by(set, trait, variable) %>%
+  filter(n() > 1)
+
+# set       trait      test     variable      
+# 1 complete  GrainYield env_mean max_PPT       
+# 2 realistic GrainYield env_mean max_PPT       
+# 3 realistic GrainYield env_mean interval_2_PPT
+# 4 complete  GrainYield env_ipca max_PPT       
+# 5 realistic GrainYield env_ipca interval_2_PPT
+# 6 realistic GrainYield env_ipca max_PPT
+
+## No overlap for HD or PH
+
+## What about overall?
+
+## Group by trait and find number of common ECs between env_mean and IPCA
+bind_rows(mutate(env_mean_cor_sig, test = "mean"), mutate(env_ipca_cor_sig, test = "ipca")) %>%
+  filter(ec_group == "multi_year") %>%
+  select(trait, test, variable) %>%
+  group_by(trait, variable) %>%
+  filter(n() > 1)
+
+
+## Common significant ECs
+bind_rows(mutate(env_mean_cor_sig, test = "mean"), mutate(env_ipca_cor_sig, test = "ipca"))  %>% 
+  filter(ec_group == "multi_year") %>% 
+  group_by(variable) %>% 
+  summarize(n = n(), n_trait = n_distinct(trait), n_test = n_distinct(test)) %>%
+  arrange(desc(n_trait), desc(n_test))
+
+bind_rows(mutate(env_mean_cor_sig, test = "mean"), mutate(env_ipca_cor_sig, test = "ipca"))  %>% 
+  filter(ec_group == "multi_year") %>% 
+  group_by(variable, trait) %>% 
+  summarize(n = n(), n_trait = n_distinct(trait), n_test = n_distinct(test)) %>%
+  arrange(desc(n_test))
+
+
+## What is the most frequently seen variable?
+bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  select(set, trait, test, variable) %>%
+  group_by(variable) %>%
+  summarize(n = n(), nTrait = n_distinct(trait)) %>%
+  arrange(desc(nTrait))
+
+bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  filter(variable %in% c("min_PPT", "max_PPT")) %>%
+  arrange(variable)
 
 
 
@@ -833,16 +942,17 @@ ec_all <- env_combine %>%
 env_variable_combine <- bind_rows(
   mutate(ec_env_mean_sig, group = "EC_Mean"),
   mutate(ec_env_ipca_sig, group = "EC_IPCA"),
-  ec_all %>% select(-h) %>% mutate(group = "EC_All")) %>%
-    ## Remove one-year covariates with the realistic scenario
-    filter(!(set == "realistic" & ec_group == "one_year"))
+  ec_all %>% select(-h) %>% mutate(group = "EC_All")
+  ) %>%
+  ## Remove one-year covariates with the realistic scenario
+  filter(!(set == "realistic" & ec_group == "one_year"))
 
 
 ## Compare the overlap of variables that are significantly correlated with the mean
 ## and correlated with the IPCA score
 env_variable_combine %>% 
   filter(group != "EC_All") %>% 
-  distinct(set, ec_group, trait, group, variable) %>% 
+  distinct(set, ec_group, trait, group, variable_newname) %>% 
   split(.$group) %>%
   map(~select(., -group)) %>%
   reduce(dplyr::intersect)
@@ -856,8 +966,8 @@ ec_mats <- env_variable_combine %>%
   do(mat = {
     df <- .
     df %>% 
-      select(environment, variable, value) %>% 
-      spread(variable, value) %>% 
+      select(environment, variable_newname, value) %>% 
+      spread(variable_newname, value) %>% 
       as.data.frame() %>% 
       column_to_rownames("environment") %>% 
       as.matrix()
