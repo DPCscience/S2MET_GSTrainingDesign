@@ -28,29 +28,6 @@ load(file.path(result_dir, "environmental_genetic_correlations.RData"))
 load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 
-## Colors for distance method
-dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" = "Location Phenotypic Distance",  "great_circle_dist" = "Great Circle Distance", 
-                         "OYEC_All" = "One Year All ECs", "OYEC_Mean" = "One Year Mean Cor EC", "OYEC_IPCA" = "One Year IPCA Cor EC", 
-                         "MYEC_All" = "Multi Year All ECs", "MYEC_Mean" = "Multi Year Mean Cor EC", "MYEC_IPCA" = "Multi Year IPCA Cor EC",
-                         "AMMI" = "AMMI", "sample" = "Random")
-dist_method_abbr <- abbreviate(dist_method_replace)
-
-## Alternative abbreviations
-dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
-                             names(dist_method_replace))
-
-# colors <- umn_palette(3)
-# colors_use <- c(colors[2], "#FFDE7A", colors[c(1, 3, 8, 4, 9, 5, 10)], "#FFB71E", "grey75")
-
-colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
-colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")
-colors_use <- c(colors[c(1:3, 5:7)], colors2[2:4], colors[4], "grey75")
-dist_colors <- setNames(colors_use, dist_method_abbr)
-
-## Subset for use
-dist_method_abbr_use <- dist_method_abbr[c("pheno_dist", "pheno_loc_dist", "AMMI", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA")]
-dist_colors_use <- dist_colors[dist_method_abbr_use]
-
 
 
 
@@ -577,6 +554,7 @@ cluster_compare1 %>%
 heat_colors <- wesanderson::wes_palette("Zissou1")
 
 cluster_compare_hm_list <- cluster_compare1 %>% 
+  mutate(set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
   filter(!lower_triangle) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = model1, fill = prop_common)) + 
@@ -585,6 +563,7 @@ cluster_compare_hm_list <- cluster_compare1 %>%
         scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], midpoint = 0.5, limits = c(0, 1),
                              name = "Proportion of overlap") +
         facet_wrap(~ trait, labeller = labeller(trait = str_add_space)) +
+        labs(subtitle = unique(.$set)) +
         theme_presentation2(base_size = 10) +
         theme(axis.title = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") )
 
@@ -592,7 +571,7 @@ g_cluster_compare <- plot_grid(plotlist = map(cluster_compare_hm_list, ~. + them
                                labels = LETTERS[seq_along(cluster_compare_hm_list)], align = "hv")
 g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
 
-ggsave(filename = "cluster_compare_heatmap.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6, height = 6, dpi = 1000)
+ggsave(filename = "cluster_compare_heatmap.jpg", plot = g_cluster_compare1, path = fig_dir, width = 5, height = 5.5, dpi = 1000)
 
 
 
@@ -693,33 +672,45 @@ single_cluster_cases <- cluster_df_tomodel %>%
 ## Extract heritability
 cluster_herit <- cluster_varcomp %>%
   mutate_at(vars(undivided, subdivided), ~map_dbl(., "heritability")) %>%
+  rename(clustered = subdivided, unclustered = undivided) %>%
   mutate(model = ifelse(model  == "pheno_location_dist", "pheno_loc_dist", model),
          model = str_replace_all(model, dist_method_abbr),
          model = factor(model, levels = dist_method_abbr_use),
-         set = str_to_title(set)) %>%
+         set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
   filter(model %in% dist_method_abbr_use)
 
 ## Calculate ratio
 cluster_herit %>%
-  mutate(effectiveness = subdivided / undivided) %>%
-  select(-undivided, -subdivided) %>%
+  mutate(effectiveness = clustered / unclustered) %>%
+  select(-unclustered, -clustered) %>%
   spread(model, effectiveness)
+
+# set       trait        AMMI    PD LocPD   GCD `All-EC` `Mean-EC` `IPCA-EC`
+# 1 Complete  GrainYield   4.93  1.11 0.595 0.534    0.482     0.558     0.764
+# 2 Complete  HeadingDate  1.14  1.01 0.952 0.874    0.861     0.855     0.930
+# 3 Complete  PlantHeight  1.05  1.11 0.716 0.613    0.564     0.657    NA    
+# 4 Realistic GrainYield   2.15 NA    0.742 0.654    0.556     0.737     0.717
+# 5 Realistic HeadingDate NA    NA    0.983 0.928    0.927     0.933     0.943
+# 6 Realistic PlantHeight NA    NA    0.778 0.744    0.715    NA         0.938
   
 
 ## Plot heritability
 g_cluster_herit <- cluster_herit %>%
+  filter(!(model == "AMMI" & set == "Time-forward")) %>%
   gather(group, heritability, -set, -model, -trait) %>%
+  mutate(group = ifelse(group == "unclustered", paste0("H1: ", group), paste0("H2: ", group))) %>%
   ggplot(aes(x = model, y = heritability, color = model, shape = group)) +
-  geom_point(position = position_dodge2(0.5), size = 2.5) +
+  geom_point(position = position_dodge2(0.5), size = 1.5) +
   scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
-  scale_shape_discrete(name = "Heritability type", labels = str_to_title, guide = guide_legend(nrow = 1)) +
-  facet_grid(trait ~ set, scales = "free", space = "free_x") +
-  xlab("Distance method") +
+  scale_shape_discrete(name = NULL, labels = str_to_title, guide = guide_legend(nrow = 2)) +
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", labeller = labeller(trait = str_add_space), switch = "y") +
+  xlab("Distance measure") +
   scale_y_continuous(breaks = pretty, name = "Heritability") +
-  theme_presentation2() +
-  theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
+  theme_presentation2(base_size = 10) +
+  theme(legend.position = c(0.22, 0.07), legend.margin = margin(), legend.key.height = unit(0.5, "line"), 
+        axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside")
 
-ggsave(filename = "cluster_heritability.jpg", plot = g_cluster_herit, path = fig_dir, width = 7, height = 7, dpi = 1000)
+ggsave(filename = "cluster_heritability.jpg", plot = g_cluster_herit, path = fig_dir, width = 3.5, height = 5, dpi = 1000)
 
 
 

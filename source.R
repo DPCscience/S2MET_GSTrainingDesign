@@ -209,7 +209,7 @@ colors <- umn_palette(3)
 colors2 <- umn_palette(2)
 colors3 <- umn_palette(4)
 
-colors_use <- c("#FFB71E", "#FFDE7A", colors[1], colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
+colors_use <- c("#FFB71E", "#FFDE7A", "#F21A00", colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
 
 # colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
 # colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")

@@ -27,7 +27,8 @@ load(file.path(result_dir, "distance_method_results.RData"))
 # Load results
 # load(file.path(result_dir, "all_predictions.RData"))
 load(file.path(result_dir, "all_predictions_00.RData"))
-load(file.path(result_dir, "distance_rank_predictions.RData"))
+load(file.path(result_dir, "distance_rank_predictions_pov.RData"))
+load(file.path(result_dir, "distance_rank_predictions_cv.RData"))
 
 
 
@@ -616,23 +617,23 @@ g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(!str_detect(scheme, "POCV")) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-        geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "black") +
-        geom_errorbar(width = 0.5) +
-        geom_point(aes(color = model)) +
+        geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
+        geom_errorbar(width = 0.5, lwd = 0.5) +
+        geom_point(aes(color = model), size = 1.25) +
         scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
-        scale_linetype_manual(values = 2, name = NULL) +
+        scale_linetype_manual(values = 1, name = NULL) +
         xlab("Distance measure") +
         facet_grid(trait ~ scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space), switch = "y") +
         labs(subtitle = unique(.$set))  +
-        theme_presentation2(base_size = 10) +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom", strip.placement = "outside") )
+        theme_presentation2(base_size = 8) +
+        theme(axis.text.x = element_text(angle = 50, hjust = 1), legend.position = "bottom", strip.placement = "outside") )
 
 g_cv_pov_cluster2 <- plot_grid(plotlist = map(g_cv_pov_cluster_list, ~. + theme(legend.position = "none")),
-                               nrow = 2, labels = LETTERS[seq_along(g_cv_pov_cluster_list)], align = "hv")
+                               nrow = 1, labels = LETTERS[seq_along(g_cv_pov_cluster_list)], align = "hv")
 g_cv_pov_cluster21 <- plot_grid(g_cv_pov_cluster2, get_legend(g_cv_pov_cluster_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
-ggsave(filename = "all_cv_pov_cluster_predictions_paper.jpg", plot = g_cv_pov_cluster21, path = fig_dir, width = 4.5, height = 8, dpi = 1000)
+ggsave(filename = "all_cv_pov_cluster_predictions_paper.jpg", plot = g_cv_pov_cluster21, path = fig_dir, width = 7, height = 3.5, dpi = 1000)
 
 
 
@@ -789,7 +790,7 @@ random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
   mutate(scheme = factor(toupper(scheme), levels = cv_replace),
-         model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set))
+         model = factor(model, levels = dist_method_abbr_use))
 
 
 g_random_cv_pov_cluster <- random_cluster_predictions_analysis1 %>%
@@ -812,25 +813,40 @@ ggsave(filename = "random_cv_pov_cluster_predictions.jpg", plot = g_random_cv_po
 ## Publication version is just CV and POV
 g_random_cv_pov_cluster_list <- random_cluster_predictions_analysis1 %>%
   mutate(scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
-         scheme = factor(scheme, levels = cv_replace)) %>%
+         scheme = factor(scheme, levels = cv_replace),
+         set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
   filter(!str_detect(scheme, "POCV")) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-        geom_hline(yintercept = 0) +
-        geom_errorbar(width = 0.5) +
-        geom_point(aes(color = model)) +
+        geom_hline(yintercept = 0, color = "grey", lty = 5) +
+        geom_errorbar(width = 0.5, lwd = 0.5) +
+        geom_point(aes(color = model), size = 1.25) +
         scale_y_continuous(breaks = pretty, name = "Prediction accuracy advantage") +
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
-        scale_linetype_manual(values = 2, name = NULL) +
-        xlab("Distance method") +
-        facet_grid(trait ~ scheme, scales = "free", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
-        theme_presentation2(base_size = 10) +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside") )
+        xlab("Distance measure") +
+        labs(subtitle = unique(.$set)) +
+        facet_grid(trait ~ scheme, scales = "free", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
+        theme_presentation2(base_size = 8) +
+        theme(axis.text.x = element_text(angle = 50, hjust = 1), strip.placement = "outside") )
 
-g_random_cv_pov_cluster1 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, nrow = 2, labels = LETTERS[seq_along(g_random_cv_pov_cluster_list)])
+g_random_cv_pov_cluster1 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, nrow = 1, labels = LETTERS[seq_along(g_random_cv_pov_cluster_list)], 
+                                      align = "hv")
 
-ggsave(filename = "random_cv_pov_cluster_predictions_paper.jpg", plot = g_random_cv_pov_cluster1, path = fig_dir, width = 5, height = 8, dpi = 1000)
+ggsave(filename = "random_cv_pov_cluster_predictions_paper.jpg", plot = g_random_cv_pov_cluster1, path = fig_dir, width = 7, height = 3.5, dpi = 1000)
 
+
+
+
+
+
+
+
+## Combine figure of cluster accuracy with random
+g_cv_pov_cluster22 <- plot_grid(get_legend(g_cv_pov_cluster_list[[1]]), g_cv_pov_cluster2, ncol = 1, rel_heights = c(0.05, 1))
+g_random_cv_pov_cluster2 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, nrow = 1, labels = LETTERS[seq_along(g_random_cv_pov_cluster_list)+2], align = "hv")
+g_cv_pov_and_random <- plot_grid(g_cv_pov_cluster22, g_random_cv_pov_cluster2, ncol = 1)
+
+ggsave(filename = "all_cv_pov_and_random_cluster_predictions_paper.jpg", plot = g_cv_pov_and_random, path = fig_dir, width = 7, height = 6, dpi = 1000)
 
 
 
