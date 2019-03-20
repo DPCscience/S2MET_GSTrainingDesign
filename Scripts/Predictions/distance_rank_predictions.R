@@ -297,13 +297,13 @@ cv00_environment_rank_train_test <- environment_rank_df %>%
         mutate_at(., vars(train, test), funs(map(., as.data.frame))) %>%
         crossing(., tibble(train_env = accumulate(row$rank[[1]], c)))
       
-      # Then create training sets
-      cv_rand %>%
-        mutate(train = map2(train, train_env, ~filter(pheno_use, environment %in% .y, line_name %in% .x[[1]])),
-               # train1 = map(train, ~geno_means(data = .)),
-               train = map(train, ~group_by(., line_name) %>% summarize(value = mean(value)) %>% ungroup() %>% mutate(environment = "blue", std_error = 0)),
-               test = map(test, ~filter(pheno_use, environment %in% row$val_environment, line_name %in% c(.[[1]], vp_geno))),
-               nTrainEnv = map_dbl(train_env, length))
+      # # Then create training sets
+      # cv_rand %>%
+      #   mutate(train = map2(train, train_env, ~filter(pheno_use, environment %in% .y, line_name %in% .x[[1]])),
+      #          # train1 = map(train, ~geno_means(data = .)),
+      #          train = map(train, ~group_by(., line_name) %>% summarize(value = mean(value)) %>% ungroup() %>% mutate(environment = "blue", std_error = 0)),
+      #          test = map(test, ~filter(pheno_use, environment %in% row$val_environment, line_name %in% c(.[[1]], vp_geno))),
+      #          nTrainEnv = map_dbl(train_env, length))
  
       
       # Then create training sets
@@ -471,10 +471,8 @@ cv00_environment_rank_random_predictions <- cv00_environment_rank_random_df %>%
       
       df <- unnest(core_df[i,])
       
-      train_data <- map(df$train, ~geno_means(data = .))
-      
       ## Run predictions
-      test_val_pred <- map2(.x = train_data, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]] )
+      test_val_pred <- map2(.x = df$train, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]] )
       
       ## Calculate accuracy
       df1 <- df %>% 
