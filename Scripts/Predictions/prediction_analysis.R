@@ -369,16 +369,28 @@ g_pov00_rank_pred <- pov00_predictions_analysis_toplot %>%
   ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
   geom_hline(aes(yintercept = accuracy, lty = "Accuracy\nusing\nall data")) + 
   geom_line(aes(size = size)) +
-  facet_grid(trait ~ set, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free") +
+  facet_grid(trait ~ set, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
   scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure", guide = guide_legend(nrow = 3)) +
   scale_linetype_manual(values = 2, name = NULL) +
   scale_size_manual(values = c(0.5, 1), guide = FALSE) +
   scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
   scale_x_continuous(breaks = pretty, name = "Number of training set environments") +
   theme_presentation2(base_size = 10) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom", strip.placement = "outside")
 
 ggsave(filename = "cumulative_env_pred_pov00.jpg", plot = g_pov00_rank_pred, path = fig_dir, width = 4.5, height = 6, dpi = 1000)
+
+
+
+
+## What is the best/worst accuracy achievable for each model?
+pov00_predictions_analysis_toplot %>%
+  mutate(advantage = fit - accuracy, perc_advantage = advantage / accuracy) %>%
+  group_by(set, trait, model) %>%
+  mutate_at(vars(advantage), funs(min, max)) %>%
+  filter(advantage == min | advantage == max) %>%
+  ungroup() %>%
+  arrange(set, trait, model)
 
 
 
@@ -510,40 +522,6 @@ for (i in seq(nrow(separate_cv_pov_cluster_predictions_analysis))) {
   
   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
   
-  
-  
-  # ## If model_rep is FALSE, just take the mean
-  # if (!separate_cv_pov_cluster_predictions_analysis$model_rep[i]) {
-  #   
-  #   # ## Model
-  #   # fit <- lmer(accuracy ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster) + (1|nTrainEnv:cluster:model), data = df)
-  #   # 
-  #   # effects_keep <- as.data.frame(Effect("model", fit))
-  #   
-  #   
-  #   ## Model
-  #   fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), data = df)
-  #   
-  #   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
-  #   
-  #   
-  # } else {
-  #   
-  #   # ## Model
-  #   # fit <- lmer(accuracy ~ 1 + model + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), 
-  #   #             data = df)
-  #   # 
-  #   # effects_keep <- as.data.frame(Effect(c("model"), fit))
-  #   
-  #   ## Model
-  #   fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), 
-  #               data = df)
-  #   
-  #   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
-  #   
-  # 
-  # }
-  
   fit_summary <- data_frame(
     fitted = list(fit),
     scheme_effects = list(effects_keep),
@@ -576,8 +554,9 @@ separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predict
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
   mutate(scheme = factor(toupper(scheme), levels = cv_replace),
-         model = factor(model, levels = dist_method_abbr_use), set = str_to_title(set)) %>%
-  left_join(., select(mutate(separate_cv_pov_predictions_analysis1, set = str_to_title(set)), -lower, -upper, -se))
+         model = factor(model, levels = dist_method_abbr_use),
+         set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
+  left_join(., select(separate_cv_pov_predictions_analysis1, -lower, -upper, -se))
            
 
 g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
@@ -589,44 +568,45 @@ g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
   scale_color_manual(values = dist_colors_use, guide = FALSE) +
   scale_linetype_manual(values = 2, name = NULL) +
   xlab("Distance method") +
-  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space),
+             switch = "y") +
   theme_presentation2(base_size = 10) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside")
 
 ggsave(filename = "all_cv_pov_cluster_predictions.jpg", plot = g_cv_pov_cluster, path = fig_dir, width = 10, height = 7, dpi = 1000)
 
 
 
-### Add predictions with random environmental subsets
-separate_cv_pov_random_predictions_analysis2 <- separate_cv_pov_random_predictions_analysis1 %>%
-  select(set, trait, scheme, nTrainEnv, accuracy) %>% 
-  mutate(nTrainEnv = paste0("accuracy", nTrainEnv),
-         set = str_to_title(set)) %>%
-  spread(nTrainEnv, accuracy)
-
-
-dist_colors_random <- wesanderson::wes_palette(name = "Darjeeling1", 3)
-dist_colors_use_random <- c(dist_colors_use, "2 env" = dist_colors_random[1], "5 env" = dist_colors_random[2], "8 env" = dist_colors_random[3])
-
-g_cv_pov_cluster1 <- separate_cv_pov_cluster_predictions_analysis1 %>%
-  left_join(., separate_cv_pov_random_predictions_analysis2) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-  geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
-  geom_hline(aes(yintercept = accuracy2, lty = "2 env"), color = "black") +
-  geom_hline(aes(yintercept = accuracy5, lty = "5 env"), color = "black") +
-  geom_hline(aes(yintercept = accuracy8, lty = "8 env"), color = "black") +
-  geom_errorbar(width = 0.5) +
-  geom_point(aes(color = model)) +
-  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
-  scale_color_manual(values = dist_colors_use_random, guide = FALSE) +
-  scale_linetype_manual(values = seq(2, 5), name = NULL) +
-  xlab("Distance method") +
-  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
-  theme_presentation2(base_size = 10) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave(filename = "all_cv_pov_cluster_predictions_with_random.jpg", plot = g_cv_pov_cluster1, path = fig_dir, width = 10, height = 7, dpi = 1000)
-
+# ### Add predictions with random environmental subsets
+# separate_cv_pov_random_predictions_analysis2 <- separate_cv_pov_random_predictions_analysis1 %>%
+#   select(set, trait, scheme, nTrainEnv, accuracy) %>% 
+#   mutate(nTrainEnv = paste0("accuracy", nTrainEnv),
+#          set = str_to_title(set)) %>%
+#   spread(nTrainEnv, accuracy)
+# 
+# 
+# dist_colors_random <- wesanderson::wes_palette(name = "Darjeeling1", 3)
+# dist_colors_use_random <- c(dist_colors_use, "2 env" = dist_colors_random[1], "5 env" = dist_colors_random[2], "8 env" = dist_colors_random[3])
+# 
+# g_cv_pov_cluster1 <- separate_cv_pov_cluster_predictions_analysis1 %>%
+#   left_join(., separate_cv_pov_random_predictions_analysis2) %>%
+#   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+#   geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
+#   geom_hline(aes(yintercept = accuracy2, lty = "2 env"), color = "black") +
+#   geom_hline(aes(yintercept = accuracy5, lty = "5 env"), color = "black") +
+#   geom_hline(aes(yintercept = accuracy8, lty = "8 env"), color = "black") +
+#   geom_errorbar(width = 0.5) +
+#   geom_point(aes(color = model)) +
+#   scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+#   scale_color_manual(values = dist_colors_use_random, guide = FALSE) +
+#   scale_linetype_manual(values = seq(2, 5), name = NULL) +
+#   xlab("Distance method") +
+#   facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+#   theme_presentation2(base_size = 10) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# ggsave(filename = "all_cv_pov_cluster_predictions_with_random.jpg", plot = g_cv_pov_cluster1, path = fig_dir, width = 10, height = 7, dpi = 1000)
+# 
 
 
 ## Paper version
@@ -642,15 +622,17 @@ g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
         scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
         scale_linetype_manual(values = 2, name = NULL) +
-        xlab("Distance method") +
-        facet_grid(trait ~ scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+        xlab("Distance measure") +
+        facet_grid(trait ~ scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space), switch = "y") +
+        labs(subtitle = unique(.$set))  +
         theme_presentation2(base_size = 10) +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") )
+        theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom", strip.placement = "outside") )
 
-g_cv_pov_cluster2 <- plot_grid(g_cv_pov_cluster_list[[1]] + theme(legend.position = "none"), g_cv_pov_cluster_list[[2]], 
-                               nrow = 2, labels = LETTERS[seq_along(g_cv_pov_cluster_list)], rel_heights = c(0.9, 1))
+g_cv_pov_cluster2 <- plot_grid(plotlist = map(g_cv_pov_cluster_list, ~. + theme(legend.position = "none")),
+                               nrow = 2, labels = LETTERS[seq_along(g_cv_pov_cluster_list)], align = "hv")
+g_cv_pov_cluster21 <- plot_grid(g_cv_pov_cluster2, get_legend(g_cv_pov_cluster_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
-ggsave(filename = "all_cv_pov_cluster_predictions_paper.jpg", plot = g_cv_pov_cluster2, path = fig_dir, width = 5, height = 8, dpi = 1000)
+ggsave(filename = "all_cv_pov_cluster_predictions_paper.jpg", plot = g_cv_pov_cluster21, path = fig_dir, width = 4.5, height = 8, dpi = 1000)
 
 
 
