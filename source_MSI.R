@@ -8,7 +8,7 @@ if (version$minor == "5.2") .libPaths(gsub(pattern = "lab_library", replacement 
 
 # Load packages
 packages <- c("dplyr", "tidyr", "tibble", "stringr", "readxl", "readr", "parallel",
-              "rrBLUP", "purrr", "boot", "pbr", "lme4", "modelr")
+              "rrBLUP", "purrr", "boot", "pbr", "lme4", "modelr", "neyhart")
 
 # ## Determine the package directory by assessing the version of R
 # vers <- paste0(strsplit(x = paste0(version$major, ".", version$minor), split = "\\.")[[1]][1:2], collapse = ".")
