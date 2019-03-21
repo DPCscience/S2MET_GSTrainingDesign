@@ -36,7 +36,7 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
 
 
 # Number of CV iterations
-nCV <- 25
+nCV <- 10
 # Number of random environment rankings
 n_random <- nCV
 # CV folds
