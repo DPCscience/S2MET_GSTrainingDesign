@@ -38,7 +38,7 @@ S2_MET_BLUEs_tomodel <- S2_MET_BLUEs %>%
 
 
 # Number of CV iterations
-nCV <- 10
+nCV <- 25
 # Number of random environment rankings
 n_random <- nCV
 # CV folds
@@ -456,6 +456,7 @@ cv00_environment_rank_random_predictions <- environment_rank_df %>%
       
       ## Filter phenotypes for that trait
       pheno_use <- subset(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
       
       ## Create random orders of environments
       ## Then create training sets
