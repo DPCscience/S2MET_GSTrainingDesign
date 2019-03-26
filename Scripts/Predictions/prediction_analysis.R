@@ -14,12 +14,11 @@ source(file.path(repo_dir, "source.R"))
 # # Load some packages
 library(lubridate)
 library(effects) # For ls means / marginal means
-library(ggforce)
-library(ggridges)
 library(gridExtra)
 library(broom)
 library(car)
 library(cowplot)
+library(grid)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
@@ -359,27 +358,45 @@ pov00_predictions_analysis <- unnest(pov00_predictions_analysis, out)
 pov00_predictions_analysis_toplot <- pov00_predictions_analysis %>%
   unnest(model_nEnv_effects) %>%
   mutate(set = factor(str_replace_all(set, set_replace), levels = set_replace),
-         model = factor(model, levels = dist_method_abbr_use),
+         model = factor(model, levels = rev(dist_method_abbr_use)),
          nTrainEnv = parse_number(nTrainEnv),
          scheme = toupper(scheme),
-         size = model == "Random") %>%
-  ## Add results from all environment predictions
-  left_join(., select(separate_cv_pov_predictions_analysis1, set, trait, scheme, accuracy))
+         size = model == "Random")
+
+## Subset the final training environment accuracy
+pov00_rank_pred_all_data <- pov00_predictions_analysis_toplot %>%
+  group_by(set, trait, scheme) %>% 
+  filter(model == model[1], nTrainEnv == max(nTrainEnv)) %>%
+  select(set:scheme, accuracy = fit)
+
+
+pov00_predictions_analysis_toplot1 <- left_join(pov00_predictions_analysis_toplot, pov00_rank_pred_all_data)
+
+
   
 g_pov00_rank_pred <- pov00_predictions_analysis_toplot %>%
   ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
-  geom_hline(aes(yintercept = accuracy, lty = "Accuracy\nusing\nall data")) + 
+  geom_hline(data = pov00_rank_pred_all_data, aes(yintercept = accuracy, lty = "Accuracy using all data")) + 
   geom_line(aes(size = size)) +
   facet_grid(trait ~ set, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
-  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure", guide = guide_legend(nrow = 3)) +
-  scale_linetype_manual(values = 2, name = NULL) +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
+                     guide = guide_legend(nrow = 3, keyheight = unit(0.5, "line"), reverse = TRUE)) +
+  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
   scale_size_manual(values = c(0.5, 1), guide = FALSE) +
   scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
   scale_x_continuous(breaks = pretty, name = "Number of training set environments") +
-  theme_presentation2(base_size = 10) +
+  theme_presentation2(base_size = 8) +
   theme(legend.position = "bottom", strip.placement = "outside")
 
-ggsave(filename = "cumulative_env_pred_pov00.jpg", plot = g_pov00_rank_pred, path = fig_dir, width = 4.5, height = 6, dpi = 1000)
+g_pov00_rank_pred1 <- g_pov00_rank_pred +
+  scale_linetype_manual(values = 2, name = NULL, guide = guide_legend()) +
+  scale_color_manual(values = dist_colors_use, guide = FALSE) +
+  theme(legend.position = c(0.38, 0.05))
+
+g_pov00_rank_pred2 <- plot_grid(g_pov00_rank_pred1, get_legend(g_pov00_rank_pred), ncol = 1, rel_heights = c(1, 0.07))
+
+
+ggsave(filename = "cumulative_env_pred_pov00.jpg", plot = g_pov00_rank_pred2, path = fig_dir, width = 3.5, height = 6, dpi = 1000)
 
 
 
@@ -407,7 +424,8 @@ cv00_predictions_out <- bind_rows(cv00_environment_rank_predictions, cv00_enviro
   left_join(., env_herit) %>%
   mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
          model = str_replace_all(model, dist_method_abbr),
-         model = factor(model, dist_method_abbr)) %>%
+         model = factor(model, dist_method_abbr),
+         scheme_number = str_extract(scheme, "[0-9]{1,2}")) %>%
   mutate_at(vars(scheme, val_environment, nTrainEnv), as.factor) %>%
   filter(model %in% dist_method_abbr_use)
 
@@ -416,7 +434,7 @@ cv00_predictions_out <- bind_rows(cv00_environment_rank_predictions, cv00_enviro
 
 # Fit a model per trait
 cv00_predictions_analysis <- cv00_predictions_out %>%
-  group_by(set, trait) %>%
+  group_by(set, trait, scheme_number) %>%
   nest() %>%
   mutate(out = list(NULL))
 
@@ -426,12 +444,14 @@ for (i in seq(nrow(cv00_predictions_analysis))) {
   df <- cv00_predictions_analysis$data[[i]] %>% # mutate(nTrainEnv = parse_number(nTrainEnv)) %>%
     droplevels()
   
-  fit <- lmer(formula = accuracy ~ 1 + model + nTrainEnv + model:nTrainEnv + (1|val_environment) + (1|val_environment:model) + 
-                (1|val_environment:nTrainEnv) + (1|val_environment:nTrainEnv:model), data = df)
+  if (any(summarize_at(df, vars(model, nTrainEnv), n_distinct) <= 1)) next
+
+  fit <- lmer(formula = accuracy ~ 1 + scheme + model + nTrainEnv + scheme:model + nTrainEnv:model + scheme:model:nTrainEnv + 
+                (1|val_environment) + (1|val_environment:model), data = df)
   
   fit_summary <- data_frame(
     fitted = list(fit),
-    model_nEnv_effects = list(Effect(focal.predictors = c("model", "nTrainEnv"), fit))) %>% 
+    model_nEnv_effects = list(Effect(focal.predictors = c("model", "nTrainEnv", "scheme"), fit))) %>% 
     mutate_at(vars(contains("effects")), ~map(., ~as.data.frame(.)))
   
   # Add the summary to the DF
@@ -439,22 +459,98 @@ for (i in seq(nrow(cv00_predictions_analysis))) {
   
 }
 
-cv00_predictions_analysis <- unnest(cv00_predictions_analysis, out)
+cv00_predictions_analysis <- cv00_predictions_analysis %>%
+  filter(!map_lgl(out, is.null)) %>%
+  unnest(out)
 
 
 
+cv00_predictions_analysis_toplot <- cv00_predictions_analysis %>%
+  unnest(model_nEnv_effects) %>%
+  filter(scheme == "cv00") %>%
+  mutate(set = factor(str_replace_all(set, set_replace), levels = set_replace),
+         model = factor(model, levels = rev(dist_method_abbr_use)),
+         nTrainEnv = parse_number(nTrainEnv),
+         scheme = toupper(scheme),
+         size = model == "Random")
+
+## Subset the final training environment accuracy
+cv00_rank_pred_all_data <- cv00_predictions_analysis_toplot %>%
+  group_by(set, trait, scheme) %>% 
+  filter(model == model[1], nTrainEnv == max(nTrainEnv)) %>%
+  ungroup() %>%
+  select(set, trait, scheme, accuracy = fit)
+
+
+cv00_predictions_analysis_toplot1 <- left_join(cv00_predictions_analysis_toplot, cv00_rank_pred_all_data)
 
 
 
+g_cv00_rank_pred <- cv00_predictions_analysis_toplot1 %>%
+  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data")) + 
+  geom_line(aes(size = size)) +
+  facet_grid(trait ~ set + scheme, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
+                     guide = guide_legend(nrow = 3, keyheight = unit(0.5, "line"), reverse = TRUE)) +
+  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
+  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_x_continuous(breaks = pretty, name = "Number of training set environments") +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom", strip.placement = "outside")
 
 
 
+## Combine CV and POV results
+environment_rank_predictions_analysis_toplot <- bind_rows(cv00_predictions_analysis_toplot1, pov00_predictions_analysis_toplot1) %>%
+  # Create limits
+  group_by(trait) %>%
+  mutate_at(vars(fit), funs(min, max)) %>%
+  ungroup()
+  
+
+g_rank_pred <- environment_rank_predictions_analysis_toplot %>%
+  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data")) + 
+  geom_line(aes(size = size)) +
+  facet_grid(trait ~ set + scheme, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
+                     guide = guide_legend(nrow = 3, keyheight = unit(0.5, "line"), reverse = TRUE)) +
+  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
+  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_x_continuous(breaks = pretty, name = "Number of training set environments") +
+  theme_presentation2(base_size = 10) +
+  theme(legend.position = "bottom", strip.placement = "outside")
+
+## Save
+ggsave(filename = "cumulative_env_pred.jpg", plot = g_rank_pred, path = fig_dir, width = 7, height = 7, dpi = 1000)
 
 
+## Add viewport of heading data/cv00/leave-one-out
+g_rank_pred_vp1 <- environment_rank_predictions_analysis_toplot %>%
+  filter(trait == "HeadingDate", set == "Leave-one-out", scheme == "CV00") %>%
+  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data")) + 
+  geom_line(aes(size = size)) +
+  geom_text(aes(x = Inf, y = -Inf, label = "A"), hjust = 2.5, vjust = -1.5, color = "black") +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure", guide = FALSE) +
+  scale_linetype_manual(values = 2, name = NULL, guide = FALSE) +
+  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+  scale_y_continuous(breaks = pretty, name = NULL) +
+  scale_x_continuous(breaks = pretty, name = NULL, labels = NULL) +
+  theme_presentation2(base_size = 10) +
+  theme(panel.border = element_rect(color = "black"))
 
 
+vp1 <- viewport(x = 0.27, y = 0.52, width = 0.33, height = 0.2)
 
 
+jpeg(filename = file.path(fig_dir, "cumulative_env_pred1.jpg"), width = 7, height = 6, units = "in", res = 1000)
+print(g_rank_pred)
+print(g_rank_pred_vp1, vp = vp1)
+dev.off()
 
 
 
