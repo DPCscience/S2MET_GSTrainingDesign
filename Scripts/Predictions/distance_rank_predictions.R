@@ -69,223 +69,138 @@ environment_rank_df <- pred_env_dist_rank %>%
   select(-mat_set) %>%
   mutate(data = list(NULL))
 
-
-# 
-# # ## Create training and test sets
-# # pov00_environment_rank_train_test <- environment_rank_df %>%
-# #   group_by(set, trait, model, val_environment) %>%
-# #   do({
-# # 
-# #     row <- .
-# 
-# pov00_environment_rank_train_test <- environment_rank_df %>%
-#   assign_cores(n_core) %>%
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-# 
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-# 
-#       row <- core_df[i,]
-#       
-#     
-#       ## Filter phenotypes for that trait
-#       pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-#       
-#       ## Create the ordered list of training environments
-#       # Then create training sets
-#       # Calculate genotypic means (this will hopefully save space later)
-#       train <- accumulate(row$rank[[1]], c) %>%
-#         map(~filter(pheno_use, environment %in% ., line_name %in% tp_geno)) %>%
-#         map(~group_by(., line_name) %>% summarize(value = mean(value)) %>% ungroup() %>% mutate(environment = "blue", std_error = 0))
-#       
-#       # # Test sets
-#       # tibble(
-#       #   train = train,
-#       #   test = list(filter(pheno_use, environment == row$val_environment, line_name %in% vp_geno)),
-#       #   nTrainEnv = seq_along(train)
-#       # )
-#       
-#       # Test sets
-#       out[[i]] <- tibble(
-#         train = train,
-#         test = list(filter(pheno_use, environment == row$val_environment, line_name %in% vp_geno)),
-#         nTrainEnv = seq_along(train)
-#       )
-#       
-#     }
-#     core_df %>%
-#       mutate(data = out) %>%
-#       select(-core) %>%
-#       unnest(data)
-#     
-#     
-#   # }) %>% ungroup()
-#     
-#   }) %>% bind_rows()
-# 
-# 
-# 
-# 
-# # ## Run the predictions
-# # pov00_environment_rank_predictions <- pov00_environment_rank_train_test %>%
-# #   group_by(set, model, trait, val_environment, nTrainEnv) %>%
-# #   do(pov00 = {
-# # 
-# #       row <- .
-# 
-# ## Run the predictions
-# pov00_environment_rank_predictions <- pov00_environment_rank_train_test %>%
-#   assign_cores(n_core) %>%
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-# 
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-# 
-#       row <- core_df[i,]
-#       
-#       
-#       # ## Run the base predictions and return accuracy
-#       # gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)[[1]]
-#       
-#       ## Run the base predictions and return accuracy
-#       out[[i]] <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)[[1]]
-# 
-#     }
-# 
-#     core_df %>%
-#       mutate(pov00 = out) %>%
-#       select(-core) %>%
-#       unnest(pov00) %>%
-#       gather(scheme, accuracy, pov00)
-# 
-#     
-#   # }) %>% ungroup() %>%
-#   # unnest(pov00) %>%
-#   # gather(scheme, accuracy, pov00)
-#     
-#   }) %>% bind_rows()
-# 
-# 
-# 
-# # ## Random environment rankings
-# # pov00_environment_rank_random_df <- environment_rank_df %>%
-# #   filter(model == "great_circle_dist") %>%
-# #   group_by(set, trait, val_environment) %>%
-# #   do({
-# # 
-# #     row <- .
-# 
-# 
-# ## Random environment rankings
-# pov00_environment_rank_random_df <- environment_rank_df %>%
-#   filter(model == "great_circle_dist") %>%
-#   assign_cores(n_core) %>%
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-# 
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-# 
-#       row <- core_df[i,]
-#     
-#       ## Filter phenotypes for that trait
-#       pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-#       
-#       ## Create random orders of environments
-#       ## Then create training sets
-#       ## Then adjust
-#       train <- replicate(n = n_random, sample(row$rank[[1]]), simplify = FALSE) %>%
-#         map(~accumulate(., c) %>%
-#               map(~filter(pheno_use, environment %in% ., line_name %in% tp_geno)) %>%
-#               map(~group_by(., line_name) %>% summarize(value = mean(value)) %>% ungroup() %>% mutate(environment = "blue", std_error = 0)) )
-#       
-#       # train %>% 
-#       #   map(~tibble(train = ., nTrainEnv = seq_along(.))) %>% 
-#       #   map2_df(.x = ., .y = seq_along(.), ~mutate(.x, model = paste0("sample", .y))) %>%
-#       #   mutate(test = list(filter(pheno_use, environment == row$val_environment, line_name %in% vp_geno)))
-#       
-#       out[[i]] <- train %>%
-#         map(~tibble(train = ., nTrainEnv = seq_along(.))) %>% 
-#         map2_df(.x = ., .y = seq_along(.), ~mutate(.x, model = paste0("sample", .y))) %>%
-#         mutate(test = list(filter(pheno_use, environment == row$val_environment, line_name %in% vp_geno)))
-# 
-#     }
-# 
-#     core_df %>%
-#       mutate(data = out) %>%
-#       select(-core) %>%
-#       unnest(data) %>%
-#       select(-model) %>% # Rename model1 to avoid duplicates
-#       rename(model = model1)
-#     
-#   # }) %>% ungroup()
-#     
-#   }) %>% bind_rows()
-# 
-# 
-# 
-# 
-# # ## Run the predictions
-# # pov00_environment_rank_random_predictions <- pov00_environment_rank_random_df %>%
-# #   group_by(set, model, trait, val_environment, nTrainEnv) %>%
-# #   do(pov00 = {
-# # 
-# #     row <- .
-#     
-# ## Run the predictions
-# pov00_environment_rank_random_predictions <- pov00_environment_rank_random_df %>%
-#   assign_cores(n_core) %>%
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-# 
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-# 
-#       row <- core_df[i,]
-#     
-#     # gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)[[1]]
-#     
-#       ## Run the base predictions and return accuracy
-#       out[[i]] <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)[[1]]
-# 
-#     }
-# 
-#     core_df %>%
-#       mutate(pov00 = out) %>%
-#       select(-core, -train, -test) %>%
-#       unnest(pov00) %>%
-#       gather(scheme, accuracy, pov00)
-#     
-#     
-#   # }) %>% ungroup() %>%
-#   # unnest(pov00) %>%
-#   # gather(scheme, accuracy, pov00)
-#     
-#   }) %>% bind_rows()
-# 
-# 
-# 
+## Assign cores and split
+environment_rank_df1 <- environment_rank_df %>%
+  assign_cores(n_core) %>%
+  split(.$core)
 
 
 
-# ## Cross-validation (CV00) with adding environments
-# ## Create training and test sets
-# cv00_environment_rank_train_test <- environment_rank_df %>%
-#   # slice(1:5) %>%
-#   group_by(set, trait, model, val_environment) %>%
-#   do({
-# 
-#     row <- .
+pov00_environment_rank_predictions <- environment_rank_df1 %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+  # lapply(X = ., FUN = function(core_df) {
+    
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
+
+      row <- core_df[i,]
+
+      ## Filter phenotypes for that trait
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
+      # Rank of environments
+      eRank <- row$rank[[1]]
+      
+      ## Create the ordered list of training environments
+      # Then create training sets
+      # Calculate genotypic means (this will hopefully save space later)
+      train <- accumulate(eRank, c) %>%
+        map(~subset(pheno_use, environment %in% . & line_name %in% tp_geno)) %>%
+        map(~as.data.frame(as.data.table(.)[, lapply(.SD, mean), by = line_name, .SDcols = "value"])) %>%
+        map(~mutate(., environment = "blue", std_error = 0))
+      
+      # Test set
+      test <- subset(pheno_use, environment == ve & line_name %in% vp_geno)
+      
+      # Empty vector to store prediction accuracy estimates
+      pred1 <- vector("numeric", length(train))
+      
+      # Loop
+      for (r in seq_along(pred1)) {
+
+        ## Predict
+        pred1[[r]] <- gblup(K = K, train = train[[r]], test = test, fit.env = FALSE)[[1]]
+
+      }
+      
+      ## output data.frame 
+      
+      out[[i]] <- data.frame(nTrainEnv = seq_along(eRank), scheme = "pov00", accuracy = pred1)
+      
+    }
+    
+    
+    core_df %>%
+      mutate(data = out) %>%
+      select(-core) %>%
+      unnest(data)
+
+  })
+
+
+
+
+## Random environment rankings
+pov00_environment_rank_random_df <- environment_rank_df %>%
+  filter(model == "great_circle_dist") %>%
+  assign_cores(n_core) %>%
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+  # lapply(X = ., FUN = function(core_df) {
+
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
+
+      row <- core_df[i,]
+
+      ## Filter phenotypes for that trait
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
+      # Rank of environments
+      eRank <- row$rank[[1]]
+      
+      ## Create the ordered list of training environments
+      # Then create training sets
+      # Calculate genotypic means (this will hopefully save space later)
+      train <- replicate(n = n_random, sample(eRank), simplify = FALSE) %>%
+        map(~accumulate(., c) %>%
+              map(~subset(pheno_use, environment %in% . & line_name %in% tp_geno)) %>%
+              map(~as.data.frame(as.data.table(.)[, lapply(.SD, mean), by = line_name, .SDcols = "value"])) %>%
+              map(~mutate(., environment = "blue", std_error = 0)) )
+      
+      # Test set
+      test <- subset(pheno_use, environment == ve & line_name %in% vp_geno)
+      
+      # Empty vector to store prediction accuracy estimates
+      pred1 <- vector("list", length(train))
+      
+      # Loop
+      for (r in seq_along(pred1)) {
+        train_r <- train[[r]]
+        
+        ## Predict
+        pred_r <- map_dbl(train_r, ~gblup(K = K, train = ., test = test, fit.env = FALSE)[[1]])
+        # Data.frame
+        pred1[[r]] <- data.frame(nTrainEnv = seq_along(pred_r), rep = r, scheme = "pov00", accuracy = pred_r)
+        
+      }
+      
+      ## output data.frame 
+      
+      out[[i]] <- do.call("rbind", pred1)
+      
+    }
+    
+    
+    core_df %>%
+      mutate(data = out) %>%
+      select(-core) %>%
+      unnest(data)
+
+  })
+
+
+
+
+
+
+
 
 
 ## Cross-validation (CV00) with adding environments
 ## Create training and test sets
 ## Combine test/train set creation and prediction
-cv00_environment_rank_predictions <- environment_rank_df %>%
-  assign_cores(n_core) %>%
-  split(.$core) %>%
+cv00_environment_rank_predictions <- environment_rank_df1 %>%
   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
 
     out <- vector("list", nrow(core_df))
@@ -371,75 +286,6 @@ cv00_environment_rank_predictions <- environment_rank_df %>%
   # }) %>% ungroup()
   
 
-
-# # CV00 predictions
-# cv00_environment_rank_predictions <- cv00_environment_rank_train_test %>%
-#   # Must nest .ids
-#   group_by(trait, set, val_environment, model, rep, nTrainEnv) %>% 
-#   do({
-#     
-#     df <- .
-# 
-# 
-# # CV00 predictions
-# cv00_environment_rank_predictions <- cv00_environment_rank_train_test %>%
-#   # Must nest .ids
-#   group_by(trait, set, val_environment, model, rep, nTrainEnv) %>%
-#   nest() %>%
-#   assign_cores(n_core) %>%
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-# 
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-# 
-#       datai <- core_df$data[[i]]
-#       df <- core_df[i,]
-# 
-#       
-#       ## Run predictions
-#       test_val_pred <- map2(.x = datai[[1]], .y = datai[[2]], ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]]) %>%
-#         map2_df(.x = ., .y = datai$.id, ~mutate(.x, .id = .y)) %>%
-#         mutate(scheme = ifelse(line_name %in% tp_geno, "cv00", "pocv00"))
-#       
-#       cv_acc <- test_val_pred %>%
-#         filter(scheme == "cv00") %>%
-#         summarize(cv00 = cor(value, pred_value))
-#       
-#       pocv_acc <- test_val_pred %>%
-#         filter(scheme == "pocv00") %>%
-#         group_by(.id) %>%
-#         summarize(pocv00 = cor(value, pred_value)) %>%
-#         summarize(pocv00 = mean(pocv00))
-#       
-#       # cbind(cv_acc, pocv_acc)
-#       
-#       out[[i]] <- cbind(cv_acc, pocv_acc)
-#       
-#     }
-# 
-#     core_df %>%
-#       mutate(data = out) %>%
-#       select(-core) %>%
-#       unnest(data) %>%
-#       gather(scheme, accuracy, cv00, pocv00)
-#     
-#     
-#     # }) %>% ungroup() %>%
-#     # gather(scheme, accuracy, cv00, pov00)
-#     
-#   })
-
-
-
-# ## Cross-validation (CV00) with adding environments
-# ## Create training and test sets
-# cv00_environment_rank_random_df <- environment_rank_df %>%
-#   filter(model == "great_circle_dist") %>%
-#   group_by(set, trait, val_environment) %>%
-#   do({
-# 
-#     row <- .
 
 
 ## Random environment rankings
@@ -531,57 +377,140 @@ cv00_environment_rank_random_predictions <- environment_rank_df %>%
    # }) %>% ungroup()
     
   })
-# 
-# 
-# ## Predictions
-# cv00_environment_rank_random_predictions <- cv00_environment_rank_random_df %>%
-#   # Must nest .ids
-#   group_by(trait, set, val_environment, model, rep, nTrainEnv) %>% 
-#   nest() %>%
-#   assign_cores(n_core) %>% 
-#   split(.$core) %>%
-#   mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
-#     
-#     out <- vector("list", nrow(core_df))
-#     for (i in seq_along(out)) {
-#       
-#       datai <- core_df$data[[i]]
-#       df <- core_df[i,]
-#       
-#       
-#       ## Run predictions
-#       test_val_pred <- map2(.x = datai[[1]], .y = datai[[2]], ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]]) %>%
-#         map2_df(.x = ., .y = datai$.id, ~mutate(.x, .id = .y)) %>%
-#         mutate(scheme = ifelse(line_name %in% tp_geno, "cv00", "pocv00"))
-#       
-#       cv_acc <- test_val_pred %>%
-#         filter(scheme == "cv00") %>%
-#         summarize(cv00 = cor(value, pred_value))
-#       
-#       pocv_acc <- test_val_pred %>%
-#         filter(scheme == "pocv00") %>%
-#         group_by(.id) %>%
-#         summarize(pocv00 = cor(value, pred_value)) %>%
-#         summarize(pocv00 = mean(pocv00))
-#       
-#       # cbind(cv_acc, pocv_acc)
-#       
-#       out[[i]] <- cbind(cv_acc, pocv_acc)
-#       
-#     }
-#     
-#     core_df %>%
-#       mutate(data = out) %>%
-#       select(-core) %>%
-#       unnest(data) %>%
-#       gather(scheme, accuracy, cv00, pocv00)
-#     
-#     
-#     # }) %>% ungroup() %>%
-#     # unnest(pov00) %>%
-#     # gather(scheme, accuracy, pov00)
-#     
-#   })
+
+
+
+
+
+
+
+
+
+## Cross-validation (CV0) with adding environments
+## Use all lines to predict in new environments
+## Create training and test sets
+## Combine test/train set creation and prediction
+cv0_pocv0_environment_rank_predictions <- environment_rank_df1 %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+  # lapply(X = ., FUN = function(core_df) {
+      
+    
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
+      
+      row <- core_df[i,]
+      
+      ## Filter phenotypes for that trait
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
+      # Rank of environments
+      eRank <- row$rank[[1]]
+      
+      ## Create the ordered list of training environments
+      # Then create training sets
+      # Calculate genotypic means (this will hopefully save space later)
+      train <- accumulate(eRank, c) %>%
+        map(~subset(pheno_use, environment %in% . & line_name %in% c(tp_geno, vp_geno))) %>%
+        map(~as.data.frame(as.data.table(.)[, lapply(.SD, mean), by = line_name, .SDcols = "value"])) %>%
+        map(~mutate(., environment = "blue", std_error = 0))
+
+
+      
+      # Test set
+      test <- subset(pheno_use, environment == ve & line_name %in% c(tp_geno, vp_geno))
+      
+      # Empty vector to store prediction accuracy estimates
+      test_val_pred <- map(train, ~gblup(K = K, train = ., test = test, fit.env = FALSE)[[2]]) %>%
+        map2_df(., seq_along(.), ~mutate(.x, nTrainEnv = .y, scheme = ifelse(line_name %in% tp_geno, "cv0", "pocv0")))
+      
+    
+      ## output data.frame 
+      out[[i]] <- test_val_pred %>% 
+        group_by(nTrainEnv, scheme) %>% 
+        summarize(accuracy = cor(value, pred_value)) %>%
+        ungroup()
+      
+    }
+    
+    
+    core_df %>%
+      mutate(data = out) %>%
+      select(-core) %>%
+      unnest(data)
+    
+  })
+
+
+
+
+## Random rankings
+cv0_pocv0_environment_rank_random_predictions <- environment_rank_df %>%
+  filter(model == "great_circle_dist") %>%
+  assign_cores(n_core) %>%
+  split(.$core) %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+  # lapply(X = ., FUN = function(core_df) {
+    
+    
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
+      
+      row <- core_df[i,]
+      
+      ## Filter phenotypes for that trait
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
+      # Rank of environments
+      eRank <- row$rank[[1]]
+      
+      ## Create the ordered list of training environments
+      # Then create training sets
+      # Calculate genotypic means (this will hopefully save space later)
+      train <- replicate(n = n_random, sample(eRank), simplify = FALSE) %>%
+        map(~accumulate(., c) %>%
+              map(~subset(pheno_use, environment %in% . & line_name %in% c(tp_geno, vp_geno))) %>%
+              map(~as.data.frame(as.data.table(.)[, lapply(.SD, mean), by = line_name, .SDcols = "value"])) %>%
+              map(~mutate(., environment = "blue", std_error = 0)) )
+      
+      # Test set
+      test <- subset(pheno_use, environment == ve & line_name %in% c(tp_geno, vp_geno))
+      
+      # Empty vector to store prediction accuracy estimates
+      pred1 <- vector("list", length(train))
+      
+      # Loop
+      for (r in seq_along(pred1)) {
+        train_r <- train[[r]]
+        
+        # Prediction accuracy estimates
+        test_val_pred <- map(train_r, ~gblup(K = K, train = ., test = test, fit.env = FALSE)[[2]]) %>%
+          map2_df(., seq_along(.), ~mutate(.x, nTrainEnv = .y, scheme = ifelse(line_name %in% tp_geno, "cv0", "pocv0")))
+        
+        # Data.frame
+        pred1[[r]] <- test_val_pred %>% 
+          group_by(nTrainEnv, scheme) %>% 
+          summarize(accuracy = cor(value, pred_value)) %>%
+          ungroup()
+        
+      }
+      
+      ## output data.frame 
+      out[[i]] <- map2_df(pred1, seq_along(pred1), ~mutate(.x, rep = .y))
+      
+    }
+    
+    
+    core_df %>%
+      mutate(data = out) %>%
+      select(-core) %>%
+      unnest(data)
+    
+  })
+
+
+
+
+
 
 
 
