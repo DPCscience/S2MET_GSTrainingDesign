@@ -8,13 +8,68 @@
 ## 
 
 library(broom)
+library(cowplot)
 
 # The head directory
 repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
-# PCA of marker genotypes
-K <- A.mat(s2_imputed_mat_use[tp_geno,])
+
+## Plot relatedness of TP versus TP-VP relatedness
+K_df <- K[tp_geno, c(tp_geno, vp_geno)] %>% 
+  as.data.frame() %>% 
+  rownames_to_column("line_name") %>% 
+  gather(line_name2, G, -line_name) %>% 
+  filter(line_name != line_name2) %>%
+  mutate(pop = ifelse(line_name2 %in% vp_geno, "TPVP", "TPTP"),
+         pop_x = ifelse(pop == "TPVP", "VP", "TP"),
+         pop_y = "TP",
+         pop = as.factor(pop))
+
+## Model
+fit <- lm(G ~ pop, data = K_df, subset = line_name != line_name2)
+effects::allEffects(fit) %>% plot
+
+
+## Visualize with heatmap
+heat_colors <- wesanderson::wes_palette(name = "Zissou1")
+
+g_relatedness_heat <- ggplot(data = K_df, aes(x = line_name2, y = line_name, fill = G)) +
+  geom_tile() +
+  scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], name = "Genomic relatedness") +
+  facet_grid(pop_y ~ pop_x, scales = "free_x", space = "free_x", switch = "both") +
+  theme_presentation(base_size = 10) +
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), axis.title = element_blank(),
+        panel.spacing.x = unit(0.1, "line"), legend.position = "top")
+
+## Plot average relatedness
+g_relatedness_bar <- group_by(K_df, pop_x, pop_y) %>% 
+  mutate_at(vars(G), funs(mean, sd, n())) %>% 
+  split(.$pop) %>%
+  map_df(~mutate(., row = seq(nrow(.)))) %>%
+  mutate(row_mean = round(mean(row))) %>%
+  ungroup() %>% 
+  mutate(se = sd / sqrt(n)) %>% 
+  mutate_at(vars(mean, se), funs(ifelse(row != row_mean, NA, .))) %>%
+  ggplot(aes(x = line_name2, y = mean, ymin = mean - se, ymax = mean + se, fill = pop_x)) +
+  geom_col(width = 35) +
+  geom_errorbar(width = 10) +
+  scale_fill_manual(values = heat_colors[c(5,1)], guide = FALSE) +
+  scale_y_continuous(name = "Genomic relatedness\nwith TP", breaks = pretty) +
+  scale_x_discrete(expand = c(0, 0)) +
+  facet_grid(~ pop_x, scales = "free_x", space = "free_x") +
+  theme_presentation(base_size = 10) +
+  theme(panel.grid = element_blank(), axis.ticks.y = element_line(), axis.text.x = element_blank(), axis.title.x = element_blank(), panel.spacing.x = unit(0.1, "line"))
+
+g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5))
+ggsave(filename = "tp_vp_relatedness.jpg", plot = g_relatedness, path = fig_dir, width = 4, height = 6, dpi = 1000)
+
+
+
+
+
+
+
 
 Ksvd <- prcomp(K)
 

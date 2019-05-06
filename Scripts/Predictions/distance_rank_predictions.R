@@ -131,7 +131,7 @@ pov00_environment_rank_predictions <- environment_rank_df1 %>%
 
 
 ## Random environment rankings
-pov00_environment_rank_random_df <- environment_rank_df %>%
+pov00_environment_rank_random_predictons <- environment_rank_df %>%
   filter(model == "great_circle_dist") %>%
   assign_cores(n_core) %>%
   split(.$core) %>%
