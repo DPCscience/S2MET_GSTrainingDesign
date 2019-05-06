@@ -103,12 +103,17 @@ oneyear_trial_env_data_use <- oneyear_trial_env_data %>%
 # average monthly temperature ([Tmax + Tmin] / 2)
 # total monthly precip
 
-summ_stats_temp <- oneyear_trial_env_data_use %>% 
+daily_stats_temp <- oneyear_trial_env_data_use %>% 
   select(environment, dap, interval, datatype, value) %>% 
   filter(datatype != "PRCP") %>% 
   spread(datatype, value) %>% 
   mutate(TAVG = (TMAX + TMIN) / 2,
-         TRANGE = TMAX - TMIN) %>%
+         TRANGE = TMAX - TMIN)
+
+
+
+
+summ_stats_temp <- daily_stats_temp %>%
   group_by(environment, interval) %>% 
   summarize_at(vars(TMAX, TMIN, TAVG, TRANGE), funs(mean, sd), na.rm = TRUE) %>% 
   rename_at(vars(contains("mean")), ~str_remove(., "_mean")) %>%

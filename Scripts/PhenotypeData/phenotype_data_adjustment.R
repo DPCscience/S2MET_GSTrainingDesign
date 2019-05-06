@@ -64,10 +64,10 @@ agdd <- one_year_daily_summary$agdd
 # Pull out heading date, round to the nearest whole number, then assign the AGDD value
 data_to_model_HD <- data_to_model %>%
   filter(trait == "HeadingDate") %>% 
-  mutate(day_from_planting = round(value, 0)) %>% 
+  mutate(dap = round(value, 0)) %>% 
   left_join(., agdd) %>%
   mutate(trait = "HeadingDateAGDD") %>%
-  select(-value, -day_from_planting) %>%
+  select(-value, -dap) %>%
   rename(value = AGDD)
 
 
@@ -175,7 +175,7 @@ for (i in seq(nrow(stage_one_results))) {
 
 # Unnest
 stage_one_data <- stage_one_results %>%
-  filter(trait %in% traits) %>%
+  # filter(trait %in% traits) %>%
   unnest()
 
 
@@ -200,11 +200,12 @@ stage_one_herit %>%
 
 
 ## Plot heritability of heading date (DAP) to heading date (AGDD)
-stage_one_herit %>% 
+g_hd_herit <- stage_one_herit %>% 
   filter(str_detect(trait, "HeadingDate")) %>%
   spread(trait, heritability) %>% 
-  qplot(x = HeadingDate, y = HeadingDateAGDD, data = .) + 
+  qplot(x = HeadingDate, y = HeadingDateAGDD, group = trial, data = .) + 
   geom_abline(slope = 1)
+plotly::ggplotly(g_hd_herit)
 
 
 ## How many trials/traits had co-factors in the final model?

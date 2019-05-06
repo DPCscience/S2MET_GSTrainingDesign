@@ -42,7 +42,7 @@ ec_date_replace <- c("annual_" = "Anno", "max_" = "Max", "min_" = "Min", "interv
 
 ### Fit a joint regression model
 ##
-## Models are fitted using all data or using just 2015 - 2016 data
+## Models are fitted using all data or using data excluding each year
 ## 
 
 
@@ -104,16 +104,14 @@ env_means_all <- full_model_fits %>%
 ## Correlate the environment means from the two sets
 env_means_all %>% 
   group_by(trait, environment) %>% 
-  filter(n() == 2) %>% 
+  filter(n() == n_distinct(env_means_all$set) - 1) %>% 
   spread(set, h) %>% 
-  group_by(trait) %>% 
-  summarize(set_cor = cor(complete, realistic))
+  split(.$trait) %>%
+  map(~cor(.[,-1:-2], use = "pairwise.complete.obs"))
+  
 
-# trait           set_cor
-# 1 GrainYield        1.000
-# 2 HeadingDate       1.000
-# 3 HeadingDateAGDD   1.000
-# 4 PlantHeight       1.000
+
+## High correlations of environmental means between sets
 
 # This is not surprising
 
@@ -130,16 +128,24 @@ data_to_model %>%
   do(fwr(formula = value ~ h, data = .))
 
 # trait           set       regression         Fstat   pvalue
-# 1 GrainYield      complete  <tibble [175 x 4]>  3.33 1.75e-41
-# 2 GrainYield      realistic <tibble [175 x 4]>  2.62 6.21e-24
-# 3 HeadingDate     complete  <tibble [175 x 4]>  1.57 4.09e- 6
-# 4 HeadingDate     realistic <tibble [175 x 4]>  2.01 1.15e-12
-# 5 HeadingDateAGDD complete  <tibble [175 x 4]>  1.76 7.15e- 9
-# 6 HeadingDateAGDD realistic <tibble [175 x 4]>  1.59 2.82e- 6
-# 7 PlantHeight     complete  <tibble [175 x 4]>  1.52 1.88e- 5
-# 8 PlantHeight     realistic <tibble [175 x 4]>  1.50 4.88e- 5
+# 1 GrainYield      complete      <tibble [175 x 4]> 2.51  1.49e-22
+# 2 GrainYield      realistic2015 <tibble [175 x 4]> 1.71  6.13e- 8
+# 3 GrainYield      realistic2016 <tibble [175 x 4]> 2.64  1.08e-23
+# 4 GrainYield      realistic2017 <tibble [175 x 4]> 2.35  2.61e-18
+# 5 HeadingDate     complete      <tibble [175 x 4]> 1.44  1.91e- 4
+# 6 HeadingDate     realistic2015 <tibble [175 x 4]> 1.39  7.42e- 4
+# 7 HeadingDate     realistic2016 <tibble [175 x 4]> 0.793 9.76e- 1
+# 8 HeadingDate     realistic2017 <tibble [175 x 4]> 1.85  6.83e-10
+# 9 HeadingDateAGDD complete      <tibble [175 x 4]> 1.65  2.88e- 7
+# 10 HeadingDateAGDD realistic2015 <tibble [175 x 4]> 1.57  3.96e- 6
+# 11 HeadingDateAGDD realistic2016 <tibble [175 x 4]> 1.83  1.76e- 9
+# 12 HeadingDateAGDD realistic2017 <tibble [175 x 4]> 1.54  1.48e- 5
+# 13 PlantHeight     complete      <tibble [175 x 4]> 1.40  5.55e- 4
+# 14 PlantHeight     realistic2015 <tibble [175 x 4]> 1.20  3.88e- 2
+# 15 PlantHeight     realistic2016 <tibble [175 x 4]> 1.25  1.59e- 2
+# 16 PlantHeight     realistic2017 <tibble [175 x 4]> 1.28  9.26e- 3
 
-## As expected, all are significant, but GY is most significant and HD is least
+## As expected, all are significant
 ## Since all traits show genotype-specific reactions to the environment mean, genotypes should also
 # demonstrate different responses to variables that are correlated with the mean
 
@@ -161,7 +167,7 @@ ec_names <- distinct(ec_env_df, variable, variable_newname)
 write_csv(x = ec_names, path = file.path(fig_dir, "env_covariate_names.csv"))
 
 
-## A functio to scale a vector to dot product sum = 1
+## A function to scale a vector to dot product sum = 1
 scale_length <- function(x) {
   # First center at 0
   x1 <- scale(x, center = TRUE, scale = FALSE)
@@ -192,6 +198,7 @@ ec_env_df1 <- ec_env_df %>%
 
 ## Re-organization and removal of some covariates
 ec_env_df2 <- ec_env_df1 %>%
+  filter(ec_group == "multi_year") %>% # Only look at the 10year average
   left_join(env_means_all, .) %>%
   mutate(EC_type = "summary") %>%
   # filter(! variable %in% c("elevation", "latitude", "longitude")) %>%
@@ -311,38 +318,41 @@ for (i in seq(nrow(env_mean_mr))) {
     
 
 env_mean_mr1 <- unnest(env_mean_mr) %>%
-  mutate(fit_R2 = map_dbl(fit, ~summary(.)$adj.r.squared))
+  mutate(fit_R2 = map_dbl(fit, ~summary(.)$adj.r.squared),
+         ecs = map(fit, ~attr(terms(.), "term.labels")))
 
 
-# ## Run multiple testing correction, then select the variables that are still significantly correlated
-# env_mean_cor_sig <- env_mean_cor1 %>% 
-#   group_by(set, ec_group, trait) %>% 
-#   # mutate(ntest = n(), padj = p.adjust(p = pvalue, method = "bonf")) %>% 
-#   mutate(padj = pvalue) %>% # Skip multiple test correction
-#   filter(padj <= alpha) %>%
-#   ungroup()
-# 
-# 
-# ## Summarize
-# env_mean_cor_sig %>% 
-#   group_by(set, ec_group, trait) %>% 
-#   summarize(n_var = n_distinct(variable), min_cor = min(cor), max_cor = max(cor))
 
-env_mean_cor_sig <- env_mean_mr1 %>%
-  unnest(tidy) %>%
-  left_join(ec_names) %>%
-  left_join(., env_mean_cor1)
+## Number of unique ECs
+common_ecs <- env_mean_mr1 %>% 
+  filter(set %in% c("complete", "realistic2017")) %>%
+  filter(trait %in% traits) %>%
+  pull(ecs) %>%
+  unlist() %>%
+  unique()
+  
+length(common_ecs)         
 
-## Summarize number of ECs per trait
+## 25 with AGDD
+## 21 without
+
+
+## number of significant ECs
 env_mean_cor_sig %>% 
   filter(ec_group == "multi_year") %>% 
+  filter(set %in% c("complete", "realistic2017"), trait %in% traits) %>%
   mutate(nEC = n_distinct(variable)) %>% 
   group_by(trait, set, nEC) %>% 
-  summarize(nEC_group = n_distinct(variable))
+  summarize(nEC_group = n_distinct(variable)) %>%
+  arrange(set)
 
-
-## Note if the top 5 
-
+# trait       set             nEC nEC_group
+# 1 GrainYield  complete         21         4
+# 2 HeadingDate complete         21         2
+# 3 PlantHeight complete         21         6
+# 4 GrainYield  realistic2017    21         3
+# 5 HeadingDate realistic2017    21         4
+# 6 PlantHeight realistic2017    21        13
 
 
 
@@ -388,110 +398,30 @@ g_mean_cor <- env_mean_cor_sig %>%
 
     
 
-
-
 ## Find overlapping variables between sets and plot
-env_mean_cor_set_overlap <- env_mean_cor_sig %>% 
-  split(.$set) %>% 
-  map(~select(., trait, ec_group, variable, variable_names)) %>% 
-  reduce(., dplyr::intersect)
+env_mean_cor_sig %>% 
+  select(trait, set, variable_newname) %>% 
+  group_by(trait, variable_newname) %>% 
+  summarize(n_sets = n()) %>% 
+  arrange(desc(n_sets))
 
-# trait       ec_group   variable          
-# 1 GrainYield  multi_year interval_1_TSEASON
-# 2 GrainYield  one_year   interval_2_PPT    
-# 3 HeadingDate multi_year interval_1_TSEASON
-# 4 HeadingDate multi_year om_r_topsoil      
-# 5 PlantHeight multi_year interval_2_TMAX   
-# 6 PlantHeight multi_year annual_TSEASON    
-# 7 PlantHeight one_year   interval_1_TRANGE 
-# 8 PlantHeight one_year   interval_1_TSEASON
-
-
-
-
-
-
-## Comment-out the interval variables. We might revisit this.
-
-# ## What interval variables are highly correlated
-# one_year_env_interval_df1 <- one_year_daily_summary_interval %>% 
-#   map(unnest) %>%
-#   map(select, -variable) %>% 
-#   reduce(full_join) %>% 
-#   gather(variable, value, -begin:-environment) %>% 
-#   left_join(env_means_all, .) %>%
-#   # Remove NA
-#   filter(!is.na(value))
-# 
-# env_interval_cor <- one_year_env_interval_df1 %>% 
-#   group_by(population, trait, variable, begin, end) %>% 
-#   do(test = cor.test(.$h, .$value)) %>%
-#   ungroup() %>%
-#   mutate(cor = map_dbl(test, "estimate"),
-#          pvalue = map_dbl(test, "p.value"),
-#          df = map_dbl(test, "parameter")) %>%
-#   select(-test)
-# 
-# ## Plot
-# env_interval_cor_plot_list <- env_interval_cor %>% 
-#   filter(population == "all") %>%
-#   split(list(.$trait, .$variable)) %>% 
-#   map(~ggplot(data = ., aes(x = begin, y = end, fill = cor)) +
-#         geom_tile() +
-#         scale_fill_gradient2() + 
-#         facet_wrap(~ trait + variable) +
-#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
-# 
-# # Cowplot
-# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
-# ggsave(filename = "one_year_interval_variable_correlation_space.jpg", plot = env_interval_cor_plot,
-#        path = fig_dir, width = 12, height = 12, dpi = 1000)
-# 
-# 
-# ## Plot
-# env_interval_cor_plot_list <- env_interval_cor %>% 
-#   filter(population == "tp") %>%
-#   split(list(.$trait, .$variable)) %>% 
-#   map(~qplot(x = begin, y = end, fill = cor, geom = "tile", data = .) +
-#         scale_fill_gradient2() + facet_wrap(~ trait + variable) +
-#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
-# 
-# # Cowplot
-# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
-# ggsave(filename = "one_year_interval_variable_correlation_space_tp.jpg", plot = env_interval_cor_plot,
-#        path = fig_dir, width = 12, height = 12, dpi = 1000)
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# ## Find the intervals most correlated with the environmental mean
-# ## Weigh the expected direction of the correlation appropriately
-# env_interval_cor_best <- env_interval_cor %>% 
-#   mutate(wt_cor = ifelse(str_detect(trait, "HeadingDate"), cor * -1, cor)) %>%
-#   # Filter for appropriate correlations
-#   filter(sign(wt_cor) == 1) %>%
-#   group_by(population, trait, variable) %>%
-#   # filter(variable %in% c("AGDD", "GDD")) %>%
-#   # filter(pvalue <= 0.05) %>%
-#   top_n(n = 10, wt = wt_cor) # Take the top 25
-# 
-# 
-# 
-# 
-# ## Create extra variables to use
-# env_interval_use <- env_interval_cor_best %>% 
-#   left_join(one_year_env_interval_df1) %>%
-#   unite(variable, variable, begin, end, sep = "_")
-
-##
+# trait       variable_newname n_sets
+# <chr>       <chr>             <int>
+# 1 PlantHeight SoilpHTS              4
+# 2 HeadingDate Int2_MinTemp          3
+# 3 PlantHeight MaxPrcp               3
+# 4 GrainYield  Latitude              2
+# 5 HeadingDate OrgMatTS              2
+# 6 PlantHeight Int1_Prcp             2
+# 7 PlantHeight Int3_AvgTemp          2
+# 8 PlantHeight Int3_MinTemp          2
+# 9 PlantHeight Int3_Prcp             2
+# 10 PlantHeight Latitude              2
 
 
-## Combine the summary variables with the interval variables
-## Then select those variables that are significant
+
+
+## Select those variables that are significant
 env_combine <- ec_env_df2 %>%
   # bind_rows(env_interval_use) %>%
   select(set, trait, ec_group, environment, h, variable_newname, value)
@@ -502,38 +432,107 @@ ec_env_mean_sig <- select(env_mean_cor_sig, set, trait, ec_group, variable_newna
 
 
 
-# ## Generate random samples of environments. For each sample, calculate the same
-# ## correlation as above. How often is the same EC strongly correlated?
-# n_sample <- 1000
-# f_sample <- 0.6
+
+
+
+
+# ##### Use partial least squares
+# library(pls)
 # 
-# set.seed(500)
-# env_samples <- env_combine %>%
-#   group_by(population, ec_group, trait) %>%
-#   do({
-#     df <- .
-#     # Generate samples of environments
-#     cor_sample <- replicate(n_sample, sample(unique(df$environment), size = ceiling(f_sample * n_distinct(df$environment))), simplify = FALSE) %>% 
-#       map(~filter(df, environment %in% .)) %>% 
-#       map_df(~group_by(., variable) %>% summarize(cor = cor(h, value)) %>% mutate(rank = rank(-abs(cor))))
+# ## This helps avoid the issue of collinearity between ECs
+# 
+# 
+# 
+# ## Try multiple regression, where ECs are added in order of correlation
+# env_mean_pls <- ec_env_df3 %>%
+#   distinct(set, trait, ec_group) %>%
+#   mutate(out = list(NULL))
+# 
+# # Number of permutations
+# perm_rep <- 5000
+# 
+# for (i in seq(nrow(env_mean_pls))) {
+#   
+#   st <- env_mean_pls$set[i]
+#   tr <- env_mean_pls$trait[i]
+#   grp <- env_mean_pls$ec_group[i]
+#   
+#   df <- ec_env_df3 %>% 
+#     filter(trait == tr, set == st, ec_group == grp)
+#   
+#   ## Run correlations and rank the ECs by correlation
+#   cors <- df %>% 
+#     group_by(variable) %>% 
+#     do(test = cor.test(.$h, .$value)) %>% 
+#     ungroup() %>%
+#     mutate(correlation = map_dbl(test, "estimate"),
+#            pvalue = map_dbl(test, "p.value")) %>%
+#     arrange(desc(abs(correlation)))
+#   
+#   # Extract EC names in order of decreasing corelation
+#   ecs <- ordered(cors$variable)
+#   
+#   # Formula
+#   base_formula <- formula(paste("h ~ ", paste(ecs[1], collapse = " + ")))
+#   full_formula <- formula(paste("h ~ ", paste(ecs, collapse = " + ")))
+#   
+# 
+#   # Create a model frame
+#   df1 <- df %>% 
+#     select(trait, environment, h, variable, value) %>% 
+#     spread(variable, value)
+#   
+#   ## Create matrices of response and predictors
+#   Y <- df1 %>% 
+#     select(environment, h) %>% 
+#     as.data.frame() %>% 
+#     column_to_rownames("environment") %>% 
+#     as.matrix()
+#   
+#   X <- df1 %>% 
+#     select(-h, -trait) %>% 
+#     as.data.frame() %>% 
+#     column_to_rownames("environment") %>% 
+#     as.matrix()
+#   
+#   ## fit the pls model
+#   fit <- plsr(Y ~ X, validation = "LOO")
+#   # Determine the number of components by minimizing the RMSE
+#   # This is minimum RMSE when the number of components is >= 1
+#   ncomp_rmse <- which.min(RMSEP(fit)$val["CV",,-1])
+#   
+#   # Refit the model
+#   fit1 <- plsr(Y ~ X, validation = "LOO", ncomp = ncomp_rmse)
+#   # Coefficients
+#   fit1_coef <- coef(fit1)
+#   
+#   ## Permutation
+#   # Randomize the response and predictors, get coefficients, establish a null distribution for coefficients
+#   perm_out <- matrix(data = NA, nrow = ncol(X), ncol = perm_rep, dimnames = list(colnames(X), paste0("rep", seq(perm_rep))))
+#   
+#   for (r in seq(perm_rep)) {
 #     
-#     # Return the average rank and average correlation of the variables
-#     cor_sample %>% 
-#       group_by(variable) %>% 
-#       summarise_at(vars(cor, rank), mean) %>% 
-#       arrange(rank)
+#     Y_perm <- apply(X = Y, MARGIN = 2, FUN = sample)
+#     X_perm <- apply(X = X, MARGIN = 2, FUN = sample)
 #     
-#   })
-# 
-# 
-# 
-# 
-# 
-# ## Check the selected covariables from above against the rank generated
-# ## from the samples
-# env_mean_cor_sig %>% 
-#   left_join(., rename(env_samples, sample_cor = cor)) %>%
-#   as.data.frame()
+#     # Fit
+#     fit_perm <- plsr(Y_perm ~ X_perm,  validation = "LOO", ncomp = ncomp_rmse)
+#     # Coefficients
+#     fit_perm_coef <- coef(fit_perm)
+#     
+#     perm_out[,r] <- fit_perm_coef
+#     
+#   }
+#   
+#   ## Determine what ECs are significant
+#   perm_out1 <- cbind(fit = abs(fit1_coef), perm_out)
+#   plsr_pvalue <- apply(X = perm_out1, MARGIN = 1, FUN = function(p) mean(p[-1] >= p[1]))
+#   
+#   ## Return the ECs that are significant
+#   env_mean_pls$out[[i]] <- names(which(plsr_pvalue <= alpha))
+#   
+#   
+# }
 
 
 
@@ -653,9 +652,19 @@ env_ipca_cor_sig <- env_ipca_mr1 %>%
 ## Summarize number of ECs per trait
 env_ipca_cor_sig %>% 
   filter(ec_group == "multi_year") %>% 
+  filter(set %in% c("complete", "realistic2017"), trait %in% traits) %>%
   mutate(nEC = n_distinct(variable)) %>% 
   group_by(trait, set, nEC) %>% 
-  summarize(nEC_group = n_distinct(variable))
+  summarize(nEC_group = n_distinct(variable)) %>%
+  arrange(set)
+
+# trait       set             nEC nEC_group
+# 1 GrainYield  complete         21         2
+# 2 HeadingDate complete         21         2
+# 3 PlantHeight complete         21         1
+# 4 GrainYield  realistic2017    21        10
+# 5 HeadingDate realistic2017    21        14
+# 6 PlantHeight realistic2017    21         2
 
 
 
@@ -706,10 +715,23 @@ g_ipca_cor <- env_ipca_cor_sig %>%
 
 
 ## Find overlapping variables between sets and plot
-env_ipca_cor_set_overlap <- env_ipca_cor_sig %>% 
-  split(.$set) %>% 
-  map(~select(., trait, ec_group, variable)) %>% 
-  reduce(., dplyr::intersect)
+env_ipca_cor_sig %>% 
+  select(trait, set, variable_newname) %>% 
+  group_by(trait, variable_newname) %>% 
+  summarize(n_sets = n(), complete_included = any(set == "complete")) %>% 
+  arrange(desc(n_sets))
+
+# trait       variable_newname n_sets
+# 1 GrainYield  Int2_Prcp             3
+# 2 GrainYield  Int4_SeasTemp         3
+# 3 HeadingDate OrgMatTS              3
+# 4 PlantHeight Int1_MaxTemp          3
+# 5 HeadingDate AnnoMaxTemp           2
+# 6 HeadingDate Int1_Prcp             2
+# 7 HeadingDate Int4_SeasTemp         2
+# 8 HeadingDate MaxMaxTemp            2
+# 9 PlantHeight Int4_MaxTemp          2
+# 10 PlantHeight Latitude              2
 
 
 
@@ -740,28 +762,140 @@ ec_top5_cor_towrite <- bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
   spread(test, annotation) %>%
   rename(Set = set, Trait = trait, Rank = top, IPCA = env_ipca, Mean = env_mean)
 
-write_csv(x = ec_top5_cor, path = file.path(fig_dir, "top5_correlated_ecs.csv"))
+write_csv(x = ec_top5_cor_towrite, path = file.path(fig_dir, "top5_correlated_ecs.csv"))
+
+
+## Create a table with significant ECs
+ec_env_sig_combine <- bind_rows(mutate(ec_env_mean_sig, group = "EC_Mean"), mutate(ec_env_ipca_sig, group = "EC_IPCA")) %>%
+  distinct(set, trait, variable_newname, group) %>% 
+  filter(set %in% c("complete", "realistic2017")) %>%
+  group_by(set, group, trait) %>% 
+  mutate(n = seq(n())) %>%
+  ungroup() %>%
+  mutate(set = str_replace_all(set, set_replace))
+
+ec_env_sig_combine_towrite <- ec_env_sig_combine %>% 
+  mutate(trait = str_add_space(trait)) %>%
+  spread(trait, variable_newname) %>%
+  select(-n)
+
+write_csv(x = ec_env_sig_combine_towrite, path = file.path(fig_dir, "significant_ecs_withAGDD.csv"), na = " ")
+  
+
+ec_env_sig_combine_towrite1 <- ec_env_sig_combine %>% 
+  filter(trait %in% traits) %>%
+  mutate(trait = str_add_space(trait)) %>%
+  spread(trait, variable_newname) %>%
+  select(-n)
+
+write_csv(x = ec_env_sig_combine_towrite1, path = file.path(fig_dir, "significant_ecs.csv"), na = " ")
+
 
 
 ## Kable extra
 library(kableExtra)
 
+## Officer and flextable
+library(officer)
+library(flextable)
+
 ec_top5_cor_towrite <- bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
   filter(ec_group == "multi_year") %>%
   select(set, trait, top, variable_newname, test, cor) %>%
   # mutate(annotation = test) %>%
-  mutate(annotation = paste0(variable_newname, " (", round(cor, 2), ")")) %>%
-  select(set, trait, top, test, annotation) %>%
-  unite("test", trait, test, sep = ":") %>%
-  spread(test, annotation) %>%
-  rename_all(~str_replace_all(string = ., pattern = "([A-Za-z]*:)([a-z_]*)", "\\2"))
+  mutate(annotation = paste0(variable_newname, " (", round(cor, 2), ")"),
+         set = str_replace_all(set, set_replace)) %>%
+  select(Scenario = set, trait, Top = top, test, annotation) %>%
+  unite("test", test, trait, sep = ".") %>%
+  spread(test, annotation)
 
-kable(ec_top5_cor_towrite, escape = TRUE, format = "html") %>%
-  kable_styling("hover", full_width = F) %>%
-  add_header_above(c(" " = 2, "Grain Yield" = 2, "Heading Date" = 2, "Plant Height" = 2)) %>%
-  column_spec(column = 3:8, width = "10em") %>%
-  # Save
-  save_kable(file = file.path(fig_dir, "top5_correlated_ecs.html"), self_contained = T)
+
+
+## Microsoft word table
+
+typology <- data.frame(
+  col_keys = names(ec_top5_cor_towrite),
+  what = c("", " ", "IPCA-EC", "IPCA-EC", "IPCA-EC", "Mean-EC", "Mean-EC", "Mean-EC"),
+  trait = c("Scenario", "Top", "Grain Yield", "Heading Date", "Plant Height", "Grain Yield", "Heading Date", "Plant Height"),
+  stringsAsFactors = FALSE )
+
+ft <- flextable(ec_top5_cor_towrite) %>%
+  set_header_df(mapping = typology, key = "col_keys") %>%
+  merge_h(part = "header") %>%
+  theme_booktabs() %>%
+  border_remove() %>%
+  # border(border.top = fp_border(), part = "header") %>%
+  border(i = 1, border.top = fp_border(width = 1.5), part = "header") %>%
+  border(i = 2, j = 3:8, border.top = fp_border(width = 1.5), part = "header") %>%
+  border(i = 2, border.bottom = fp_border(width = 1.5), part = "header") %>%
+  border(i = nrow(ec_top5_cor_towrite), border.bottom = fp_border(width = 1.5), part = "body") %>%
+  autofit() %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = 2:8, align = "center", part = "all")
+
+## Output to MS word
+doc <- read_docx()
+doc <- body_add_flextable(doc, value = ft)
+print(doc, target = file.path(fig_dir, "top5_correlated_ecs_paper.docx"))
+
+    
+
+
+
+
+
+## Alternative
+
+ec_top5_cor_towrite <- bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
+  filter(ec_group == "multi_year") %>%
+  select(set, trait, top, variable_newname, test, cor) %>%
+  # mutate(annotation = test) %>%
+  mutate(annotation = paste0(variable_newname, " (", round(cor, 2), ")"),
+         set = str_replace_all(set, set_replace),
+         test = ifelse(test == "env_mean", "Mean-EC", "IPCA-EC")) %>%
+  select(Scenario = set, trait, Distance.method = test, Top = top, annotation) %>%
+  # unite("test", test, trait, sep = ".") %>%
+  spread(trait, annotation) %>%
+  arrange(Scenario, Distance.method)
+
+typology <- data.frame(
+  col_keys = names(ec_top5_cor_towrite),
+  trait = c("Scenario", "Distance method", "Top", "Grain Yield", "Heading Date", "Plant Height"),
+  stringsAsFactors = FALSE )
+
+ft <- flextable(ec_top5_cor_towrite) %>%
+  set_header_df(mapping = typology, key = "col_keys") %>%
+  merge_h(part = "header") %>%
+  theme_booktabs() %>%
+  border_remove() %>%
+  # border(border.top = fp_border(), part = "header") %>%
+  border(i = 1, border.top = fp_border(width = 1.5), border.bottom = fp_border(width = 1.5), part = "header") %>%
+  # border(i = 2, j = 3:8, border.top = fp_border(width = 1.5), part = "header") %>%
+  # border(i = 1, border.bottom = fp_border(width = 1.5), part = "header") %>%
+  border(i = nrow(ec_top5_cor_towrite), border.bottom = fp_border(width = 1.5), part = "body") %>%
+  autofit() %>%
+  align(j = 1, align = "left", part = "all") %>%
+  align(j = seq(2, ncol(ec_top5_cor_towrite)), align = "center", part = "all")
+
+## Output to MS word
+doc <- read_docx()
+doc <- body_add_flextable(doc, value = ft)
+print(doc, target = file.path(fig_dir, "top5_correlated_ecs_paper_alt.docx"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -773,13 +907,13 @@ bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
   group_by(set, trait, variable) %>%
   filter(n() > 1)
 
-# set       trait      test     variable      
-# 1 complete  GrainYield env_mean max_PPT       
-# 2 realistic GrainYield env_mean max_PPT       
-# 3 realistic GrainYield env_mean interval_2_PPT
-# 4 complete  GrainYield env_ipca max_PPT       
-# 5 realistic GrainYield env_ipca interval_2_PPT
-# 6 realistic GrainYield env_ipca max_PPT
+# set           trait      test     variable      
+# 1 complete      GrainYield env_mean max_PPT       
+# 2 realistic2017 GrainYield env_mean max_PPT       
+# 3 realistic2017 GrainYield env_mean interval_2_PPT
+# 4 complete      GrainYield env_ipca max_PPT       
+# 5 realistic2017 GrainYield env_ipca interval_2_PPT
+# 6 realistic2017 GrainYield env_ipca max_PPT 
 
 ## No overlap for HD or PH
 
@@ -814,6 +948,19 @@ bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
   group_by(variable) %>%
   summarize(n = n(), nTrait = n_distinct(trait)) %>%
   arrange(desc(nTrait))
+
+# variable                n nTrait
+# 1 interval_1_PPT          8      3
+# 2 interval_3_TMAX         5      3
+# 3 latitude                5      3
+# 4 min_PPT                 5      3
+# 5 om_r_topsoil            6      3
+# 6 silttotal_r_topsoil     3      3
+# 7 annual_TRANGE_max       2      2
+# 8 annual_TSEASON          3      2
+# 9 interval_1_TSEASON      4      2
+# 10 interval_2_PPT          7      2
+
 
 bind_rows(env_mean_top5_cor, env_ipca_top5_cor) %>%
   filter(ec_group == "multi_year") %>%
@@ -934,18 +1081,16 @@ ggsave(filename = "env_ipca_cor_top_poster.jpg", plot = env_ipca_cor_top, path =
 
 ## Data.frame with all ECs for all sets
 ec_all <- env_combine %>%
-  filter(set == "complete") %>%
-  bind_rows(., mutate(., set = "realistic"))
+  filter(set == "complete") %>% 
+  select(-set) %>% 
+  crossing(., set = unique(env_ipca_cor_sig$set))
 
 
 
 env_variable_combine <- bind_rows(
   mutate(ec_env_mean_sig, group = "EC_Mean"),
   mutate(ec_env_ipca_sig, group = "EC_IPCA"),
-  ec_all %>% select(-h) %>% mutate(group = "EC_All")
-  ) %>%
-  ## Remove one-year covariates with the realistic scenario
-  filter(!(set == "realistic" & ec_group == "one_year"))
+  ec_all %>% select(-h) %>% mutate(group = "EC_All"))
 
 
 ## Compare the overlap of variables that are significantly correlated with the mean
@@ -1035,72 +1180,103 @@ save_file <- file.path(result_dir, "environmental_covariable_distance_mat.RData"
 save("ec_mats", "sim_mat_df", "sim_mat_df1", "sim_mat_df2", "env_ipca_mr1", "env_mean_mr1", file = save_file)
 
 
-## Use PCA to visualize the environments
-ec_mats_pca <- ec_mats %>%
-  mutate(pca = map(mat, ~prcomp(.) %>% tidy()))
-
-
-
-## Plot
-g_ec_pca <- ec_mats_pca %>%
-  split(.$ec_group) %>%
-  map(~{
-    unnest(., pca) %>%
-      filter(PC %in% c(1,2)) %>%
-      mutate(year = paste0("20", str_extract(row, "[0-9]{2}")),
-             PC = paste0("PC", PC)) %>%
-      spread(PC, value) %>%
-      ## Plot
-      ggplot(aes(x = PC1, y = PC2, color = year)) +
-      geom_point() +
-      facet_wrap(trait ~ group, scales = "free", ncol = 3) +
-      theme_acs()
-  })
-
-for(i in seq_along(g_ec_pca)) {
-  filename <- str_c(names(g_ec_pca)[i], "_ec_mat_pca.jpg")
-  ggsave(filename = filename, plot = g_ec_pca[[i]], path = fig_dir, width = 5, height = 5, dpi = 1000)
-}
-
-
-
-## PCA of the similarity matrix
-## Use PCA to visualize the environments
-sim_mat_pca <- sim_mat_df %>%
-  mutate(pca = map(sim_mat, ~prcomp(.) %>% tidy()))
-  # mutate(pca = map(sim_mat, ~cmdscale(.) %>% tidy() %>% rename(row = .rownames, x = X1, y = X2)))
-
-
-
-## PCA of the similarity matrix
-## Use PCA to visualize the environments
-sim_mat_pca <- mutate(sim_mat_df2, pca = map(sim_mat, ~prcomp(.) %>% tidy()))
-
-
-
-## Plot
-g_sim_pca <- sim_mat_pca %>%
-  filter(population == "tp") %>%
-  split(.$ec_group) %>%
-  map(~{
-    unnest(., pca) %>%
-      filter(PC %in% c(1,2)) %>%
-      mutate(year = paste0("20", str_extract(row, "[0-9]{2}")),
-             PC = paste0("PC", PC)) %>%
-      spread(PC, value) %>%
-      ## Plot
-      ggplot(aes(x = PC1, y = PC2, color = year)) +
-      geom_point() +
-      facet_wrap(trait ~ group, scales = "free", ncol = 3) +
-      theme_acs()
-  })
 
 
 
 
-## Using the different similarity matrices, rank the distance from each environment to every other environment. 
-## Are the rankings consistent?
-sim_mat_df_rank <- sim_mat_df$sim_mat %>% map(~apply(X = ., MARGIN = 1, FUN = order, decreasing = TRUE)[-1,])
-sim_mat_df1_rank <- sim_mat_df1$sim_mat %>% map(~apply(X = ., MARGIN = 1, FUN = order, decreasing = TRUE)[-1,])
-sim_mat_df2_rank <- sim_mat_df2$sim_mat %>% map(~apply(X = ., MARGIN = 1, FUN = order, decreasing = TRUE)[-1,])
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### Appendix
+
+
+## Comment-out the interval variables. We might revisit this.
+
+# ## What interval variables are highly correlated
+# one_year_env_interval_df1 <- one_year_daily_summary_interval %>% 
+#   map(unnest) %>%
+#   map(select, -variable) %>% 
+#   reduce(full_join) %>% 
+#   gather(variable, value, -begin:-environment) %>% 
+#   left_join(env_means_all, .) %>%
+#   # Remove NA
+#   filter(!is.na(value))
+# 
+# env_interval_cor <- one_year_env_interval_df1 %>% 
+#   group_by(population, trait, variable, begin, end) %>% 
+#   do(test = cor.test(.$h, .$value)) %>%
+#   ungroup() %>%
+#   mutate(cor = map_dbl(test, "estimate"),
+#          pvalue = map_dbl(test, "p.value"),
+#          df = map_dbl(test, "parameter")) %>%
+#   select(-test)
+# 
+# ## Plot
+# env_interval_cor_plot_list <- env_interval_cor %>% 
+#   filter(population == "all") %>%
+#   split(list(.$trait, .$variable)) %>% 
+#   map(~ggplot(data = ., aes(x = begin, y = end, fill = cor)) +
+#         geom_tile() +
+#         scale_fill_gradient2() + 
+#         facet_wrap(~ trait + variable) +
+#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
+# 
+# # Cowplot
+# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
+# ggsave(filename = "one_year_interval_variable_correlation_space.jpg", plot = env_interval_cor_plot,
+#        path = fig_dir, width = 12, height = 12, dpi = 1000)
+# 
+# 
+# ## Plot
+# env_interval_cor_plot_list <- env_interval_cor %>% 
+#   filter(population == "tp") %>%
+#   split(list(.$trait, .$variable)) %>% 
+#   map(~qplot(x = begin, y = end, fill = cor, geom = "tile", data = .) +
+#         scale_fill_gradient2() + facet_wrap(~ trait + variable) +
+#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
+# 
+# # Cowplot
+# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
+# ggsave(filename = "one_year_interval_variable_correlation_space_tp.jpg", plot = env_interval_cor_plot,
+#        path = fig_dir, width = 12, height = 12, dpi = 1000)
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# ## Find the intervals most correlated with the environmental mean
+# ## Weigh the expected direction of the correlation appropriately
+# env_interval_cor_best <- env_interval_cor %>% 
+#   mutate(wt_cor = ifelse(str_detect(trait, "HeadingDate"), cor * -1, cor)) %>%
+#   # Filter for appropriate correlations
+#   filter(sign(wt_cor) == 1) %>%
+#   group_by(population, trait, variable) %>%
+#   # filter(variable %in% c("AGDD", "GDD")) %>%
+#   # filter(pvalue <= 0.05) %>%
+#   top_n(n = 10, wt = wt_cor) # Take the top 25
+# 
+# 
+# 
+# 
+# ## Create extra variables to use
+# env_interval_use <- env_interval_cor_best %>% 
+#   left_join(one_year_env_interval_df1) %>%
+#   unite(variable, variable, begin, end, sep = "_")
+
+##

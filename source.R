@@ -50,6 +50,10 @@ trial_info <- read_csv(file.path(data_dir, "trial_metadata.csv"))
 # Vector of relevant traits
 traits <- c("GrainYield", "HeadingDate", "PlantHeight")
 
+## Traits with units
+traits_unit <- setNames(c("kg~ha^-1", "days", "cm"), traits)
+traits_unit1 <- setNames(c("kg~ha^-1", "days", "AGDD", "cm"), unique(S2_MET_BLUEs$trait))
+
 
 # Grab the entry names that are not checks
 tp <- entry_list %>% 
@@ -78,6 +82,16 @@ s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, vp_geno),]
 
 # Calculate the K matrix
 K <- A.mat(X = s2_imputed_mat_use, min.MAF = 0, max.missing = 1)
+
+
+# ## Use TP as base population
+# M <- s2_imputed_mat_use
+# p <- colMeans(2 - (M[tp_geno,,drop = FALSE] + 1)) / 2
+# P <- matrix((2 * (p - 0.5)), nrow = nrow(M), ncol = ncol(M), byrow = T)
+# Z <- M - P
+# G <- tcrossprod(Z) / (2 * sum(p * (1 - p)))
+# 
+
 
 # # Create a replacement vector for each trait that adds a space between words and
 # # also included the unit
@@ -228,5 +242,5 @@ cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0"
   setNames(object = toupper(.), .)
 
 ## Set replacement
-set_replace <- c("complete" = "Leave-one-out", "realistic" = "Time-forward")
+set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Time-forward")
 
