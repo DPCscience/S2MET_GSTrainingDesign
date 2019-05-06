@@ -15,7 +15,7 @@ library(data.table)
 ## Number of cores
 n_core <- 32
 n_core <- detectCores()
-n_core <- 4
+n_core <- 8
 
 
 
@@ -50,7 +50,7 @@ k <- 5
 ## Data.frame of test environments
 test_env_df <- bind_rows(
   data_frame(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
-  data_frame(set = "realistic", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
+  data_frame(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
 )
 
 
@@ -66,6 +66,7 @@ environment_rank_df <- pred_env_dist_rank %>%
   rename(val_environment = validation_environment) %>%
   filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>%
   filter(model %in% names(dist_method_abbr_use)) %>%
+  filter(set %in% c("complete", "realistic2017")) %>%
   select(-mat_set) %>%
   mutate(data = list(NULL))
 
