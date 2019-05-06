@@ -15,7 +15,7 @@ library(data.table)
 ## Number of cores
 n_core <- 32
 n_core <- detectCores()
-n_core <- 4
+n_core <- 8
 
 
 
