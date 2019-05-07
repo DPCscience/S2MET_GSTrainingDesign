@@ -5,11 +5,24 @@
 ## 
 
 
-
-## Run on a local machine
-repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
+# Run the source script
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+source(file.path(repo_dir, "source_MSI.R"))
+library(data.table)
 library(modelr)
+
+## Number of cores
+n_core <- detectCores()
+n_core <- 8
+
+
+
+
+# ## Run on a local machine
+# repo_dir <- getwd()
+# source(file.path(repo_dir, "source.R"))
+# library(data.table)
+# library(modelr)
 
 
 
@@ -37,7 +50,7 @@ k <- 5
 ## Data.frame of test environments
 test_env_df <- bind_rows(
   data_frame(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
-  data_frame(set = "realistic", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
+  data_frame(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
 )
 
 
@@ -52,376 +65,130 @@ cv_tp_df <- data.frame(line_name = tp_geno, stringsAsFactors = FALSE)
 
 ###### Leave-one-environment-out predictions
 
+loeo_prediction_df <- test_env_df %>%
+  mutate(test_env = map2(train_env, test_env, ~data_frame(val_environment = .y, train_env = lapply(X = .y, function(.y1) setdiff(.x, .y1))))) %>%
+  unnest(test_env)
+
+# Split
+loeo_prediction_df1 <- loeo_prediction_df %>%
+  assign_cores(n_core = n_core) %>%
+  split(.$core)
+  
+  
+
 
 ## CV00 - predict new genotypes in new environments
 ### Leave-one-environment-out cross-validation (CV00)
-# Generate training and test sets
-cv00_train_test <- test_env_df %>%
-  group_by(set, trait) %>%
-  do({
-    row <- .
+cv00_predictions <- loeo_prediction_df1 %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
     
-    ## Subset the phenotype data for the particular trait
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    
-    row2 <- row %>% 
-      unnest(test_env) %>%
-      crossing(., select(row, train_env)) %>%
-      mutate(val_environment = test_env,
-             test_env = map(test_env, ~.),
-             train_env = map2(train_env, test_env, setdiff))
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
       
-    # Create testing and training sets based on that environment and the cv samples
-    row2 %>%
-      mutate(data = map2(.x = train_env, test_env, ~{
-        tr <- .x
-        te <- .y
-        replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
-          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y)) %>%
-          mutate_at(vars(train, test), funs(map(., as.data.frame))) %>%
-          mutate(train = map(train, ~filter(pheno_use, environment %in% tr, line_name %in% .[[1]])),
-                 test = map(test, ~filter(pheno_use, environment %in% te, line_name %in% c(.[[1]], vp_geno))),
-                 nTrainEnv = length(.x)) })) %>%
-      unnest(data)
+      row <- core_df[i,]
     
+      ## Filter phenotypes for that trait
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      ve <- row$val_environment
+      train_use <- subset(pheno_use, environment != ve)
+      test_use <- subset(pheno_use, environment == ve)
+      
+      
+      ## Create CV randomizations
+      cv_rand <- replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
+        map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y)) %>%
+        mutate_at(., vars(train, test), funs(map(., as.data.frame))) %>%
+        mutate(train = map(train, ~subset(train_use, line_name %in% .[[1]])),
+               test = map(test, ~subset(test_use, line_name %in% c(.[[1]], vp_geno)))) %>%
+        nest(train, test, .id)
+      
+      pred1 <- vector("list", nrow(cv_rand))
+      
+      # Loop
+      for (r in seq(nrow(cv_rand))) {
+        
+        df <- cv_rand[[2]][[r]]
+        
+        dat_adj <- map(df$train, ~geno_means(data = .))
+        # Predict and validate
+        test_val_pred <- map2(.x = dat_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]] %>%
+          mutate(scheme = ifelse(line_name %in% tp_geno, "cv00", "pocv00")) ) %>%
+          mutate(df, pred = .) %>%
+          unnest(pred)
+        
+        
+        cv_acc <- test_val_pred %>%
+          subset(scheme == "cv00") %>%
+          summarize(cv00 = cor(value, pred_value))
+        
+        pocv_acc <- test_val_pred %>%
+          subset(scheme == "pocv00") %>%
+          group_by(.id) %>%
+          summarize(pocv00 = cor(value, pred_value)) %>%
+          summarize(pocv00 = mean(pocv00))
+        
+        pred1[[r]] <- cbind(cv_acc, pocv_acc)
+        
+      }
+      
+      out[[i]] <- cv_rand %>%
+        mutate(pred = pred1) %>%
+        unnest(pred) %>%
+        select(-data)
+      
+    }
     
+    core_df %>%
+      mutate(out = out) %>%
+      select(-train_env, -core) %>%
+      unnest(out)
     
-  }) %>% ungroup()
+  })
 
 
 
 
-
-## Predict
-cv00_predictions <- cv00_train_test %>%
-  group_by(set, trait, val_environment, nTrainEnv, rep) %>%
-  do({
-    
-    df <- .
-    
-    ## Calculate genotype means for the training sets
-    data_adj <- map(df$train, ~geno_means(data = .))
-    
-    ## Make predictions
-    test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]])
-    
-    ## Add results to the row
-    df1 <- df %>%
-      mutate(test_out = map(test_val_pred, ~filter(., !line_name %in% vp)),
-             val_out = map(test_val_pred, ~filter(., line_name %in% vp))) %>%
-      select(.id, test_out, val_out)
-    
-    ## Calculate test accuracy
-    test_acc <- df1 %>%
-      unnest(test_out) %>% 
-      summarize(cv00 = cor(value, pred_value))
-    
-    ## Calculate average val accuracy
-    val_acc <- df1 %>%
-      unnest(val_out) %>%
-      group_by(.id) %>%
-      summarize(accuracy = cor(value, pred_value)) %>%
-      summarize(pocv00 = mean(accuracy))
-    
-    
-    cbind(test_acc, val_acc)
-    
-  }) %>% ungroup() %>%
-  gather(scheme, accuracy, cv00, pocv00)
-
-
-
-
-
-## Create training and test sets
-## POV00 = untested gen1 in untested env
-pov00_train_test <- test_env_df %>%
-  group_by(set, trait) %>%
-  do({
-    row <- .
-    
-    ## Subset the phenotype data for the particular trait
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    
-    # Get a vector of testing environments
-    row1 <- row %>% 
-      unnest(test_env) %>%
-      crossing(., select(row, train_env)) %>%
-      mutate(val_environment = test_env,
-             test_env = map(test_env, ~.),
-             train_env = map2(train_env, test_env, setdiff),
-             nTrainEnv = map_dbl(train_env, length)) %>%
-      mutate(train = map(train_env, ~filter(pheno_use, environment %in% ., line_name %in% tp_geno)),
-             test = map(test_env, ~filter(pheno_use, line_name %in% vp_geno, environment %in% .) %>% 
-                          mutate(line_name = as.character(line_name))))
-    
-    
-  }) %>% ungroup()
-
-
-
-
-## Predict
-pov00_predictions <- pov00_train_test %>%
-  group_by(set, trait, val_environment, nTrainEnv) %>%
+## POV00 - predict new genotypes in new environments
+### Leave-one-environment-out cross-validation (POV00)
+pov00_predictions <- loeo_prediction_df %>%
+  group_by(set, trait, val_environment) %>%
   do(pov00 = {
     
     row <- .
     
-    ## Calculate genotype means
-    data_adj <- geno_means(data = row$train[[1]])
+    ## Filter phenotypes for that trait
+    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+    ve <- row$val_environment
+    train_use <- geno_means(data = subset(pheno_use, environment != ve & line_name %in% tp_geno))
+    test_use <- subset(pheno_use, environment == ve & line_name %in% vp_geno)
     
-    ## Run the base predictions
-    gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[1]]
-    # base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
-
+    gblup(K = K, train = train_use, test = test_use, fit.env = FALSE)[[1]]
     
-  }) %>% ungroup() %>%
-  unnest(pov00) %>%
-  gather(scheme, accuracy, pov00)
-
+  }) %>% unnest()
+  
+  
 
 
 ## CV0 - predict observed genotypes in unobserved environments
-# Generate training and test sets
-cv0_train_test <- test_env_df %>%
-  group_by(set, trait) %>%
+cv0_predictions <- loeo_prediction_df %>%
+  group_by(set, trait, val_environment) %>%
   do({
+    
     row <- .
     
-    ## Subset the phenotype data for the particular trait
+    ## Filter phenotypes for that trait
     pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+    ve <- row$val_environment
+    train_use <- geno_means(data = subset(pheno_use, environment != ve))
+    test_use <- subset(pheno_use, environment == ve)
     
-    row2 <- row %>% 
-      unnest(test_env) %>%
-      crossing(., select(row, train_env)) %>%
-      mutate(val_environment = test_env,
-             test_env = map(test_env, ~.),
-             train_env = map2(train_env, test_env, setdiff))
-    
-    
-    # Create testing and training sets based on that environment and the cv samples
-    row2 %>%
-      mutate(train = map(train_env, ~filter(pheno_use, environment %in% .)),
-             test = map(test_env, ~filter(pheno_use, environment %in% .)),
-             nTrainEnv = map_dbl(train_env, length))
-    
-  }) %>% ungroup()
-
-
-
-## Predict
-cv0_predictions <- cv0_train_test %>%
-  group_by(set, trait, val_environment, nTrainEnv) %>%
-  do({
-    
-    row <- .
-    
-    ## Calculate genotype means for the training sets
-    data_adj <- geno_means(data = row$train[[1]])
-    
-    ## Make predictions
-    test_val_pred <- gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[2]]
-    
-    ## Calculate accuracy
-    test_val_pred %>%
+    gblup(K = K, train = train_use, test = test_use, fit.env = FALSE)[[2]] %>%
       mutate(scheme = ifelse(line_name %in% tp_geno, "cv0", "pocv0")) %>%
       group_by(scheme) %>%
       summarize(accuracy = cor(value, pred_value))
+      
     
   }) %>% ungroup()
-
-
-# 
-# 
-# 
-# 
-# ## Create training and test sets
-# ## POV1 = untested gen1 in tested env
-# pov1_train_test <- test_env_df %>%
-#   filter(set == "complete") %>%
-#   group_by(set, trait) %>%
-#   do({
-#     row <- .
-#     
-#     # Get a vector of testing environments
-#     row1 <- row %>% 
-#       unnest(test_env) %>%
-#       rename(val_environment = test_env)
-# 
-#     # Create testing and training sets based on that environment
-#     row1 %>%
-#       mutate(train = map2(.x = trait, .y = val_environment, ~filter(S2_MET_BLUEs_tomodel, trait == .x) %>% droplevels() %>%
-#                             filter(line_name %in% tp_geno)),
-#              test = map2(.x = trait, .y = val_environment, ~filter(S2_MET_BLUEs_tomodel, line_name %in% vp_geno, trait == .x, environment == .y) %>%
-#                            mutate(line_name = as.character(line_name))))
-# 
-#     
-#   }) %>% ungroup()
-# 
-# 
-# 
-# 
-# ## Predict
-# pov1_predictions <- pov1_train_test %>%
-#   group_by(set, trait, val_environment) %>%
-#   do({
-#     
-#     row <- .
-#     
-#     ## Calculate genotype means
-#     data_adj <- geno_means(data = row$train[[1]])
-#     
-#     ## Run the base predictions
-#     base_pred <- gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)
-#     # base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
-#     
-#     ## Calculate accuracy and return
-#     base_pred$pgv %>%
-#       group_by(environment) %>% 
-#       summarize(accuracy = cor(value, pred_value))
-#     
-#     
-#   }) %>% ungroup() %>%
-#   select(set, trait, val_environment = environment, accuracy) %>%
-#   mutate(scheme = "pov1")
-# 
-# 
-# ## Create training and test sets
-# ## CV1 = untested gen1 in tested env
-# cv1_train_test <- test_env_df %>%
-#   filter(set == "complete") %>%
-#   group_by(set, trait) %>%
-#   do({
-#     row <- .
-#     
-#     # Get a vector of testing environments
-#     row1 <- row %>% 
-#       unnest(test_env) %>%
-#       rename(val_environment = test_env)
-#     
-#     # Create testing and training sets based on that environment
-#     crossing(row1, cv1_cv00_train_test) %>%
-#       mutate(train = map2(.x = trait, .y = train, ~filter(S2_MET_BLUEs_tomodel, trait == .x) %>% droplevels() %>%
-#                             filter(line_name %in% .y)),
-#              test = pmap(list(trait, val_environment, test, val), ~filter(S2_MET_BLUEs_tomodel, line_name %in% c(..3, ..4), trait == ..1, environment %in% ..2) %>% 
-#                            mutate(line_name = as.character(line_name))))
-#     
-#     
-#   }) %>% ungroup()
-# 
-# 
-# 
-# 
-# ## Predict
-# cv1_predictions <- cv1_train_test %>%
-#   separate(.id, c("rep", ".id"), sep = "_") %>%
-#   group_by(set, trait, val_environment, rep) %>%
-#   do({
-#     
-#     df <- .
-#     
-#     ## Calculate genotype means for the training sets
-#     data_adj <- map(df$train, ~geno_means(data = .))
-#     
-#     ## Make predictions
-#     test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)$pgv)
-#     
-#     ## Add results to the row
-#     df1 <- df %>%
-#       mutate(test_out = map(test_val_pred, ~filter(., !line_name %in% vp)),
-#              val_out = map(test_val_pred, ~filter(., line_name %in% vp))) %>%
-#       select(.id, test_out, val_out)
-#     
-#     ## Calculate test accuracy
-#     test_acc <- df1 %>%
-#       unnest(test_out) %>% 
-#       group_by(environment) %>%
-#       summarize(cv1 = cor(value, pred_value))
-#     
-#     ## Calculate average val accuracy
-#     val_acc <- df1 %>%
-#       unnest(val_out) %>%
-#       group_by(environment, .id) %>%
-#       summarize(accuracy = cor(value, pred_value)) %>%
-#       summarize(pocv1 = mean(accuracy))
-#     
-#     full_join(test_acc, val_acc, by = "environment")
-#     
-#     
-#   }) %>% ungroup() %>%
-#   gather(scheme, accuracy, cv1, pocv1) %>%
-#   select(set, trait, val_environment = environment, rep, scheme, accuracy)
-
-
-
-
-
-
-
-
-# ## Cross-validation 2
-# 
-# # Just the TP - predict!
-# cv2_predictions <- cv2_train_test %>%
-#   group_by(trait, rep) %>%
-#   do({
-#     
-#     df <- .
-#     
-#     ## Calculate genotype means for the training sets
-#     data_adj <- map(df$train, ~geno_means(data = .))
-#     
-#     ## Make predictions
-#     test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)$pgv)
-#     
-#     ## Add results to the row
-#     df1 <- df %>%
-#       mutate(test_out = test_val_pred) %>%
-#       select(.id, test_out)
-#     
-#     ## Calculate test accuracy and return
-#     df1 %>%
-#       unnest(test_out) %>% 
-#       group_by(environment) %>%
-#       summarize(accuracy = cor(value, pred_value)) %>%
-#       mutate(scheme = "cv2")
-#     
-#   }) %>% ungroup()
-# 
-# 
-# ## Now all information - TP and VP
-# pocv2_predictions <- pocv2_train_test %>%
-#   group_by(trait, rep) %>%
-#   do({
-#     
-#     df <- .
-#     
-#     ## Calculate genotype means for the training sets
-#     data_adj <- map(df$train, ~geno_means(data = .))
-#     
-#     ## Make predictions
-#     test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)$pgv)
-#     
-#     ## Add results to the row
-#     df1 <- df %>%
-#       mutate(test_out = test_val_pred) %>%
-#       select(.id, test_out)
-#     
-#     ## Calculate test accuracy and return
-#     df1 %>%
-#       unnest(test_out) %>% 
-#       group_by(environment) %>%
-#       summarize(accuracy = cor(value, pred_value)) %>%
-#       mutate(scheme = "pocv2")
-#     
-#   }) %>% ungroup()
-
-
-
-
-
-
 
 
 
@@ -432,25 +199,122 @@ cv0_predictions <- cv0_train_test %>%
 
 
 clusters <- cluster_df %>% 
-  left_join(., test_env_df) %>%
+  inner_join(., test_env_df) %>%
   mutate(nClusters = map_dbl(cluster, ~n_distinct(.$cluster))) %>%
   ## You can't have AMMI and "realistic"
   filter(!(set == "realistic" & model == "AMMI"))
 
 ## Unnest for future use
-clusters1 <- unnest(clusters, cluster)
+clusters1 <- unnest(clusters, cluster) %>%
+  group_by(set, model, trait, nClusters, cluster) %>%
+  nest(environment) %>%
+  left_join(., select(clusters, set:trait, train_env, test_env))
 
-cluster_train_test <- clusters %>%
-  mutate(data = list(NULL))
-
-
-
-
-
-
+clusters1_split <- clusters1 %>%
+  assign_cores(n_core = n_core) %>%
+  split(.$core)
 
 
-pov00_cluster_train_test <- clusters %>%
+
+## CV00 - predict unobserved genotypes in unobserved environments
+cv00_cluster_predictions <- clusters1_split %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
+
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
+
+          df <- core_df[i,]
+
+
+# cv00_cluster_predictions <- clusters1 %>%
+#   group_by(set, model, trait, nClusters, cluster) %>%
+#   do({
+#       
+#     df <- .
+      
+      # List of validation environments in the clusters at hand
+      ve_use <- intersect(df$test_env[[1]], df$data[[1]][[1]])
+      
+      ## Filter phenotypes for the trait and for target environments
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait & environment %in% df$data[[1]][[1]])
+      
+      ve_pred <- vector("list", length(ve_use))
+      
+      # Iterate over validation environment
+      for (r in seq_along(ve_pred)) {
+        
+        # Subset data
+        ve <- ve_use[r]
+        train_use <- subset(pheno_use, environment != ve)
+        test_use <- subset(pheno_use, environment == ve)
+        
+        ## Create CV randomizations for each validation environment
+        cv_rand <- replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
+          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y)) %>%
+          mutate_at(., vars(train, test), funs(map(., as.data.frame))) %>%
+          mutate(train = map(train, ~subset(train_use, line_name %in% .[[1]])),
+                 test = map(test, ~subset(test_use, line_name %in% c(.[[1]], vp_geno)))) %>%
+          nest(train, test, .id)
+        
+        
+        ## Run adjustments, predictions, and validation
+        pred1 <- lapply(cv_rand$data, function(df) {
+          dat_adj <- map(df$train, ~geno_means(data = .))
+          
+          test_val_pred <- map2(.x = dat_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]] %>%
+                                  mutate(scheme = ifelse(line_name %in% tp_geno, "cv00", "pocv00")) ) %>%
+            mutate(df, pred = .) %>%
+            unnest(pred)
+          
+          cv_acc <- test_val_pred %>%
+            subset(scheme == "cv00") %>%
+            summarize(cv00 = cor(value, pred_value))
+          
+          pocv_acc <- test_val_pred %>%
+            subset(scheme == "pocv00") %>%
+            group_by(.id) %>%
+            summarize(pocv00 = cor(value, pred_value)) %>%
+            summarize(pocv00 = mean(pocv00))
+          
+          cbind(cv_acc, pocv_acc)
+          
+        })
+        
+        ## Add the accuracies to the list
+        ve_pred[[r]] <- cv_rand %>%
+          mutate(pred = pred1, nTrainEnv = n_distinct(train_use$environment)) %>%
+          unnest(pred) %>%
+          select(-data)
+        
+      }
+      
+  #     df$data[[1]] %>% 
+  #       mutate(predictions = ve_pred) %>% 
+  #       rename(val_environment = environment)
+  #     
+  # })
+  #     
+      
+      
+      
+      ## Add the cluster results to the out vector
+      out[[i]] <- df$data[[1]] %>%
+        mutate(predictions = ve_pred) %>%
+        rename(val_environment = environment)
+
+    }
+
+    # Add the out vector to the core_df
+    core_df %>%
+      mutate(out = out) %>%
+      select(-data, -train_env, -test_env, -core) %>%
+      unnest(out)
+
+  })
+      
+      
+## POV00 - predict unobserved genotypes in unobserved environments
+pov00_cluster_predictions <- clusters %>%
   group_by(set, trait, model, nClusters) %>%
   do({
     
@@ -462,10 +326,8 @@ pov00_cluster_train_test <- clusters %>%
     row1 <- row %>% 
       unnest(test_env) %>% 
       mutate(train_env = row$train_env, 
-             train_env = map2(train_env, test_env, setdiff))
-    
-    ## Get the data for the cluster of the test environment
-    row1 %>%
+             train_env = map2(train_env, test_env, setdiff)) %>%
+      ## Get the data for the cluster of the test environment
       mutate(data = map2(test_env, train_env, ~{
         cluster_val <- subset(clus, environment == .x, cluster, drop = T)
         cluster_train <- intersect(subset(clus, cluster == cluster_val, environment, drop = T), .y)
@@ -479,117 +341,23 @@ pov00_cluster_train_test <- clusters %>%
         )
         
       })) %>% unnest(data)
-        
     
-  }) %>% ungroup() %>%
-  rename(val_environment = test_env)
-  
-  
-
-
-## This is the normal, POV00 predictions (untested genos in untested envs)
-pov00_cluster_predictions <- pov00_cluster_train_test %>%
-  group_by(set, model, trait, val_environment, nClusters, nTrainEnv, cluster) %>%
-  do(pov00 = {
-
-    row <- .
-
     ## Calculate genotype means
-    data_adj <- geno_means(data = row$train[[1]])
+    data_adj <-  map(row1$train, ~geno_means(data = .))
     
     ## Run the base predictions
-    gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[1]]
-    # base_pred <- gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = TRUE)$accuracy
-
-  }) %>% ungroup() %>%
-  unnest(pov00) %>%
-  gather(scheme, accuracy, pov00)
-
-
-
-## CV00 predictions (with POCV00)
-cv00_cluster_train_test <- clusters %>%
-  group_by(set, trait, model, nClusters) %>%
-  do({
+    preds <- map2_dbl(.x = data_adj, .y = row1$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[1]])
     
-    row <- .
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    
-    clus <- unnest(row, cluster)
-    
-    row1 <- row %>% 
-      unnest(test_env) %>% 
-      mutate(train_env = row$train_env, 
-             train_env = map2(train_env, test_env, setdiff)) %>%
-      ## Remove environments not in pheno_use
-      filter(test_env %in% clus$environment)
-    
-    ## Get the data for the cluster of the test environment
-    row1 %>%
-      mutate(data = map2(test_env, train_env, ~{
-        testE <- .x
-        cluster_val <- subset(clus, environment == testE, cluster, drop = T)
-        cluster_train <- intersect(subset(clus, cluster == cluster_val, environment, drop = T), .y)
-        
-        ## Generate CV sets
-        replicate(n = nCV, expr = crossv_kfold(data = cv_tp_df), simplify = FALSE) %>%
-          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y)) %>%
-          mutate_at(vars(train, test), funs(map(., as.data.frame))) %>%
-          mutate(train = map(train, ~filter(pheno_use, environment %in% cluster_train, line_name %in% .[[1]])),
-                 test = map(test, ~filter(pheno_use, environment %in% testE, line_name %in% c(.[[1]], vp_geno))),
-                 cluster = cluster_val,
-                 nTrainEnv = length(cluster_train))
-        
-      })) %>% unnest(data)
-    
-    
-  }) %>% ungroup() %>%
-  rename(val_environment = test_env)
-    
-
-
-## Predict!
-cv00_cluster_predictions <- cv00_cluster_train_test %>%
-  group_by(set, model, trait, val_environment, nClusters, cluster, nTrainEnv, rep) %>%
-  do({
-    
-    df <- .
-    train_data <- df$train
-    
-    ## Calculate genotype means for the training sets
-    data_adj <- map(train_data, ~geno_means(data = .))
-    
-    ## Make predictions
-    test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]])
-    
-    ## Add results to the row
-    df1 <- df %>% 
-      mutate(pred = test_val_pred) %>% 
-      unnest(pred) %>% 
-      mutate(scheme = ifelse(line_name %in% tp, "cv00", "pocv00")) %>%
-      select(.id, scheme, line_name, value, pred_value)
-      
-    
-    ## Calculate test accuracy
-    test_acc <- df1 %>%
-      filter(scheme == "cv00") %>% 
-      summarize(cv00 = cor(value, pred_value))
-    
-    ## Calculate average val accuracy
-    val_acc <- df1 %>% 
-      filter(scheme == "pocv00") %>% 
-      group_by(.id) %>% 
-      summarize(accuracy = cor(value, pred_value)) %>%
-      summarize(pocv00 = mean(accuracy))
-    
-    
-    cbind(test_acc, val_acc)
+    ## Add results and output
+    row1 %>% 
+      mutate(pov00 = preds) %>% 
+      select(set, model, trait, val_environment = test_env, nClusters, cluster, nTrainEnv, pov00)
     
   }) %>% ungroup()
+  
 
 
-
-## CV0 - predict observed genotypes in unobserved environments
+## CV0 and POV0 - predict observed genotypes in unobserved environments
 cv0_cluster_train_test <- clusters %>%
   group_by(set, trait, model, nClusters) %>%
   do({
@@ -604,10 +372,8 @@ cv0_cluster_train_test <- clusters %>%
       mutate(train_env = row$train_env, 
              train_env = map2(train_env, test_env, setdiff)) %>%
       ## Remove environments not in pheno_use
-      filter(test_env %in% clus$environment)
-    
-    ## Get the data for the cluster of the test environment
-    row1 %>%
+      filter(test_env %in% clus$environment) %>%
+      ## Get the data for the cluster of the test environment
       mutate(data = map2(test_env, train_env, ~{
         testE <- .x
         cluster_val <- subset(clus, environment == testE, cluster, drop = T)
@@ -623,31 +389,23 @@ cv0_cluster_train_test <- clusters %>%
       })) %>% unnest(data)
     
     
-  }) %>% ungroup() %>%
-  rename(val_environment = test_env)
-
-
-## Predict!
-cv0_cluster_predictions <- cv0_cluster_train_test %>%
-  group_by(set, model, trait, val_environment, nClusters, cluster, nTrainEnv) %>%
-  do({
+    ## Calculate genotype means
+    data_adj <-  map(row1$train, ~geno_means(data = .))
     
-    row <- .
-    train_data <- row$train[[1]]
+    ## Run the base predictions
+    test_val_pred <- map2(.x = data_adj, .y = row1$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]]) %>%
+      map(~mutate(., scheme = ifelse(line_name %in% tp, "cv0", "pocv0")) %>%
+            group_by(scheme) %>%
+            summarize(accuracy = cor(value, pred_value)) )
     
-    ## Calculate genotype means for the training sets
-    data_adj <- geno_means(data = train_data)
-    
-    ## Make predictions
-    test_val_pred <- gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[2]]
-    
-    ## Add results to the row
-    test_val_pred %>% 
-      mutate(scheme = ifelse(line_name %in% tp, "cv0", "pocv0")) %>%
-      group_by(scheme) %>%
-      summarize(accuracy = cor(value, pred_value))
+    ## Add results and output
+    row1 %>% 
+      mutate(out = test_val_pred) %>% 
+      unnest(out) %>%
+      rename(val_environment = test_env)
     
   }) %>% ungroup()
+
 
 
 
@@ -882,237 +640,238 @@ cv0_cluster_predictions <- cv0_cluster_train_test %>%
 
 
 
-#### Random environment cross-validation / pov
-
-
-
-## Generate pov00 train/test sets
-## POV00 = untested geno in untested env
-pov00_train_test_random <- test_env_df %>%
-  group_by(set, trait) %>%
-  do({
-    row <- .
-    
-    ## Subset phenos for the trait
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    
-    # Get a vector of testing environments
-    row1 <- row %>% 
-      unnest(test_env) %>%
-      rename(val_environment = test_env) %>%
-      group_by(set, trait, val_environment) %>%
-      ## Create lists of random test environment
-      do({
-        r <- .
-        possible_env <- setdiff(unique(pheno_use$environment), r$val_environment)
-        
-        test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
-        
-        tibble(nTrainEnv = n_rand_env, test_env) %>% 
-          unnest(test_env) %>% 
-          group_by(nTrainEnv) %>%
-          mutate(rep = seq(n())) %>% ungroup()
-        
-      }) %>% ungroup()
-    
-    
-    # Create testing and training sets based on that environment
-    row1 %>% 
-      mutate(train = map(test_env, ~filter(pheno_use, environment %in% ., line_name %in% tp_geno) %>% droplevels() %>% 
-                           mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
-             test = map(val_environment, ~filter(pheno_use, line_name %in% vp_geno, environment == .) %>% mutate(line_name = as.character(line_name))))
-      
-  }) %>% ungroup()
-
-
-
-## Predict
-pov00_predictions_random <- pov00_train_test_random %>%
-  mutate(n = seq(nrow(.))) %>%
-  group_by(set, trait, val_environment, nTrainEnv, rep) %>%
-  do(accuracy = {
-    
-    row <- .
-  
-    ## Calculate genotype means
-    data_adj <- geno_means(data = row$train[[1]])
-    
-    ## Run the base predictions
-    gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[1]]
-    # gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)$accuracy
-    
-  }) %>% ungroup() %>%
-  unnest(accuracy) %>%
-  mutate(scheme = "pov00")
-
-
-
-
-
-
-### Leave-one-environment-out cross-validation (CV00)
-# Generate training and test sets
-cv00_train_test_random  <- test_env_df %>%
-  group_by(set, trait) %>%
-  do({
-    row <- .
-    
-    ## Subset phenos for the trait
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    # Unique environments
-    unique_env <- unique(pheno_use$environment)
-    # Data.frame of TP lines to randomize
-    tp_lines_df <- data_frame(line_name = tp_geno)
-    
-    
-    # Get a vector of testing environments
-    row1 <- row %>% 
-      unnest(test_env) %>%
-      rename(val_environment = test_env) %>%
-      group_by(set, trait, val_environment) %>%
-      ## Create lists of random test environment
-      do({
-        r <- .
-        possible_env <- setdiff(unique_env, r$val_environment)
-        test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
-        
-        ## For each test env set, generate a new cross-validation set
-        train_cv <- map(test_env, ~map(., ~mutate(crossv_kfold(data = tp_lines_df, k = k), test_env = list(.))))
-        
-        
-        tibble(nTrainEnv = n_rand_env, train_cv) %>% 
-          unnest(train_cv) %>% 
-          group_by(nTrainEnv) %>%
-          mutate(rep = seq(n())) %>% 
-          ungroup() %>%
-          unnest(train_cv) %>%
-          unite(.id, c("rep", ".id"), sep = "_") %>%
-          mutate_at(vars(train, test), funs(lapply(., FUN = as.data.frame))) %>%
-          mutate_at(vars(train, test), funs(lapply(., pull)))
-        
-      }) %>% ungroup()
-    
-    
-    # Create testing and training sets based on that environment
-    row1 %>% 
-      mutate(train = map2(.x = test_env, .y = train, ~filter(pheno_use, environment %in% .x, line_name %in% .y) %>% droplevels() %>% 
-                           mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
-             test = map2(.x = val_environment, .y = test, ~filter(pheno_use, line_name %in% c(.y, vp_geno), environment == .x) %>% 
-                           mutate(line_name = as.character(line_name))))
-    
-  }) %>% ungroup()
-    
-    
-    
-## Predict
-cv00_predictions_random <- cv00_train_test_random %>%
-  separate(.id, c("rep", ".id"), sep = "_") %>%
-  group_by(set, trait, val_environment, nTrainEnv, rep) %>%
-  do({
-    
-    df <- .
-    
-    ## Calculate genotype means for the training sets
-    data_adj <- map(df$train, ~geno_means(data = .))
-    
-    ## Make predictions
-    test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]])
-    
-    ## Add results to the row
-    df1 <- df %>%
-      mutate(test_out = map(test_val_pred, ~filter(., !line_name %in% vp)),
-             val_out = map(test_val_pred, ~filter(., line_name %in% vp))) %>%
-      select(.id, test_out, val_out)
-    
-    ## Calculate test accuracy
-    test_acc <- df1 %>%
-      unnest(test_out) %>% 
-      summarize(cv00 = cor(value, pred_value))
-    
-    ## Calculate average val accuracy
-    val_acc <- df1 %>%
-      unnest(val_out) %>%
-      group_by(.id) %>%
-      summarize(accuracy = cor(value, pred_value)) %>%
-      summarize(pocv00 = mean(accuracy))
-    
-    
-    cbind(test_acc, val_acc)
-    
-  }) %>% ungroup() %>%
-  gather(scheme, accuracy, cv00, pocv00)
-
-
-
-
-
-
-
-
-### CV0 - tested genotyped in untested environments
-# Generate training and test sets
-cv0_train_test_random  <- test_env_df %>%
-  group_by(set, trait) %>%
-  do({
-    row <- .
-    
-    ## Subset phenos for the trait
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
-    # Unique environments
-    unique_env <- unique(pheno_use$environment)
-    
-    
-    # Get a vector of testing environments
-    row1 <- row %>% 
-      unnest(test_env) %>%
-      rename(val_environment = test_env) %>%
-      group_by(set, trait, val_environment) %>%
-      ## Create lists of random test environment
-      do({
-        r <- .
-        possible_env <- setdiff(unique_env, r$val_environment)
-        test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
-        
-        tibble(nTrainEnv = n_rand_env, test_env) %>% 
-          unnest(test_env) %>% 
-          group_by(nTrainEnv) %>%
-          mutate(rep = seq(n())) %>% 
-          ungroup()
-        
-      }) %>% ungroup()
-    
-    
-    # Create testing and training sets based on that environment
-    row1 %>% 
-      mutate(train = map(test_env, ~filter(pheno_use, environment %in% .) %>% droplevels() %>% 
-                            mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
-             test = map(val_environment, ~filter(pheno_use, environment == .) %>% mutate(line_name = as.character(line_name))))
-    
-  }) %>% ungroup()
-
-
-## Predict
-cv0_predictions_random <- cv0_train_test_random %>%
-  group_by(set, trait, val_environment, nTrainEnv, rep) %>%
-  do({
-    
-    row <- .
-    
-    ## Calculate genotype means
-    data_adj <- geno_means(data = row$train[[1]])
-    
-    ## Make predictions
-    test_val_pred <- gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[2]]
-      
-    test_val_pred %>% 
-      mutate(scheme = ifelse(line_name %in% tp_geno, "cv0", "pocv0")) %>%
-      group_by(scheme) %>%
-      summarize(accuracy = cor(value, pred_value))
-    
-  }) %>% ungroup() 
-
-
-
+# #### Random environment cross-validation / pov
+# 
+# 
+# 
+# ## Generate pov00 train/test sets
+# ## POV00 = untested geno in untested env
+# pov00_train_test_random <- test_env_df %>%
+#   group_by(set, trait) %>%
+#   do({
+#     row <- .
+#     
+#     ## Subset phenos for the trait
+#     pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+#     
+#     # Get a vector of testing environments
+#     row1 <- row %>% 
+#       unnest(test_env) %>%
+#       rename(val_environment = test_env) %>%
+#       group_by(set, trait, val_environment) %>%
+#       ## Create lists of random test environment
+#       do({
+#         r <- .
+#         possible_env <- setdiff(unique(pheno_use$environment), r$val_environment)
+#         
+#         test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
+#         
+#         tibble(nTrainEnv = n_rand_env, test_env) %>% 
+#           unnest(test_env) %>% 
+#           group_by(nTrainEnv) %>%
+#           mutate(rep = seq(n())) %>% ungroup()
+#         
+#       }) %>% ungroup()
+#     
+#     
+#     # Create testing and training sets based on that environment
+#     row1 %>% 
+#       mutate(train = map(test_env, ~filter(pheno_use, environment %in% ., line_name %in% tp_geno) %>% droplevels() %>% 
+#                            mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
+#              test = map(val_environment, ~filter(pheno_use, line_name %in% vp_geno, environment == .) %>%
+#                           mutate(line_name = as.character(line_name))))
+#       
+#   }) %>% ungroup()
+# 
+# 
+# 
+# ## Predict
+# pov00_predictions_random <- pov00_train_test_random %>%
+#   mutate(n = seq(nrow(.))) %>%
+#   group_by(set, trait, val_environment, nTrainEnv, rep) %>%
+#   do(accuracy = {
+#     
+#     row <- .
+#   
+#     ## Calculate genotype means
+#     data_adj <- geno_means(data = row$train[[1]])
+#     
+#     ## Run the base predictions
+#     gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[1]]
+#     # gblup(K = K, train = row$train[[1]], test = row$test[[1]], fit.env = FALSE)$accuracy
+#     
+#   }) %>% ungroup() %>%
+#   unnest(accuracy) %>%
+#   mutate(scheme = "pov00")
+# 
+# 
+# 
+# 
+# 
+# 
+# ### Leave-one-environment-out cross-validation (CV00)
+# # Generate training and test sets
+# cv00_train_test_random  <- test_env_df %>%
+#   group_by(set, trait) %>%
+#   do({
+#     row <- .
+#     
+#     ## Subset phenos for the trait
+#     pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+#     # Unique environments
+#     unique_env <- unique(pheno_use$environment)
+#     # Data.frame of TP lines to randomize
+#     tp_lines_df <- data_frame(line_name = tp_geno)
+#     
+#     
+#     # Get a vector of testing environments
+#     row1 <- row %>% 
+#       unnest(test_env) %>%
+#       rename(val_environment = test_env) %>%
+#       group_by(set, trait, val_environment) %>%
+#       ## Create lists of random test environment
+#       do({
+#         r <- .
+#         possible_env <- setdiff(unique_env, r$val_environment)
+#         test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
+#         
+#         ## For each test env set, generate a new cross-validation set
+#         train_cv <- map(test_env, ~map(., ~mutate(crossv_kfold(data = tp_lines_df, k = k), test_env = list(.))))
+#         
+#         
+#         tibble(nTrainEnv = n_rand_env, train_cv) %>% 
+#           unnest(train_cv) %>% 
+#           group_by(nTrainEnv) %>%
+#           mutate(rep = seq(n())) %>% 
+#           ungroup() %>%
+#           unnest(train_cv) %>%
+#           unite(.id, c("rep", ".id"), sep = "_") %>%
+#           mutate_at(vars(train, test), funs(lapply(., FUN = as.data.frame))) %>%
+#           mutate_at(vars(train, test), funs(lapply(., pull)))
+#         
+#       }) %>% ungroup()
+#     
+#     
+#     # Create testing and training sets based on that environment
+#     row1 %>% 
+#       mutate(train = map2(.x = test_env, .y = train, ~filter(pheno_use, environment %in% .x, line_name %in% .y) %>% droplevels() %>% 
+#                            mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
+#              test = map2(.x = val_environment, .y = test, ~filter(pheno_use, line_name %in% c(.y, vp_geno), environment == .x) %>% 
+#                            mutate(line_name = as.character(line_name))))
+#     
+#   }) %>% ungroup()
+#     
+#     
+#     
+# ## Predict
+# cv00_predictions_random <- cv00_train_test_random %>%
+#   separate(.id, c("rep", ".id"), sep = "_") %>%
+#   group_by(set, trait, val_environment, nTrainEnv, rep) %>%
+#   do({
+#     
+#     df <- .
+#     
+#     ## Calculate genotype means for the training sets
+#     data_adj <- map(df$train, ~geno_means(data = .))
+#     
+#     ## Make predictions
+#     test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]])
+#     
+#     ## Add results to the row
+#     df1 <- df %>%
+#       mutate(test_out = map(test_val_pred, ~filter(., !line_name %in% vp)),
+#              val_out = map(test_val_pred, ~filter(., line_name %in% vp))) %>%
+#       select(.id, test_out, val_out)
+#     
+#     ## Calculate test accuracy
+#     test_acc <- df1 %>%
+#       unnest(test_out) %>% 
+#       summarize(cv00 = cor(value, pred_value))
+#     
+#     ## Calculate average val accuracy
+#     val_acc <- df1 %>%
+#       unnest(val_out) %>%
+#       group_by(.id) %>%
+#       summarize(accuracy = cor(value, pred_value)) %>%
+#       summarize(pocv00 = mean(accuracy))
+#     
+#     
+#     cbind(test_acc, val_acc)
+#     
+#   }) %>% ungroup() %>%
+#   gather(scheme, accuracy, cv00, pocv00)
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# ### CV0 - tested genotyped in untested environments
+# # Generate training and test sets
+# cv0_train_test_random  <- test_env_df %>%
+#   group_by(set, trait) %>%
+#   do({
+#     row <- .
+#     
+#     ## Subset phenos for the trait
+#     pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+#     # Unique environments
+#     unique_env <- unique(pheno_use$environment)
+#     
+#     
+#     # Get a vector of testing environments
+#     row1 <- row %>% 
+#       unnest(test_env) %>%
+#       rename(val_environment = test_env) %>%
+#       group_by(set, trait, val_environment) %>%
+#       ## Create lists of random test environment
+#       do({
+#         r <- .
+#         possible_env <- setdiff(unique_env, r$val_environment)
+#         test_env <- map(n_rand_env, ~replicate(n = nCV, sample(x = possible_env, size = .), simplify = FALSE))
+#         
+#         tibble(nTrainEnv = n_rand_env, test_env) %>% 
+#           unnest(test_env) %>% 
+#           group_by(nTrainEnv) %>%
+#           mutate(rep = seq(n())) %>% 
+#           ungroup()
+#         
+#       }) %>% ungroup()
+#     
+#     
+#     # Create testing and training sets based on that environment
+#     row1 %>% 
+#       mutate(train = map(test_env, ~filter(pheno_use, environment %in% .) %>% droplevels() %>% 
+#                             mutate(line_name = factor(line_name, levels = c(tp_geno, vp_geno)))),
+#              test = map(val_environment, ~filter(pheno_use, environment == .) %>% mutate(line_name = as.character(line_name))))
+#     
+#   }) %>% ungroup()
+# 
+# 
+# ## Predict
+# cv0_predictions_random <- cv0_train_test_random %>%
+#   group_by(set, trait, val_environment, nTrainEnv, rep) %>%
+#   do({
+#     
+#     row <- .
+#     
+#     ## Calculate genotype means
+#     data_adj <- geno_means(data = row$train[[1]])
+#     
+#     ## Make predictions
+#     test_val_pred <- gblup(K = K, train = data_adj, test = row$test[[1]], fit.env = FALSE)[[2]]
+#       
+#     test_val_pred %>% 
+#       mutate(scheme = ifelse(line_name %in% tp_geno, "cv0", "pocv0")) %>%
+#       group_by(scheme) %>%
+#       summarize(accuracy = cor(value, pred_value))
+#     
+#   }) %>% ungroup() 
+# 
+# 
+# 
 # ## CV1 - untested genotypes in tested environments
 # # Generate training and test sets
 # cv1_train_test_random  <- test_env_df %>%
@@ -1362,18 +1121,18 @@ cv0_predictions_random <- cv0_train_test_random %>%
 #     
 #   }) %>% ungroup() %>%
 #   mutate(scheme = "pocv2")
-
-
-
-
-# List of random predictions
-random_pred <- c("cv0_predictions_random", "cv00_predictions_random", "cv1_predictions_random", "cv2_predictions_random", 
-                 "pocv2_predictions_random", "pov00_predictions_random", "pov1_predictions_random")
-
-
-
-##
-
+# 
+# 
+# 
+# 
+# # List of random predictions
+# random_pred <- c("cv0_predictions_random", "cv00_predictions_random", "cv1_predictions_random", "cv2_predictions_random", 
+#                  "pocv2_predictions_random", "pov00_predictions_random", "pov1_predictions_random")
+# 
+# 
+# 
+# ##
+# 
 
 
 
@@ -1396,7 +1155,7 @@ n_random <- nCV
 
 
 clusters <- cluster_df %>% 
-  left_join(., test_env_df) %>%
+  inner_join(., test_env_df) %>%
   mutate(nClusters = map_dbl(cluster, ~n_distinct(.$cluster))) %>%
   ## You can't have AMMI and "realistic"
   filter(!(set == "realistic" & model == "AMMI"))
@@ -1408,99 +1167,99 @@ cv_train_df <- data.frame(line_name = tp_geno, stringsAsFactors = FALSE)
 ## CV00 - predict new genotypes in new environments ##
 # For each environment in method, randomly sample n_random sets of the same number of training environments. For each n_random,
 # generate nCV cross-validation samples
-cv00_cluster_random_train_test <- clusters %>%
-  group_by(set, trait, model) %>%
-  do({
-    row <- .
+
+## CV00 - predict unobserved genotypes in unobserved environments
+cv00_cluster_random_predictions <- clusters1_split %>%
+  mclapply(X = ., mc.cores = n_core, FUN = function(core_df) {
     
-    # Phenotypes to use
-    pheno_use <- filter(S2_MET_BLUEs_tomodel, trait %in% row$trait)
-    
-    ## Possible training environments
-    train_env <- row$train_env[[1]]
-    ## Test environments
-    test_env <- row$test_env[[1]]
-    
-    ## Calculate nTrainEnv depending on the set
-    if (row$set == "complete") {
-    
-      ## Unnest clusters
-      clus1 <- unnest(row, cluster) %>%
-        group_by(cluster) %>%
-        mutate(nTrainEnv = n() - 1) %>%
-        ungroup()
+    out <- vector("list", nrow(core_df))
+    for (i in seq_along(out)) {
       
-    } else {
+      df <- core_df[i,]
       
-      ## Unnest clusters
-      clus1 <- unnest(row, cluster) %>%
-        group_by(cluster) %>%
-        mutate(nTrainEnv = sum(environment %in% train_env)) %>%
-        ungroup()
+      # List of validation environments in the clusters at hand
+      ve_use <- intersect(df$test_env[[1]], df$data[[1]][[1]])
+
+      ## Filter phenotypes for the trait and for target environments
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait)
+      
+      ve_pred <- vector("list", length(ve_use))
+      
+      # Iterate over validation environment
+      for (r in seq_along(ve_pred)) {
+        
+        # Subset data
+        ve <- ve_use[r]
+        # Number of training environments
+        nTrainEnv <- length(setdiff(df$data[[1]][[1]], ve))
+        
+        ## Possible training environments
+        te_use <- setdiff(df$train_env[[1]], ve)
+        test_use <- subset(pheno_use, environment == ve)
+        
+        ## Create CV randomizations for each validation environment
+        cv_rand <- replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
+          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y, train_env = list(sample(te_use, nTrainEnv)))) %>%
+          mutate_at(., vars(train, test), funs(map(., as.data.frame))) %>%
+          mutate(train = map2(train, train_env, ~subset(pheno_use, line_name %in% .x[[1]] & environment %in% .y)),
+                 test = map(test, ~subset(test_use, line_name %in% c(.[[1]], vp_geno)))) %>%
+          nest(train, test, .id, train_env)
+
+        ## Run adjustments, predictions, and validation
+        pred1 <- lapply(cv_rand$data, function(df) {
+          dat_adj <- map(df$train, ~geno_means(data = .))
+          
+          test_val_pred <- map2(.x = dat_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]] %>%
+                                  mutate(scheme = ifelse(line_name %in% tp_geno, "cv00", "pocv00")) ) %>%
+            mutate(df, pred = .) %>%
+            unnest(pred)
+          
+          cv_acc <- test_val_pred %>%
+            subset(scheme == "cv00") %>%
+            summarize(cv00 = cor(value, pred_value))
+          
+          pocv_acc <- test_val_pred %>%
+            subset(scheme == "pocv00") %>%
+            group_by(.id) %>%
+            summarize(pocv00 = cor(value, pred_value)) %>%
+            summarize(pocv00 = mean(pocv00))
+          
+          cbind(cv_acc, pocv_acc)
+          
+        })
+        
+        ## Add the accuracies to the list
+        ve_pred[[r]] <- cv_rand %>%
+          mutate(pred = pred1, nTrainEnv = map_dbl(data, ~length(.$train_env[[1]]))) %>%
+          unnest(pred) %>%
+          select(-data)
+        
+      }
+      
+      #     df$data[[1]] %>% 
+      #       mutate(predictions = ve_pred) %>% 
+      #       rename(val_environment = environment)
+      #     
+      # })
+      #     
+      
+      
+      
+      ## Add the cluster results to the out vector
+      out[[i]] <- df$data[[1]] %>%
+        mutate(predictions = ve_pred) %>%
+        rename(val_environment = environment) %>%
+        unnest()
       
     }
     
-    clus2 <- clus1 %>%
-      filter(environment %in% test_env) %>%
-      ## For each environment, sample nTrainEnv environments from the train_env pool
-      mutate(random = map2(.x = environment, .y = nTrainEnv, ~replicate(n = n_random, sample(setdiff(train_env, .x), size = .y), simplify = FALSE)),
-             cv_sample = map(environment, ~replicate(n = nCV, expr = crossv_kfold(data = cv_train_df, k = k), simplify = FALSE)),
-             cv_sample = map(cv_sample, ~map(., ~mutate_at(., vars(-.id), funs(map(., as.data.frame))))))
+    # Add the out vector to the core_df
+    core_df %>%
+      mutate(out = out) %>%
+      select(-data, -train_env, -test_env, -core) %>%
+      unnest(out)
     
-    ## Use the sampled environments and sampled genotypes to create train/test sets
-    clus2 %>%
-      mutate(train = pmap(list(cv_sample, random, environment), ~{
-        .z <- ..3
-        map2(.x = ..1, .y = ..2, ~{
-          mutate(.x, train = map(train, function(x) subset(pheno_use, environment %in% .y & line_name %in% x[[1]])),
-                 test = map(test, function(x) subset(pheno_use, environment == .z & line_name %in% c(x[[1]], vp_geno))))
-          
-        }) %>%
-          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y))
-        
-      })) %>%
-      select(-random, -cv_sample) %>% 
-      unnest(train)
-    
-  }) %>% ungroup()
-
-
-## Predict
-cv00_cluster_random_predictions <- cv00_cluster_random_train_test %>%
-  group_by(set, model, trait, environment, rep, cluster, nTrainEnv) %>%
-  do({
-    
-    df <- .
-    
-    ## Calculate genotype means for the training sets
-    data_adj <- map(df$train, ~geno_means(data = .))
-    
-    ## Make predictions
-    test_val_pred <- map2(.x = data_adj, .y = df$test, ~gblup(K = K, train = .x, test = .y, fit.env = FALSE)[[2]])
-    
-    ## Add results to the row
-    df1 <- df %>% 
-      mutate(pred = test_val_pred) %>% 
-      unnest(pred) %>% 
-      mutate(scheme = ifelse(line_name %in% tp, "cv00", "pocv00")) %>%
-      select(environment, .id, scheme, cluster, line_name, value, pred_value)
-    
-    ## Calculate test accuracy
-    test_acc <- df1 %>%
-      filter(scheme == "cv00") %>% 
-      summarize(cv00 = cor(value, pred_value))
-    
-    ## Calculate average val accuracy
-    val_acc <- df1 %>%
-      filter(scheme == "pocv00") %>% 
-      group_by(.id) %>%
-      summarize(pocv00 = cor(value, pred_value)) %>%
-      summarize(pocv00 = mean(pocv00))
-    
-    cbind(test_acc, val_acc)
-    
-  }) %>% ungroup() %>%
-  rename(val_environment = environment)
+  })
 
 
 ## POV00 - predict new genotypes in new environments ##
@@ -1554,6 +1313,7 @@ pov00_cluster_random_train_test <- clusters %>%
       unnest(data)
     
   }) %>% ungroup()
+
 
 ## Predict
 pov00_cluster_random_predictions <- pov00_cluster_random_train_test %>%
@@ -1901,7 +1661,7 @@ cv0_cluster_random_predictions <- cv0_cluster_random_train_test %>%
 pred_list <- cfind(what = "_predictions", class = "data.frame")
 
 # save_file <- file.path(result_dir, "all_predictions.RData")
-save_file <- file.path(result_dir, "all_predictions_00.RData")
+save_file <- file.path(result_dir, "all_data_cluster_predictions.RData")
 save(list = pred_list, file = save_file)
 
 
