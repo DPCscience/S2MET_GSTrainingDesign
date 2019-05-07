@@ -24,9 +24,8 @@ library(grid)
 load(file.path(result_dir, "distance_method_results.RData"))
 
 # Load results
-# load(file.path(result_dir, "all_predictions.RData"))
 load(file.path(result_dir, "all_predictions_00.RData"))
-load(file.path(result_dir, "distance_rank_predictions_pov.RData"))
+# load(file.path(result_dir, "distance_rank_predictions_pov.RData"))
 load(file.path(result_dir, "distance_rank_predictions.RData"))
 
 
