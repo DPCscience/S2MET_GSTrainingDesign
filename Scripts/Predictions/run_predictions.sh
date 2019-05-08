@@ -23,5 +23,5 @@ Rscript distance_rank_predictions.R
 # Rscript environment_covariance_matrix_predictions.R
 
 # Cluster predictions
-# Rscript cluster_predictions.R
+# Rscript all_data_cluster_predictions.R
 
