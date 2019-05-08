@@ -126,7 +126,7 @@ pov00_environment_rank_predictions <- environment_rank_df1 %>%
       select(-core) %>%
       unnest(data)
 
-  })
+  }) %>% bind_rows()
 
 
 
@@ -188,7 +188,7 @@ pov00_environment_rank_random_predictons <- environment_rank_df %>%
       select(-core) %>%
       unnest(data)
 
-  })
+  }) %>% bind_rows()
 
 
 
@@ -281,7 +281,7 @@ cv00_environment_rank_predictions <- environment_rank_df1 %>%
     select(-core) %>%
     unnest(data)
 
-  })
+  }) %>% bind_rows()
     
       
   # }) %>% ungroup()
@@ -377,7 +377,7 @@ cv00_environment_rank_random_predictions <- environment_rank_df %>%
 
    # }) %>% ungroup()
     
-  })
+  }) %>% bind_rows()
 
 
 
@@ -439,7 +439,7 @@ cv0_pocv0_environment_rank_predictions <- environment_rank_df1 %>%
       select(-core) %>%
       unnest(data)
     
-  })
+  }) %>% bind_rows()
 
 
 
@@ -506,7 +506,7 @@ cv0_pocv0_environment_rank_random_predictions <- environment_rank_df %>%
       select(-core) %>%
       unnest(data)
     
-  })
+  }) %>% bind_rows()
 
 
 
