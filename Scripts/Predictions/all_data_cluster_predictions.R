@@ -143,7 +143,7 @@ cv00_predictions <- loeo_prediction_df1 %>%
       select(-train_env, -core) %>%
       unnest(out)
     
-  })
+  }) %>% bind_rows()
 
 
 
@@ -192,6 +192,9 @@ cv0_predictions <- loeo_prediction_df %>%
 
 
 
+
+## List of all predictions
+all_pred_list <- c("cv00_predictions", "pov00_predictions", "cv0_predictions")
 
 
 
@@ -310,7 +313,7 @@ cv00_cluster_predictions <- clusters1_split %>%
       select(-data, -train_env, -test_env, -core) %>%
       unnest(out)
 
-  })
+  }) %>% bind_rows()
       
       
 ## POV00 - predict unobserved genotypes in unobserved environments
@@ -358,7 +361,7 @@ pov00_cluster_predictions <- clusters %>%
 
 
 ## CV0 and POV0 - predict observed genotypes in unobserved environments
-cv0_cluster_train_test <- clusters %>%
+cv0_cluster_predictions <- clusters %>%
   group_by(set, trait, model, nClusters) %>%
   do({
     
@@ -630,6 +633,14 @@ cv0_cluster_train_test <- clusters %>%
 #     
 #   }) %>% ungroup() %>%
 #   rename(val_environment = environment)
+
+
+cluster_pred_list <- c("cv00_cluster_predictions", "pov00_cluster_predictions", "cv0_cluster_predictions")
+
+
+
+
+
 
 
 
@@ -1259,7 +1270,7 @@ cv00_cluster_random_predictions <- clusters1_split %>%
       select(-data, -train_env, -test_env, -core) %>%
       unnest(out)
     
-  })
+  }) %>% bind_rows()
 
 
 ## POV00 - predict new genotypes in new environments ##
@@ -1642,6 +1653,7 @@ cv0_cluster_random_predictions <- cv0_cluster_random_train_test %>%
 #   rename(val_environment = environment)
 
 
+cluster_random_pred_list <- c("cv00_cluster_random_predictions", "pov00_cluster_random_predictions", "cv0_cluster_random_predictions")
 
 
 
@@ -1656,9 +1668,7 @@ cv0_cluster_random_predictions <- cv0_cluster_random_train_test %>%
 
 
 
-
-
-pred_list <- cfind(what = "_predictions", class = "data.frame")
+pred_list <- c(all_pred_list, cluster_pred_list, cluster_random_pred_list)
 
 # save_file <- file.path(result_dir, "all_predictions.RData")
 save_file <- file.path(result_dir, "all_data_cluster_predictions.RData")

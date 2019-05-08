@@ -24,7 +24,7 @@ library(grid)
 load(file.path(result_dir, "distance_method_results.RData"))
 
 # Load results
-load(file.path(result_dir, "all_predictions_00.RData"))
+load(file.path(result_dir, "all_data_cluster_predictions.RData"))
 # load(file.path(result_dir, "distance_rank_predictions_pov.RData"))
 load(file.path(result_dir, "distance_rank_predictions.RData"))
 
@@ -43,6 +43,16 @@ env_herit <- stage_one_data %>%
 
 
 #### Cross-validation / POV using all data #####
+
+## Bind rows for any lists
+cv00_environment_rank_predictions <- bind_rows(cv00_environment_rank_predictions)
+cv00_environment_rank_random_predictions <- bind_rows(cv00_environment_rank_random_predictions)
+pov00_environment_rank_predictions <- bind_rows(pov00_environment_rank_predictions)
+cv0_pocv0_environment_rank_predictions <- bind_rows(cv0_pocv0_environment_rank_predictions)
+cv0_pocv0_environment_rank_random_predictions <- bind_rows(cv0_pocv0_environment_rank_random_predictions)
+
+## Adjust pov00
+pov00_predictions <- gather(pov00_predictions, scheme, accuracy, pov00)
 
 
 ## Combine the all-data prediction results
