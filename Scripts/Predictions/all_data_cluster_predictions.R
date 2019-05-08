@@ -239,7 +239,7 @@ cv00_cluster_predictions <- clusters1_split %>%
       ve_use <- intersect(df$test_env[[1]], df$data[[1]][[1]])
       
       ## Filter phenotypes for the trait and for target environments
-      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == row$trait & environment %in% df$data[[1]][[1]])
+      pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == df$trait & environment %in% df$data[[1]][[1]])
       
       ve_pred <- vector("list", length(ve_use))
       
