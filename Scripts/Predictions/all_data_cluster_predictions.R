@@ -301,9 +301,10 @@ cv00_cluster_predictions <- clusters1_split %>%
       
       
       ## Add the cluster results to the out vector
-      out[[i]] <- df$data[[1]] %>%
+      out[[i]] <- data_frame(environment = ve_use) %>%
         mutate(predictions = ve_pred) %>%
-        rename(val_environment = environment)
+        rename(val_environment = environment) %>%
+        unnest()
 
     }
 
@@ -1257,10 +1258,11 @@ cv00_cluster_random_predictions <- clusters1_split %>%
       
       
       ## Add the cluster results to the out vector
-      out[[i]] <- df$data[[1]] %>%
+      out[[i]] <- data_frame(environment = ve_use) %>%
         mutate(predictions = ve_pred) %>%
         rename(val_environment = environment) %>%
         unnest()
+      
       
     }
     
