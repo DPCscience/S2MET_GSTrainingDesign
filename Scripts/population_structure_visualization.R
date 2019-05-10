@@ -61,7 +61,8 @@ g_relatedness_bar <- group_by(K_df, pop_x, pop_y) %>%
   theme_presentation(base_size = 10) +
   theme(panel.grid = element_blank(), axis.ticks.y = element_line(), axis.text.x = element_blank(), axis.title.x = element_blank(), panel.spacing.x = unit(0.1, "line"))
 
-g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5))
+g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5),
+                            labels = LETTERS[1:2])
 ggsave(filename = "tp_vp_relatedness.jpg", plot = g_relatedness, path = fig_dir, width = 4, height = 6, dpi = 1000)
 
 

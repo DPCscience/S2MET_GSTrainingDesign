@@ -69,6 +69,7 @@ loeo_prediction_df <- test_env_df %>%
   mutate(test_env = map2(train_env, test_env, ~data_frame(val_environment = .y, train_env = lapply(X = .y, function(.y1) setdiff(.x, .y1))))) %>%
   unnest(test_env)
 
+
 # Split
 loeo_prediction_df1 <- loeo_prediction_df %>%
   assign_cores(n_core = n_core) %>%
@@ -237,6 +238,8 @@ cv00_cluster_predictions <- clusters1_split %>%
       
       # List of validation environments in the clusters at hand
       ve_use <- intersect(df$test_env[[1]], df$data[[1]][[1]])
+      # List of training environments 
+      te_use <- intersect(df$train_env[[1]], df$data[[1]][[1]])
       
       ## Filter phenotypes for the trait and for target environments
       pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == df$trait & environment %in% df$data[[1]][[1]])
@@ -248,7 +251,10 @@ cv00_cluster_predictions <- clusters1_split %>%
         
         # Subset data
         ve <- ve_use[r]
-        train_use <- subset(pheno_use, environment != ve)
+        ## Training environments
+        te <- setdiff(te_use, ve)
+          
+        train_use <- subset(pheno_use, environment %in% te)
         test_use <- subset(pheno_use, environment == ve)
         
         ## Create CV randomizations for each validation environment
@@ -1191,6 +1197,8 @@ cv00_cluster_random_predictions <- clusters1_split %>%
       
       # List of validation environments in the clusters at hand
       ve_use <- intersect(df$test_env[[1]], df$data[[1]][[1]])
+      # List of training environments 
+      te_use <- intersect(df$train_env[[1]], df$data[[1]][[1]])
 
       ## Filter phenotypes for the trait and for target environments
       pheno_use <- filter(S2_MET_BLUEs_tomodel, trait == df$trait)
@@ -1202,16 +1210,16 @@ cv00_cluster_random_predictions <- clusters1_split %>%
         
         # Subset data
         ve <- ve_use[r]
-        # Number of training environments
-        nTrainEnv <- length(setdiff(df$data[[1]][[1]], ve))
         
         ## Possible training environments
-        te_use <- setdiff(df$train_env[[1]], ve)
+        te <- setdiff(te_use, ve)
+        # Number of training environments
+        nTrainEnv <- length(te)
         test_use <- subset(pheno_use, environment == ve)
         
         ## Create CV randomizations for each validation environment
         cv_rand <- replicate(n = nCV, crossv_kfold(data = cv_tp_df, k = k), simplify = FALSE) %>%
-          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y, train_env = list(sample(te_use, nTrainEnv)))) %>%
+          map2_df(.x = ., .y = seq_along(.), ~mutate(.x, rep = .y, train_env = list(sample(df$train_env[[1]], nTrainEnv)))) %>%
           mutate_at(., vars(train, test), funs(map(., as.data.frame))) %>%
           mutate(train = map2(train, train_env, ~subset(pheno_use, line_name %in% .x[[1]] & environment %in% .y)),
                  test = map(test, ~subset(test_use, line_name %in% c(.[[1]], vp_geno)))) %>%
