@@ -120,6 +120,7 @@ ammi_fitted %>%
 
 ## Create clusters
 ammi_clusters <- ammi_fitted %>%
+  filter(trait %in% traits) %>%
   ungroup() %>%
   mutate(favorable = ifelse(trait == "GrainYield", top, bottom)) %>% 
   mutate(cluster = map(favorable, ~as.data.frame(.[1,]) %>% rownames_to_column("environment") %>% 
@@ -302,6 +303,7 @@ gl_mean_D_complete <- location_BLUEs %>%
 
 ## Now calculate the line means in each location, excluding data from each dropped year
 location_BLUEs_realistic_df <- distinct(S2_MET_BLUEs, year, trait) %>%
+  filter(trait %in% traits) %>%
   mutate(set = paste0("realistic", year), data = list(NULL), cor = list(NULL), dist = list(NULL))
 
 for (i in seq(nrow(location_BLUEs_realistic_df))) {
@@ -515,9 +517,23 @@ ec_mat_realistic_pam  <- ec_mats %>%
   
 
 # Combine
-cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic, filter(ammi_clusters, set == "realistic2017"))
-cluster_df_realistic_pam <- bind_rows(gcd_mat_realistic_pam, pld_mat_realistic_pam, ec_mat_realistic_pam, 
-                                      filter(ammi_clusters, set == "realistic2017"))
+cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic) %>%
+  # Make sure the test environments are all consistent
+  split(.$trait) %>%
+  map_df(~mutate(., unique_env = map(data, row.names) %>% subset(., !map_lgl(., is.null)) %>% reduce(intersect) %>% list(),
+              unique_test_env = map(test_env, ~.) %>% subset(., !map_lgl(., is.null)) %>% reduce(intersect) %>% list())) %>%
+  mutate(test_env = map2(test_env, unique_test_env, intersect),
+         cluster = map2(cluster, unique_env, ~filter(.x, environment %in% .y))) %>%
+  select(-contains("unique"))
+  
+cluster_df_realistic_pam <- bind_rows(gcd_mat_realistic_pam, pld_mat_realistic_pam, ec_mat_realistic_pam) %>%
+  # Make sure the test environments are all consistent
+  split(.$trait) %>%
+  map_df(~mutate(., unique_env = map(data, row.names) %>% subset(., !map_lgl(., is.null)) %>% reduce(intersect) %>% list(),
+                 unique_test_env = map(test_env, ~.) %>% subset(., !map_lgl(., is.null)) %>% reduce(intersect) %>% list())) %>%
+  mutate(test_env = map2(test_env, unique_test_env, intersect),
+         cluster = map2(cluster, unique_env, ~filter(.x, environment %in% .y))) %>%
+  select(-contains("unique"))
 
 
 ## Combine all
@@ -1132,6 +1148,7 @@ write_csv(x = cluster_varcomp_table, path = file.path(fig_dir, "cluster_varcomp_
 # Modify the BLUEs for predictions
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   filter(line_name %in% c(tp_geno, vp_geno)) %>%
+  filter(trait %in% traits) %>%
   mutate_at(vars(environment:line_name), as.factor)
 
 
@@ -1144,12 +1161,14 @@ train_envs <- c(tp_vp_env, tp_only_env)
 # Summarize the traits available in those environments
 val_envs_traits <- S2_MET_BLUEs_use %>%
   filter(environment %in% pred_envs) %>% 
+  filter(trait %in% traits) %>%
   group_by(environment) %>% 
   distinct(trait) %>%
   ungroup() %>%
   nest(environment, .key = "val_environments") %>%
   mutate(set = "complete") %>%
-  bind_rows(., cluster_df_realistic %>% filter(!map_lgl(test_env, is.null)) %>% distinct(set, trait, test_env) %>% mutate(val_environments = map(test_env, ~data.frame(environment = .))) %>% select(-test_env))
+  bind_rows(., cluster_df_realistic %>% filter(!map_lgl(test_env, is.null)) %>% subset(., model == "great_circle_dist", c(set, trait, test_env)) %>%
+              mutate(val_environments = map(test_env, ~data.frame(environment = .))) %>% select(-test_env))
 
 
 train_envs_traits <- S2_MET_BLUEs_use %>%
@@ -1159,7 +1178,7 @@ train_envs_traits <- S2_MET_BLUEs_use %>%
   ungroup() %>%
   nest(environment, .key = "train_environments") %>%
   full_join(., val_envs_traits) %>%
-  mutate(train_environments = map2(train_environments, val_environments, ~setdiff(.x, .y)),
+  mutate(train_environments = map2(train_environments, val_environments, ~dplyr::setdiff(.x, .y)),
          train_environments = ifelse(set == "complete", val_environments, train_environments)) %>%
   select(-val_environments)
   
@@ -1175,6 +1194,7 @@ env_rank_df <- dist_method_df %>%
     dmat <- ..1
     val_env_use <- ..2
     train_env_use <- ..3
+    
     
     ddf <- as.matrix(dmat) %>% 
       broom::fix_data_frame(newcol = "environment") %>%

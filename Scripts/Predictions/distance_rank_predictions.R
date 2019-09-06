@@ -49,8 +49,8 @@ k <- 5
 
 ## Data.frame of test environments
 test_env_df <- bind_rows(
-  data_frame(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
-  data_frame(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
+  tibble(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
+  tibble(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
 )
 
 
