@@ -17,7 +17,7 @@ proj_dir <- repo_dir
 gdrive_dir <- "C:/Users/jln54//GoogleDrive"
 
 # Geno, pheno, and enviro data
-geno_dir <-  file.path(gdrive_dir, "BarleyLab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/")
+geno_dir <-  file.path(gdrive_dir, "BarleyLab/Breeding/GenotypicData/GBS_Genotype_Data/")
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")

@@ -9,6 +9,7 @@
 
 # Load packages and the source script
 library(mclust)
+library(cluster)
 library(pbr)
 library(ggdendro)
 library(cowplot)
@@ -29,26 +30,11 @@ load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 
 
-
-
-
-
-
-
-
-
-
-
-
 # # Create a new data.frame to hold the different datasets
 # S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 #   group_by(trait) %>%
 #   nest() %>%
 #   mutate(data = map(data, droplevels))
-
-
-
-
 
 
 
@@ -225,7 +211,7 @@ trial_lat_long <- trial_info %>%
 
 ## Create different lat/long matrices depending on the trait
 gcd_mat_list <- S2_MET_BLUEs %>% 
-  # filter(trait %in% traits) %>% 
+  filter(trait %in% traits) %>%
   split(.$trait) %>%
   map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
   map(~unique(.$environment)) %>% 
@@ -256,7 +242,7 @@ great_circle_dist_list <- trial_great_circle %>%
 # First calculate the distance based on each environment
 ge_mean_D <- S2_MET_BLUEs %>%
   filter(line_name %in% tp) %>%
-  # filter(trait %in% traits) %>%
+  filter(trait %in% traits) %>%
   # Split by trait
   split(.$trait) %>%
   map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
@@ -284,7 +270,7 @@ ge_mean_D <- S2_MET_BLUEs %>%
 #             control = control)
 
 location_BLUEs <- S2_MET_BLUEs %>%
-  # filter(trait %in% traits) %>% 
+  filter(trait %in% traits) %>%
   group_by(trait, line_name, location) %>%
   mutate(value = mean(value)) %>%
   ungroup()
@@ -299,7 +285,7 @@ loc_cor_complete <- location_BLUEs %>%
 # Calculate the distance between locations using all data
 gl_mean_D_complete <- location_BLUEs %>%
   filter(line_name %in% tp) %>%
-  # filter(trait %in% traits) %>%
+  filter(trait %in% traits) %>%
   # Split by trait
   split(.$trait) %>%
   map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
@@ -364,8 +350,9 @@ sim_mat_group <- bind_rows(
 ) %>% select(-mat)
 
 
+## Create the model using an abbreviation for the ec_group (multi-year) and the group (All, Mean. IPCA)
 ec_sim_mat_df1 <- sim_mat_group %>%
-  mutate(model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
+  mutate(model = str_replace_all(ec_group, "multiyear", "multi year") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group),
          dist = map(sim_mat, dist)) %>%
   select(mat_set, set, model, trait, cov = sim_mat, dist)
@@ -376,21 +363,23 @@ dist_method_df_complete <- ec_sim_mat_df1 %>%
   filter(set == "complete") %>% 
   # filter(trait %in% traits) %>% 
   add_row(trait = unique(.$trait), model = "great_circle_dist", dist = great_circle_dist_list, cov = map(great_circle_dist_list, ~1 - as.matrix(.))) %>% 
-  add_row(trait = unique(.$trait), model = "pheno_dist", dist = ge_mean_D, cov = env_cor_all) %>% 
+  add_row(trait = unique(.$trait), model = "pheno_dist", dist = ge_mean_D, cov = env_cor_all[traits]) %>% 
   add_row(trait = unique(.$trait), model = "pheno_loc_dist", dist = gl_mean_D_complete, cov = loc_cor_complete) %>%
   mutate(set = "complete")
   
 
 dist_method_df_realistic <- ec_sim_mat_df1 %>% 
-  filter(str_detect(set, "realistic")) %>%
+  # filter(str_detect(set, "realistic")) %>%
   # filter(trait %in% traits) %>% 
   bind_rows(., data_frame(trait = unique(.$trait), model = "great_circle_dist", dist = great_circle_dist_list, cov = map(great_circle_dist_list, ~1 - as.matrix(.))) %>% crossing(set = unique(location_BLUEs_realistic_df$set), .)) %>%
-  bind_rows(., location_BLUEs_realistic_df %>% select(set, trait, cov = cor, dist) %>% mutate(model = "pheno_loc_dist"))
+  bind_rows(., location_BLUEs_realistic_df %>% select(set, trait, cov = cor, dist) %>% mutate(model = "pheno_loc_dist")) %>%
+  filter(set == "realistic2017")
   
 
 ## Combine
 ## Remove the distance matrices
-dist_method_df <- bind_rows(ammi_distance, dist_method_df_complete, dist_method_df_realistic)
+dist_method_df <- bind_rows(ammi_distance, dist_method_df_complete, dist_method_df_realistic) %>%
+  filter(set == "realistic2017")
 
 
 
@@ -413,24 +402,47 @@ min_env <- 2
 gcd_mat_complete <- data_frame(set = "complete", model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list) %>%
   mutate(cluster = map(data, ~env_mclust(data = ., min_env = min_env)))
 
+# PAM
+gcd_mat_complete_pam <- data_frame(set = "complete", model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list) %>%
+  mutate(cluster = map(data, ~env_mclust(data = ., min_env = min_env, method = "pam")))
+
+
 # Pheno dist
 pd_mat_complete <- data_frame(set = "complete", model = "pheno_dist", trait = names(ge_mean_D), data = ge_mean_D) %>%
   mutate(data = map(data, cmdscale),
          cluster = map(data, ~env_mclust(data = ., min_env = min_env)))
+
+pd_mat_complete_pam <- data_frame(set = "complete", model = "pheno_dist", trait = names(ge_mean_D), data = ge_mean_D) %>%
+  mutate(data = map(data, cmdscale),
+         cluster = map(data, ~env_mclust(data = ., min_env = min_env, method = "pam", diss = FALSE)))
 
 # Location dist
 pld_mat_complete <- data_frame(set = "complete", model = "pheno_location_dist", trait = names(gl_mean_D_complete), data = gl_mean_D_complete) %>%
   mutate(data = map(data, cmdscale),
          cluster = map(data, ~env_mclust(data = ., min_env = min_env)))
 
+pld_mat_complete_pam <- data_frame(set = "complete", model = "pheno_location_dist", trait = names(gl_mean_D_complete), data = gl_mean_D_complete) %>%
+  mutate(data = map(data, cmdscale),
+         cluster = map(data, ~env_mclust(data = ., min_env = min_env, method = "pam")))
+
 
 ## Environmental covariates
-ec_mat_complete <- ec_mats %>% 
+ec_mats_data <- ec_mats %>% 
+  mutate(ec_group = str_replace(ec_group, "multiyear", "multi_year")) %>%
   filter(set == "complete", trait %in% traits) %>% 
   rename(data = mat) %>%
   left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% 
-  mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,])) %>%
+  mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,,drop = F]))
+
+ec_mat_complete <- ec_mats_data %>%
   mutate(cluster = map(data, ~env_mclust(data = ., min_env = min_env)),
+         model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
+         model = str_c(model, group)) %>%
+  select(set, model, trait, data, cluster)
+
+## Environmental covariates
+ec_mat_complete_pam <- ec_mats_data %>%
+  mutate(cluster = map(data, ~env_mclust(data = ., min_env = min_env, method = "pam")),
          model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group)) %>%
   select(set, model, trait, data, cluster)
@@ -438,6 +450,8 @@ ec_mat_complete <- ec_mats %>%
 
 # Combine
 cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_complete, ec_mat_complete, filter(ammi_clusters, set == "complete"))
+cluster_df_complete_pam <- bind_rows(gcd_mat_complete_pam, pd_mat_complete_pam, pld_mat_complete_pam, ec_mat_complete_pam, 
+                                     filter(ammi_clusters, set == "complete"))
 
   
 
@@ -448,9 +462,14 @@ cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_comp
 ## Realistic
 # GCD
 gcd_mat_realistic <- distinct(dist_method_df_realistic, set) %>% 
-  crossing(., data_frame(model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list, test_env = complete_train_env)) %>% 
+  crossing(., data_frame(model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list, test_env = realistic_test_env[traits])) %>% 
   mutate(test_env = map2(set, test_env, ~str_subset(.y, str_extract(.x, "1[0-9]"))),
          cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)))
+
+gcd_mat_realistic_pam <- distinct(dist_method_df_realistic, set) %>% 
+  crossing(., data_frame(model = "great_circle_dist", trait = names(gcd_mat_list), data = gcd_mat_list, test_env = realistic_test_env[traits])) %>% 
+  mutate(test_env = map2(set, test_env, ~str_subset(.y, str_extract(.x, "1[0-9]"))),
+         cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y, method = "pam")))
 
 # Location dist
 pld_mat_realistic  <- gcd_mat_realistic %>% 
@@ -460,8 +479,16 @@ pld_mat_realistic  <- gcd_mat_realistic %>%
          test_env = map2(.x = data, .y = test_env, ~intersect(row.names(.x), .y)),
          cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)))
 
+pld_mat_realistic_pam  <- gcd_mat_realistic %>% 
+  distinct(set, trait, test_env) %>% 
+  left_join(., location_BLUEs_realistic_df %>% mutate(model = "pheno_location_dist") %>% select(model, set, trait, data = dist)) %>%
+  mutate(data = map(data, cmdscale),
+         test_env = map2(.x = data, .y = test_env, ~intersect(row.names(.x), .y)),
+         cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y, method = "pam")))
+
 ## Environmental covariates
 ec_mat_realistic  <- ec_mats %>% 
+  mutate(ec_group = str_replace(ec_group, "multiyear", "multi_year")) %>%
   filter(str_detect(set, "realistic"), trait %in% traits) %>% 
   rename(data = mat) %>%
   left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% # filter out undesired environments
@@ -470,15 +497,35 @@ ec_mat_realistic  <- ec_mats %>%
   mutate(cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y)),
          model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
          model = str_c(model, group)) %>%
-  select(set, model, trait, data, cluster)
+  select(set, model, trait, data, cluster, test_env)
+
+## Environmental covariates
+ec_mat_realistic_pam  <- ec_mats %>% 
+  mutate(ec_group = str_replace(ec_group, "multiyear", "multi_year")) %>%
+  filter(str_detect(set, "realistic"), trait %in% traits) %>% 
+  rename(data = mat) %>%
+  left_join(., data_frame(trait = names(tp_vp_env_trait), env = tp_vp_env_trait)) %>% # filter out undesired environments
+  mutate(data = map2(data, env, ~.x[row.names(.x) %in% .y,, drop = FALSE])) %>%
+  left_join(., distinct(pld_mat_realistic, set, trait, test_env)) %>%
+  mutate(cluster = map2(.x = data, .y = test_env, ~env_mclust(data = .x, min_env = min_env, test.env = .y, method = "pam")),
+         model = str_replace_all(ec_group, "_", " ") %>% str_to_title() %>% abbreviate(2),
+         model = str_c(model, group)) %>%
+  select(set, model, trait, data, cluster, test_env)
+
   
 
 # Combine
-cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic, filter(ammi_clusters, str_detect(set, "realistic")))
+cluster_df_realistic <- bind_rows(gcd_mat_realistic, pld_mat_realistic, ec_mat_realistic, filter(ammi_clusters, set == "realistic2017"))
+cluster_df_realistic_pam <- bind_rows(gcd_mat_realistic_pam, pld_mat_realistic_pam, ec_mat_realistic_pam, 
+                                      filter(ammi_clusters, set == "realistic2017"))
 
 
 ## Combine all
 cluster_df <- bind_rows(cluster_df_complete, cluster_df_realistic) %>%
+  select(-test_env)
+
+## Combine all
+cluster_df_pam <- bind_rows(cluster_df_complete_pam, cluster_df_realistic_pam) %>%
   select(-test_env)
 
 
@@ -497,6 +544,17 @@ cluster_summary <- cluster_df %>%
   summarize(nCluster = n_distinct(cluster)) %>% 
   spread(model, nCluster)
 
+## How many clusters per trait, set, and model?
+cluster_summary_pam <- cluster_df_pam %>% 
+  unnest(cluster) %>% 
+  mutate(model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model),
+         model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr_use)) %>%
+  filter(model %in% dist_method_abbr_use) %>%
+  group_by(set, trait, model) %>% 
+  summarize(nCluster = n_distinct(cluster)) %>% 
+  spread(model, nCluster)
+
 cluster_summary %>%
   kableExtra::kable() %>%
   kableExtra::kable_styling()
@@ -505,62 +563,77 @@ cluster_summary %>%
 cluster_summary %>% 
   write_csv(x = ., path = file.path(fig_dir, "number_of_clusters.csv"))
 
+## Write to csv
+cluster_summary_pam %>% 
+  write_csv(x = ., path = file.path(fig_dir, "number_of_clusters_pam.csv"))
 
+
+
+## A function to compare clusters
+## This is VERY ad hoc and should not be generalized
+compare_clusters <- function(x) {
+  comparison <- select(x, model, cluster) %>% 
+    crossing(., .)
+  
+  comparison1 <- map2_dbl(.x = comparison$cluster, .y = comparison$cluster1, ~{
+    
+    # This calculate the proportion of pairs of environments assigned to the same cluster
+    comp1 <- crossing(environment = .x[[1]], environment1 = .y[[1]]) %>%
+      filter(environment != environment1) %>%
+      mutate(same_cluster_x = NA, same_cluster_y = NA)
+    
+    for (i in seq(nrow(comp1))) {
+      e1 <- comp1$environment[[i]]
+      e2 <- comp1$environment1[[i]]
+      
+      comp1$same_cluster_x[[i]] <- n_distinct(subset(.x, environment %in% c(e1, e2), cluster, drop = T)) == 1
+      comp1$same_cluster_y[[i]] <- n_distinct(subset(.y, environment %in% c(e1, e2), cluster, drop = T)) == 1
+      
+    }
+    
+    comp2 <- comp1 %>%
+      mutate(same_cluster = same_cluster_x == same_cluster_y)
+    
+    mean(comp2$same_cluster)
+    
+  })
+  
+  
+  
+  ## Find the number of clusters and the mean (and range) of the number 
+  ## of environments in each cluster
+  model_nCluster <- group_by(x, model) %>%
+    do({
+      tb <- table(.$cluster[[1]]$cluster)
+      data.frame(nCluster = length(tb), nEnv_mean = mean(tb), nEnv_min = min(tb), nEnv_max = max(tb)) %>%
+        mutate(annotation = paste0(round(nEnv_mean, 1), "\n(", nEnv_min, ",", nEnv_max, ")"),
+               annotation1 = paste0(nCluster, "\n(", round(nEnv_mean, 1), ")"))
+      
+    }) %>% ungroup()
+  
+  
+  ## Add the mean
+  comparison %>%
+    select(model, model1) %>%
+    mutate(prop_common = comparison1) %>%
+    left_join(., model_nCluster, by = "model")
+  
+}
 
 
 ## What is the proportion of environments assigned to the same cluster across distance method
 cluster_compare <- cluster_df %>%
   select(-data) %>% 
   group_by(set, trait) %>% 
-  do({
-    df <- .
-    comparison <- select(df, model, cluster) %>% 
-      crossing(., .)
-    
-    comparison1 <- map2_dbl(.x = comparison$cluster, .y = comparison$cluster1, ~{
-      
-      # This calculate the proportion of pairs of environments assigned to the same cluster
-      comp1 <- crossing(environment = .x[[1]], environment1 = .y[[1]]) %>%
-        filter(environment != environment1) %>%
-        mutate(same_cluster_x = NA, same_cluster_y = NA)
-      
-      for (i in seq(nrow(comp1))) {
-        e1 <- comp1$environment[[i]]
-        e2 <- comp1$environment1[[i]]
-        
-        comp1$same_cluster_x[[i]] <- n_distinct(subset(.x, environment %in% c(e1, e2), cluster, drop = T)) == 1
-        comp1$same_cluster_y[[i]] <- n_distinct(subset(.y, environment %in% c(e1, e2), cluster, drop = T)) == 1
-        
-      }
-      
-      comp2 <- comp1 %>%
-        mutate(same_cluster = same_cluster_x == same_cluster_y)
-      
-      mean(comp2$same_cluster)
+  do(compare_clusters(x = .)) %>% 
+  ungroup()
 
-    })
-    
-    
-    
-    ## Find the number of clusters and the mean (and range) of the number 
-    ## of environments in each cluster
-    model_nCluster <- group_by(df, model) %>%
-      do({
-        tb <- table(.$cluster[[1]]$cluster)
-        data.frame(nCluster = length(tb), nEnv_mean = mean(tb), nEnv_min = min(tb), nEnv_max = max(tb)) %>%
-          mutate(annotation = paste0(round(nEnv_mean, 1), "\n(", nEnv_min, ",", nEnv_max, ")"),
-                 annotation1 = paste0(nCluster, "\n(", round(nEnv_mean, 1), ")"))
-        
-      }) %>% ungroup()
-      
-    
-    ## Add the mean
-    comparison %>%
-      select(model, model1) %>%
-      mutate(prop_common = comparison1) %>%
-      left_join(., model_nCluster, by = "model")
-
-  }) %>% ungroup()
+## What is the proportion of environments assigned to the same cluster across distance method
+cluster_compare_pam <- cluster_df_pam %>%
+  select(-data) %>% 
+  group_by(set, trait) %>% 
+  do(compare_clusters(x = .)) %>% 
+  ungroup()
 
 
 ## Filter out
@@ -620,6 +693,118 @@ g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm
 
 
 ggsave(filename = "cluster_compare_heatmap.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6.5, height = 5, dpi = 1000)
+
+
+
+
+
+#### Greyscale version
+cluster_compare_hm_list <- cluster_compare1 %>% 
+  filter(!(str_detect(set,"realistic") & model == "AMMI")) %>%
+  filter(set %in% c("complete", "realistic2017")) %>%
+  filter(trait %in% traits) %>% 
+  mutate(set = str_replace_all(set, set_replace),
+         # set = str_replace_all(set, "Time-forward", "Leave-one-year-out "),
+         set = str_replace_all(set, "2017", ""),
+         prop_common = ifelse(model == model1, NA, prop_common),
+         annotation_use = ifelse(model == model1, annotation1, round(prop_common, 2))) %>%
+  filter(!lower_triangle) %>%
+  split(.$set) %>%
+  map(~ggplot(data = ., aes(x = model, y = model1, fill = prop_common)) + 
+        geom_tile() +  
+        geom_text(aes(label = annotation_use), size = 2) + 
+        scale_fill_gradient2(low = grey.colors(11)[11], mid = grey.colors(11)[5], high = grey.colors(10)[1], 
+                             midpoint = 0.5, limits = c(0, 1), na.value = "grey95",
+                             name = "Proportion of\noverlap") +
+        facet_wrap(~ trait, labeller = labeller(trait = str_add_space)) +
+        labs(subtitle = unique(.$set)) +
+        theme_presentation2(base_size = 10) +
+        theme(axis.title = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "bottom") )
+
+g_cluster_compare <- plot_grid(plotlist = map(cluster_compare_hm_list, ~. + theme(legend.position = "none")), ncol = 1, 
+                               labels = LETTERS[seq_along(cluster_compare_hm_list)], align = "hv")
+# g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]] + theme(legend.position = "right")), 
+                                nrow = 1, rel_widths = c(1, 0.15))
+
+
+ggsave(filename = "cluster_compare_heatmap_greyscale.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6.5, height = 5, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+### PAM
+## Filter out
+cluster_compare1 <- cluster_compare_pam %>%
+  mutate_at(vars(model, model1), funs(ifelse(. == "pheno_location_dist", "pheno_loc_dist", .))) %>%
+  mutate_at(vars(model, model1), funs(str_replace_all(., dist_method_abbr))) %>%
+  filter_at(vars(model1, model), all_vars(. %in% dist_method_abbr_use)) %>%
+  mutate_at(vars(model, model1), funs(factor(., levels = dist_method_abbr_use))) %>%
+  arrange(set, trait, model, model1) %>%
+  # Designate upper or lower triangle
+  split(list(.$set, .$trait)) %>%
+  map_df(~mutate(., lower_triangle = duplicated(map2_chr(.x = model, .y = model1, ~paste(sort(c(as.character(.x), as.character(.y))), collapse = "_")))))
+
+
+cluster_compare1 %>% group_by(set, model) %>% summarize(mean = mean(prop_common))
+
+cluster_compare1 %>% 
+  filter_at(vars(model, model1), all_vars(. %in% c("AMMI", "PD", "LocPD"))) %>%
+  group_by(set, model, model1) %>% 
+  summarize(mean = mean(prop_common))
+
+cluster_compare1 %>% 
+  filter_at(vars(model, model1), all_vars(. %in% c("All-EC", "Mean-EC", "IPCA-EC"))) %>%
+  group_by(set, model) %>% 
+  summarize(mean = mean(prop_common))
+
+
+## Plot heatmaps
+heat_colors <- wesanderson::wes_palette("Zissou1")
+
+cluster_compare_hm_list <- cluster_compare1 %>% 
+  filter(!(str_detect(set,"realistic") & model == "AMMI")) %>%
+  filter(set %in% c("complete", "realistic2017")) %>%
+  filter(trait %in% traits) %>% 
+  mutate(set = str_replace_all(set, set_replace),
+         # set = str_replace_all(set, "Time-forward", "Leave-one-year-out "),
+         set = str_replace_all(set, "2017", ""),
+         prop_common = ifelse(model == model1, NA, prop_common),
+         annotation_use = ifelse(model == model1, annotation1, round(prop_common, 2))) %>%
+  filter(!lower_triangle) %>%
+  split(.$set) %>%
+  map(~ggplot(data = ., aes(x = model, y = model1, fill = prop_common)) + 
+        geom_tile() +  
+        geom_text(aes(label = annotation_use), size = 2) + 
+        scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], midpoint = 0.5, limits = c(0, 1), na.value = "grey95",
+                             name = "Proportion of\noverlap") +
+        facet_wrap(~ trait, labeller = labeller(trait = str_add_space)) +
+        labs(subtitle = unique(.$set)) +
+        theme_presentation2(base_size = 10) +
+        theme(axis.title = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "bottom") )
+
+g_cluster_compare <- plot_grid(plotlist = map(cluster_compare_hm_list, ~. + theme(legend.position = "none")), ncol = 1, 
+                               labels = LETTERS[seq_along(cluster_compare_hm_list)], align = "hv")
+# g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
+g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]] + theme(legend.position = "right")), 
+                                nrow = 1, rel_widths = c(1, 0.15))
+
+
+ggsave(filename = "cluster_compare_heatmap_pam.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6.5, height = 5, dpi = 1000)
+
+
+
+
+
+
+
+
 
 
 
@@ -690,7 +875,7 @@ cluster_grouping %>%
 
 
 ### Test variance components given clustering
-cluster_df_tomodel <- cluster_df %>% 
+cluster_df_tomodel <- bind_rows(mutate(cluster_df, method = "mclust"), mutate(cluster_df_pam, method = "pam")) %>% 
   filter(set %in% c("complete", "realistic2017")) %>%
   unnest(cluster) %>% 
   left_join(filter(S2_MET_BLUEs, line_name %in% tp))
@@ -699,7 +884,7 @@ cluster_df_tomodel <- cluster_df %>%
 control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
 
 cluster_varcomp <- cluster_df_tomodel %>% 
-  group_by(set, model, trait) %>%
+  group_by(set, model, trait, method) %>%
   filter(n_distinct(cluster) > 1) %>% # Pass over trait/models that forced a single cluster
   do({
     df <- .
@@ -777,9 +962,9 @@ cluster_varcomp <- cluster_df_tomodel %>%
   }) %>% ungroup()
     
 single_cluster_cases <- cluster_df_tomodel %>% 
-  group_by(set, model, trait) %>%
+  group_by(set, model, trait, method) %>%
   filter(n_distinct(cluster) == 1) %>%
-  distinct(set, model, trait)
+  distinct(set, model, trait, method)
 
 
 ## Extract heritability
@@ -797,10 +982,23 @@ cluster_herit %>%
   select(-unclustered, -clustered) %>%
   spread(model, effectiveness)
 
-# set                       trait        AMMI    PD LocPD   GCD `All-EC` `Mean-EC` `IPCA-EC`
-# 1 Leave-one-environment-out GrainYield   4.93  1.11 0.595 0.534    0.482     0.558     0.764
-# 2 Leave-one-environment-out HeadingDate  1.14  1.01 0.952 0.874    0.861     0.855     0.930
-# 3 Leave-one-environment-out PlantHeight  1.05  1.11 0.716 0.613    0.564     0.657    NA 
+# set           trait           method  AMMI     PD LocPD   GCD `All-EC` `Mean-EC` `IPCA-EC`
+# 1 complete      GrainYield      mclust  4.93  1.11  0.595 0.534    0.482     0.558     0.764
+# 2 complete      GrainYield      pam     4.93  2.00  0.459 0.445    0.408     0.558     0.734
+# 3 complete      HeadingDate     mclust  1.14  1.01  0.952 0.874    0.861     0.855     0.930
+# 4 complete      HeadingDate     pam     1.14  0.953 1.01  0.879    0.839     0.878     0.842
+# 5 complete      HeadingDateAGDD mclust NA     1.01  0.915 0.881   NA        NA        NA    
+# 6 complete      HeadingDateAGDD pam    NA     0.951 0.927 0.887   NA        NA        NA    
+# 7 complete      PlantHeight     mclust  1.05  1.11  0.716 0.613    0.564     0.657    NA    
+# 8 complete      PlantHeight     pam     1.05  1.11  0.504 0.561    0.522     0.749     0.632
+# 9 realistic2017 GrainYield      mclust  2.15 NA     0.742 0.654    0.636     0.634     0.607
+# 10 realistic2017 GrainYield      pam     2.15 NA     1.13  0.797    0.855     0.870     0.776
+# 11 realistic2017 HeadingDate     mclust NA    NA     0.983 0.928    0.927     0.933     0.943
+# 12 realistic2017 HeadingDate     pam    NA    NA     0.994 0.919    0.925     0.933     0.928
+# 13 realistic2017 HeadingDateAGDD mclust NA    NA     0.978 0.924   NA        NA        NA    
+# 14 realistic2017 HeadingDateAGDD pam    NA    NA     0.982 0.925   NA        NA        NA    
+# 15 realistic2017 PlantHeight     mclust NA    NA     0.778 0.744    0.728     0.801     0.755
+# 16 realistic2017 PlantHeight     pam    NA    NA     0.917 0.745    0.749     0.808     0.853
   
 
 ## Plot heritability
@@ -808,11 +1006,11 @@ g_cluster_herit <- cluster_herit %>%
   mutate(set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", "")) %>%
   filter(!(model == "AMMI" & set == "Time-forward")) %>%
-  gather(group, heritability, -set, -model, -trait) %>%
+  gather(group, heritability, -set, -model, -trait, -method) %>%
   mutate(group = ifelse(group == "unclustered", paste0("H1: ", group), paste0("H2: ", group))) %>%
-  ggplot(aes(x = model, y = heritability, color = model, shape = group)) +
+  ggplot(aes(x = model, y = heritability, color = method, shape = group)) +
   geom_point(position = position_dodge2(0.5), size = 1.5) +
-  scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
+  # scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
   scale_shape_discrete(name = NULL, labels = str_to_title, guide = guide_legend(nrow = 2)) +
   facet_grid(trait ~ set, scales = "free_x", space = "free_x", labeller = labeller(trait = str_add_space), switch = "y") +
   xlab("Distance measure") +
@@ -830,9 +1028,11 @@ g_cluster_herit <- cluster_herit %>%
          set = str_replace_all(set, "[0-9]{4}", "")) %>%
   filter(!(model == "AMMI" & set == "Time-forward")) %>%
   filter(trait %in% traits) %>%
-  gather(group, heritability, -set, -model, -trait) %>%
+  filter(method == "mclust") %>%
+  gather(group, heritability, -set, -model, -trait, -method) %>%
   mutate(group = ifelse(group == "unclustered", paste0("H1: ", group), paste0("H2: ", group))) %>%
   ggplot(aes(x = model, y = heritability, color = model, shape = group)) +
+  # ggplot(aes(x = model, y = heritability, color = method, shape = group)) +
   geom_point(position = position_dodge2(0.5), size = 1.5) +
   scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
   scale_shape_discrete(name = NULL, labels = str_to_title, guide = guide_legend(nrow = 2)) +
@@ -879,6 +1079,7 @@ g_cluster_varcomp <- cluster_varcomp1 %>%
 
 # Save a table
 cluster_varcomp_table <- cluster_varcomp1 %>%
+  filter(method == "mclust") %>%
   mutate(annotation = list(NULL)) %>%
   mutate(annotation = str_trim(paste0(formatC(x = varprop, digits = 2))),
          annotation = str_remove_all(annotation, "NA")) %>%
@@ -1070,7 +1271,7 @@ pred_env_rank_random <- pred_env_dist_rank %>%
 
 # Save this
 save_file <- file.path(result_dir, "distance_method_results.RData")
-save("env_rank_df", "cluster_df", "cluster_varcomp", "pred_env_dist_rank","pred_env_rank_random", file = save_file)
+save("env_rank_df", "cluster_df", "cluster_df_pam", "cluster_varcomp", "pred_env_dist_rank","pred_env_rank_random", file = save_file)
 
 
 

@@ -14,52 +14,117 @@ library(cowplot)
 repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
+## Calculate genomic relationship
+genom_rel <- matrix(data = 0, nrow = nrow(K), ncol = ncol(K), dimnames = dimnames(K))
 
-## Plot relatedness of TP versus TP-VP relatedness
-K_df <- K[tp_geno, c(tp_geno, vp_geno)] %>% 
+# Iterate over rows and columns
+for (j in seq(ncol(K))) {
+  for (i in seq(nrow(K))) {
+
+    # Skip if i <= j
+    if (i <= j) {
+      next
+      
+    } else {
+      genom_rel[i,j] <- K[i,j, drop = F] / prod(sqrt(diag(K)[c(i, j)]))
+      
+    }
+  }
+}
+
+genom_rel1 <- as.matrix(as.dist(genom_rel))
+
+## Convert to data.frame
+genom_rel_df <- genom_rel1 %>% 
   as.data.frame() %>% 
   rownames_to_column("line_name") %>% 
   gather(line_name2, G, -line_name) %>% 
-  filter(line_name != line_name2) %>%
+  filter(line_name != line_name2)
+
+
+## Create DF of TP-TP relatedness
+genome_rel_tptp_df <- genom_rel1[tp_geno, tp_geno] %>% 
+  as.dist() %>%
+  tidy(diagonal = F) %>%
+  rename(line_name2 = item1, line_name = item2, G = distance)
+
+## Create DF of TP-VP relatedness
+genome_rel_tpvp_df <- genom_rel1[tp_geno, vp_geno] %>% 
+  as.data.frame() %>% 
+  rownames_to_column("line_name") %>% 
+  gather(line_name2, G, -line_name) %>% 
+  filter(line_name != line_name2)
+
+## Combine
+genom_rel_df1 <- bind_rows(genome_rel_tptp_df, genome_rel_tpvp_df) %>%
   mutate(pop = ifelse(line_name2 %in% vp_geno, "TPVP", "TPTP"),
-         pop_x = ifelse(pop == "TPVP", "VP", "TP"),
-         pop_y = "TP",
+         pop_x = ifelse(pop == "TPVP", "Test", "Train"),
+         pop_x = factor(pop_x, levels = c("Train", "Test")),
+         pop_y = "Train",
          pop = as.factor(pop))
 
+
+## Resample the genomeic relatedness of size n_test,
+## calculate genomic relationship. Repeat
+null_genome_rel_mean <- replicate(10000, sample(c(tp_geno, vp_geno), size = length(vp_geno)), simplify = FALSE) %>%
+  map(~subset(genom_rel_df1, line_name2 %in% ., G, drop = T)) %>%
+  map_dbl(mean)
+
+## Calculate realized mean relatedness between tp and vp
+real_genome_rel_mean <- group_by(genom_rel_df1, pop_x, pop_y) %>% 
+  summarize_at(vars(G), funs(mean, sd, n())) %>% 
+  mutate(se = sd / sqrt(n),
+         comparison = paste0(pop_y, "-", pop_x))
+
+## Plot with realized means
+tibble(x = null_genome_rel_mean) %>% 
+  ggplot(aes(x = x)) + 
+  geom_histogram(fill = "grey85", color = "black") +
+  geom_vline(data = real_genome_rel_mean, aes(xintercept = mean, color = comparison))
+
+
+
+
+
+
 ## Model
-fit <- lm(G ~ pop, data = K_df, subset = line_name != line_name2)
+fit <- lm(G ~ pop, data = genom_rel_df, subset = line_name != line_name2)
 effects::allEffects(fit) %>% plot
+
+## Visualize via density
+qplot(x = G, fill = pop, data = genom_rel_df, geom = "density")
 
 
 ## Visualize with heatmap
 heat_colors <- wesanderson::wes_palette(name = "Zissou1")
 
-g_relatedness_heat <- ggplot(data = K_df, aes(x = line_name2, y = line_name, fill = G)) +
+g_relatedness_heat <- ggplot(data = genom_rel_df1, aes(x = line_name2, y = line_name, fill = G)) +
   geom_tile() +
-  scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], name = "Genomic relatedness") +
+  scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], name = "Genomic relationship") +
   facet_grid(pop_y ~ pop_x, scales = "free_x", space = "free_x", switch = "both") +
-  theme_presentation(base_size = 10) +
-  theme(axis.ticks = element_blank(), axis.text = element_blank(), axis.title = element_blank(),
+  theme_presentation2(base_size = 10) +
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), axis.title = element_blank(), panel.border = element_blank(),
         panel.spacing.x = unit(0.1, "line"), legend.position = "top")
 
 ## Plot average relatedness
-g_relatedness_bar <- group_by(K_df, pop_x, pop_y) %>% 
-  mutate_at(vars(G), funs(mean, sd, n())) %>% 
-  split(.$pop) %>%
+g_relatedness_bar <- genom_rel_df1 %>% 
+  distinct(line_name2, pop_x) %>% 
+  split(.$pop_x) %>%
   map_df(~mutate(., row = seq(nrow(.)))) %>%
+  group_by(pop_x) %>%
   mutate(row_mean = round(mean(row))) %>%
-  ungroup() %>% 
-  mutate(se = sd / sqrt(n)) %>% 
+  left_join(., real_genome_rel_mean) %>%
   mutate_at(vars(mean, se), funs(ifelse(row != row_mean, NA, .))) %>%
   ggplot(aes(x = line_name2, y = mean, ymin = mean - se, ymax = mean + se, fill = pop_x)) +
   geom_col(width = 35) +
   geom_errorbar(width = 10) +
   scale_fill_manual(values = heat_colors[c(5,1)], guide = FALSE) +
-  scale_y_continuous(name = "Genomic relatedness\nwith TP", breaks = pretty) +
+  scale_y_continuous(name = "Genomic relationship\nwith Train", breaks = pretty) +
   scale_x_discrete(expand = c(0, 0)) +
-  facet_grid(~ pop_x, scales = "free_x", space = "free_x") +
+  facet_grid(~ pop_x, scales = "free_x", space = "free_x", switch = "x") +
   theme_presentation(base_size = 10) +
   theme(panel.grid = element_blank(), axis.ticks.y = element_line(), axis.text.x = element_blank(), axis.title.x = element_blank(), panel.spacing.x = unit(0.1, "line"))
+
 
 g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5),
                             labels = LETTERS[1:2])
@@ -70,30 +135,91 @@ ggsave(filename = "tp_vp_relatedness.jpg", plot = g_relatedness, path = fig_dir,
 
 
 
-
-
 Ksvd <- prcomp(K)
 
 # Color vector for programs
-program_colors <- subset(entry_list, Line %in% tp_geno, Program, drop = T) %>%
-  unique() %>%
-  setNames(object = umn_palette(2, n = 7)[-1:-2], .)
+program_colors <- entry_list %>%
+  mutate(Program = parse_character(Program)) %>%
+  filter(!is.na(Program)) %>%
+  distinct(Program) %>%
+  pull() %>%
+  setNames(object = c(neyhart_palette("umn1", 7)[-1:-2], neyhart_palette("umn2")[4]), .)
 
 # Plot
 g_pop_struc <- tidy(Ksvd) %>% 
   rename(line_name = row) %>% 
   left_join(., select(entry_list, line_name = Line, program = Program)) %>% 
+  filter(program != "M2") %>%
   filter(PC %in% 1:2) %>% 
-  mutate(PC = paste0("PC", PC)) %>% 
+  mutate(PC = paste0("PC", PC),
+         program = factor(program, levels = names(program_colors))) %>% 
   spread(PC, value)  %>% 
   ggplot(aes(x = PC1, y = PC2, color = program)) + 
   geom_point(size = 3) + 
-  scale_color_manual(values = program_colors, name = NULL) +
+  scale_color_manual(values = program_colors, name = NULL, drop = FALSE) +
   theme_poster() +
-  theme(legend.position = c(0.10, 0.75), legend.key.height = unit(1.5, "lines"))
+  theme(legend.position = c(0.10, 0.75), legend.key.height = unit(1.5, "lines"), legend.box = "horizontal")
 
 # Save
-ggsave(filename = "tp_population_structure.jpg", plot = g_pop_struc, path = fig_dir, width = 6, height = 5, dpi = 1000)
+ggsave(filename = "population_structure.jpg", plot = g_pop_struc, path = fig_dir, width = 6, height = 5, dpi = 1000)
+ggsave(filename = "population_structure_tp.jpg", plot = g_pop_struc, path = fig_dir, width = 6, height = 5, dpi = 1000)
+
+
+
+
+
+
+
+
+## Greyscale heatmap
+
+g_relatedness_heat <- ggplot(data = genom_rel_df1, aes(x = line_name2, y = line_name, fill = G)) +
+  geom_tile() +
+  scale_fill_gradient2(low = grey.colors(11)[11], mid = grey.colors(11)[5], high = grey.colors(11)[1], name = "Genomic relationship") +
+  facet_grid(pop_y ~ pop_x, scales = "free_x", space = "free_x", switch = "both") +
+  theme_presentation2(base_size = 10) +
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), axis.title = element_blank(), panel.border = element_blank(),
+        panel.spacing.x = unit(0.1, "line"), legend.position = "top")
+
+## Plot average relatedness
+g_relatedness_bar <- genom_rel_df1 %>% 
+  distinct(line_name2, pop_x) %>% 
+  split(.$pop_x) %>%
+  map_df(~mutate(., row = seq(nrow(.)))) %>%
+  group_by(pop_x) %>%
+  mutate(row_mean = round(mean(row))) %>%
+  left_join(., real_genome_rel_mean) %>%
+  mutate_at(vars(mean, se), funs(ifelse(row != row_mean, NA, .))) %>%
+  ggplot(aes(x = line_name2, y = mean, ymin = mean - se, ymax = mean + se, fill = pop_x)) +
+  geom_col(width = 35) +
+  geom_errorbar(width = 10) +
+  scale_fill_manual(values = heat_colors[c(5,1)], guide = FALSE) +
+  scale_y_continuous(name = "Genomic relationship\nwith Train", breaks = pretty) +
+  scale_x_discrete(expand = c(0, 0)) +
+  facet_grid(~ pop_x, scales = "free_x", space = "free_x", switch = "x") +
+  theme_presentation(base_size = 10) +
+  theme(panel.grid = element_blank(), axis.ticks.y = element_line(), axis.text.x = element_blank(), axis.title.x = element_blank(), panel.spacing.x = unit(0.1, "line"))
+
+
+g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5),
+                           labels = LETTERS[1:2])
+ggsave(filename = "tp_vp_relatedness_greyscale.jpg", plot = g_relatedness, path = fig_dir, width = 4, height = 6, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -19,6 +19,7 @@ library(broom)
 library(car)
 library(cowplot)
 library(grid)
+library(modelr)
 
 # Load the environmental distance df
 load(file.path(result_dir, "distance_method_results.RData"))
@@ -43,13 +44,6 @@ env_herit <- stage_one_data %>%
 
 
 #### Cross-validation / POV using all data #####
-
-## Bind rows for any lists
-cv00_environment_rank_predictions <- bind_rows(cv00_environment_rank_predictions)
-cv00_environment_rank_random_predictions <- bind_rows(cv00_environment_rank_random_predictions)
-pov00_environment_rank_predictions <- bind_rows(pov00_environment_rank_predictions)
-cv0_pocv0_environment_rank_predictions <- bind_rows(cv0_pocv0_environment_rank_predictions)
-cv0_pocv0_environment_rank_random_predictions <- bind_rows(cv0_pocv0_environment_rank_random_predictions)
 
 ## Adjust pov00 and cv00
 pov00_predictions <- gather(pov00_predictions, scheme, accuracy, pov00)
@@ -156,6 +150,13 @@ for (i in seq(nrow(separate_cv_pov_predictions_analysis))) {
     
     fit <- lmer(accuracy ~ 1 + scheme + (1|val_environment), data = df)
     
+    # ## Update?
+    # df1 <- df %>%
+    #   add_predictions(fit) %>%
+    #   filter(pred > 0.2)
+    # # Refit
+    # fit1 <- lmer(formula(fit), data = df1)
+    
     effects_keep <- as.data.frame(Effect(focal.predictors = "scheme", fit))
     
     fit_summary <- data_frame(
@@ -177,6 +178,8 @@ for (i in seq(nrow(separate_cv_pov_predictions_analysis))) {
     
     ## Model
     fit <- lmer(accuracy ~ 1 + scheme + (1|val_environment) + (1|val_environment:scheme), data = df)
+    
+
     
     effects_keep <- as.data.frame(Effect(focal.predictors = "scheme", fit))
     
@@ -218,7 +221,34 @@ g_cv_pov_all_data <- separate_cv_pov_predictions_analysis1 %>%
 ggsave(filename = "all_cv_pov_predictions.jpg", plot = g_cv_pov_all_data, path = fig_dir, width = 4, height = 5, dpi = 1000)
 
 
+## Paper version
+g_cv_pov_all_data_paper <- separate_cv_pov_predictions_analysis1 %>%
+  filter(scheme != "POCV00") %>%
+  mutate(scheme = str_replace(scheme, "POCV", "POV"),
+         scheme = factor(scheme, levels = c("CV0", "POV0", "CV00", "POV00"))) %>%
+  ggplot(aes(x = scheme, y = accuracy, ymin = lower, ymax = upper)) +
+  geom_point() +
+  geom_errorbar(width = 0.5) +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  xlab("Validation scheme") +
+  facet_grid(trait ~ set, scales = "free_x", space = "free_x", labeller = labeller(trait = str_add_space), switch = "y") +
+  theme_presentation2(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave(filename = "all_cv_pov_predictions_paper.jpg", plot = g_cv_pov_all_data_paper, path = fig_dir, width = 4, height = 5, dpi = 1000)
+
+
+## Output a table
+separate_cv_pov_predictions_analysis1 %>%
+  filter(scheme != "POCV00") %>%
+  mutate(scheme = str_replace(scheme, "POCV", "POV"),
+         scheme = factor(scheme, levels = c("CV0", "POV0", "CV00", "POV00"))) %>%
+  mutate_at(vars(accuracy, lower, upper), round, 2) %>%
+  mutate(annotation = paste0(accuracy, " (", lower, ", ", upper, ")")) %>%
+  select(set, trait, scheme, annotation) %>%
+  spread(scheme, annotation) %>%
+  # Output a table
+  write_csv(x = ., path = file.path(fig_dir, "all_cv_pov_predictions.csv"))
 
 
 
@@ -269,10 +299,12 @@ environment_rank_df %>%
 
 
 
-
+##### 
 
 ## Analyze pov00 first
-pov00_predictions_out <- bind_rows(pov00_environment_rank_predictions, pov00_environment_rank_random_predictions) %>%
+pov00_predictions_out <- pov00_environment_rank_random_predictions %>%
+  mutate(model = paste0("sample", rep)) %>%
+  bind_rows(pov00_environment_rank_predictions, .) %>%
   mutate(model = ifelse(str_detect(model, "sample"), "sample", model)) %>%
   left_join(., env_herit) %>%
   mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
@@ -625,6 +657,86 @@ dev.off()
 
 
 
+### Example for presentation
+traits_present <- c("GrainYield", "HeadingDate")
+model_present <- c("Random", "IPCA-EC", "GCD", "PD")
+
+### Just leave-one-environment-out
+g_rank_pred_base <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
+  # filter(trait %in% traits) %>%
+  filter(trait %in% traits_present) %>%
+  filter(model %in% model_present) %>%
+  filter(set == "Leave-one-environment-out") %>%
+  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+  geom_line(aes(size = size), color = "white") +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using\nall data")) +
+  facet_grid(trait ~ scheme, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
+  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
+                     guide = guide_legend(keyheight = unit(1, "line"), reverse = TRUE)) +
+  scale_linetype_manual(values = 2, name = NULL) +
+  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+  scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
+  scale_x_continuous(breaks = pretty, name = expression("Number of training set environments ("*italic(N[TE])*")")) +
+  theme_presentation2(base_size = 12) +
+  theme(legend.position = "right", strip.placement = "outside")
+
+ggsave(filename = "cumulative_env_pred_LOEO_presentation_base.jpg", path = fig_dir, plot = g_rank_pred_base, 
+       width = 6.5, height = 5, units = "in", dpi = 1000)
+
+
+g_rank_pred <- g_rank_pred_base + 
+  geom_line(aes(size = size))
+
+## Add viewport of heading data/cv00/leave-one-out
+g_rank_pred_vp_list <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
+  filter(trait == "HeadingDate") %>%
+  filter(model %in% model_present) %>%
+  split(list(.$set, .$scheme)) %>%
+  map2(.x = ., .y = LETTERS[seq_along(.)], ~gg_vp(x = .x, let = ""))
+
+
+## Coordinates for viewports
+vp1 <- viewport(x = 0.29, y = 0.27, width = 0.29, height = 0.33)
+vp2 <- viewport(x = 0.60, y = 0.34, width = 0.29, height = 0.33)
+
+
+jpeg(filename = file.path(fig_dir, "cumulative_env_pred_LOEO_presentation.jpg"), width = 6.5, height = 5, units = "in", res = 1000)
+print(g_rank_pred)
+print(g_rank_pred_vp_list$`Leave-one-environment-out.CV00`, vp = vp1)
+print(g_rank_pred_vp_list$`Leave-one-environment-out.POV00`, vp = vp2)
+dev.off()
+
+# 
+# 
+# 
+# ## Example graphs to demonstrate concept
+# g_rank_pred_example <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
+#   filter(trait == "GrainYield", set == "Leave-one-environment-out", scheme == "CV00") %>%
+#   filter(model %in% c("LocPD", "Random", "GCD")) %>%
+#   mutate(model = factor(model, levels = unique(model))) %>%
+#   ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+#   geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data")) +
+#   geom_line(lwd = 2) +
+#   scale_color_discrete(guide = FALSE) +
+#   scale_linetype_manual(values = 2, name = NULL) +
+#   scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+#   scale_y_continuous(breaks = pretty, limits = c(0.23, 0.47), name = expression("Prediction accuracy ("*italic(r[MG])*")"), labels = NULL) +
+#   scale_x_continuous(breaks = pretty, name = expression("Number of training set environments ("*italic(N[TE])*")")) +
+#   theme_presentation2(base_size = 18) +
+#   theme(legend.position = c(0.75, 0.10), strip.placement = "outside")
+# 
+# 
+# ggsave(filename = "rank_prediction_example.jpg", plot = g_rank_pred_example, width = 7, height = 5.5, dpi = 1000,
+#        path = "C:/Users/jln54/GoogleDrive/BarleyLab/ForKevin/Presentations/DefenseSeminar/figures/")
+# ggsave(filename = "rank_prediction_example1.jpg", plot = g_rank_pred_example, width = 7, height = 5.5, dpi = 1000,
+#        path = "C:/Users/jln54/GoogleDrive/BarleyLab/ForKevin/Presentations/DefenseSeminar/figures/")
+# ggsave(filename = "rank_prediction_example2.jpg", plot = g_rank_pred_example, width = 7, height = 5.5, dpi = 1000,
+#        path = "C:/Users/jln54/GoogleDrive/BarleyLab/ForKevin/Presentations/DefenseSeminar/figures/")
+
+
+
+
 
 
 
@@ -842,6 +954,7 @@ cluster_pred <- ls(pattern = "[0-9]{1,2}_cluster_predictions") %>%
 
 cv00_cluster_predictions <- cv00_cluster_predictions %>%
   gather(scheme, accuracy, cv00, pocv00)
+pov00_cluster_predictions <- gather(pov00_cluster_predictions, scheme, accuracy, pov00)
 
 ## Get and tidy
 cluster_pred_df <- map(cluster_pred, get) %>%
@@ -890,9 +1003,19 @@ for (i in seq(nrow(separate_cv_pov_cluster_predictions_analysis))) {
   
   df <- separate_cv_pov_cluster_predictions_analysis$data[[i]]
   
+  # ## Model building
+  # fit1 <- lm(accuracy ~ 1 + model + scheme + model:scheme, data = df)
+  # 
+  # fit2 <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model), data = df)
+  # 
+  # fit3 <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model), data = df)
+  # 
+  # 
+  # 
   ## One model
   ## Model
-  fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + (1|nTrainEnv:cluster:model), data = df)
+  fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + 
+                (1|nTrainEnv:cluster:model), data = df)
   
   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
   
@@ -920,7 +1043,7 @@ separate_cv_pov_cluster_predictions_analysis %>%
   filter(p.value <= alpha)
 
 
-
+## Mostly environment nested within cluster nested within model
 
 
 ## Plot all
@@ -929,12 +1052,14 @@ separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predict
   unnest(effects) %>%
   mutate(scheme = factor(toupper(scheme), levels = cv_replace),
          model = factor(model, levels = dist_method_abbr_use),
-         set = factor(str_replace_all(set, set_replace), levels = set_replace)) %>%
+         set = str_replace_all(set, set_replace),
+         set = str_replace_all(set, "[0-9]{4}", "")) %>%
   left_join(., select(separate_cv_pov_predictions_analysis1, -lower, -upper, -se)) %>%
   mutate(group = paste0(set, " - ", scheme))
            
 
 g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
   geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
   geom_errorbar(width = 0.5) +
@@ -986,6 +1111,7 @@ ggsave(filename = "all_cv_pov_cluster_predictions.jpg", plot = g_cv_pov_cluster,
 
 ## Paper version
 g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  filter(trait %in% traits) %>%
   mutate(scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
          scheme = factor(scheme, levels = cv_replace)) %>%
   filter(!str_detect(scheme, "POCV")) %>%
@@ -1026,6 +1152,7 @@ legend_key <- paste0(names(dist_colors_use), ": ", c("", "Phenotypic distance", 
 
 g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(scheme %in% c("CV00", "POV00")) %>%
+  filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
   geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
   geom_errorbar(width = 0.5) +
@@ -1047,7 +1174,29 @@ ggsave(filename = "cv00_pov00_cluster_predictions.jpg", plot = g_cv00_pov00_clus
 
 
 
-##
+## Example for presentation
+
+g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
+  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+  filter(trait %in% traits_present, model %in% model_present) %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model), size = 3) +
+  scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
+  scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
+  scale_linetype_manual(values = 1, name = NULL) +
+  xlab("Distance measure") +
+  labs(caption = "") +
+  facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
+
+ggsave(filename = "cv00_pov00_cluster_predictions_presentation.jpg", plot = g_cv00_pov00_cluster, path = fig_dir, 
+       width = 4.5, height = 4.5, dpi = 1000)
+
+
 
 
 
@@ -1168,10 +1317,12 @@ random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
          model = factor(model, levels = dist_method_abbr_use),
          scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
          scheme = factor(scheme, levels = cv_replace),
-         set = factor(str_replace_all(set, set_replace), levels = set_replace))
+         set = str_replace_all(set, set_replace),
+         set = str_replace_all(set, "[0-9]{4}", ""))
 
 
 g_random_cv_pov_cluster <- random_cluster_predictions_analysis1 %>%
+  filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
   geom_hline(yintercept = 0) +
   geom_errorbar(width = 0.5) +
@@ -1190,6 +1341,7 @@ ggsave(filename = "random_cv_pov_cluster_predictions.jpg", plot = g_random_cv_po
 
 ## Publication version is just CV and POV
 g_random_cv_pov_cluster_list <- random_cluster_predictions_analysis1 %>%
+  filter(trait %in% traits) %>%
   filter(!str_detect(scheme, "POCV")) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
@@ -1210,6 +1362,31 @@ g_random_cv_pov_cluster1 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, n
 ggsave(filename = "random_cv_pov_cluster_predictions_paper.jpg", plot = g_random_cv_pov_cluster1, path = fig_dir, width = 7, height = 3.5, dpi = 1000)
 
 
+## Example for presentation
+g_random_cv00_pov00_cluster <- random_cluster_predictions_analysis1 %>%
+  filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
+  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+  filter(trait %in% traits_present, model %in% model_present) %>%
+  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+  geom_hline(aes(yintercept = 0, lty = "Accuracy using random clusters"), color = "grey") +
+  geom_errorbar(width = 0.5) +
+  geom_point(aes(color = model), size = 3) +
+  scale_y_continuous(breaks = pretty, name = "Marginal prediction accuracy") +
+  scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
+  scale_linetype_manual(values = 1, name = NULL) +
+  xlab("Distance measure") +
+  labs(caption = "") +
+  facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  theme_presentation2(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
+
+ggsave(filename = "random_cv00_pov00_cluster_predictions_presentation.jpg", plot = g_random_cv00_pov00_cluster, path = fig_dir, 
+       width = 4.5, height = 4.5, dpi = 1000)
+
+
+
+
+
 
 
 ## Combine figure of cluster accuracy with random
@@ -1224,6 +1401,15 @@ g_cv_pov_cluster_TF <- plot_grid(g_cv_pov_cluster_list$`Time-forward` + theme(le
 
 ggsave(filename = "all_cv_pov_and_random_cluster_predictions_LOEO_paper.jpg", plot = g_cv_pov_cluster_LOEO, path = fig_dir, width = 7, height = 4, dpi = 1000)
 ggsave(filename = "all_cv_pov_and_random_cluster_predictions_TF_paper.jpg", plot = g_cv_pov_cluster_TF, path = fig_dir, width = 7, height = 4, dpi = 1000)
+
+
+
+
+
+
+
+
+
 
 
 

@@ -4,22 +4,6 @@
 ## 
 
 
-
-## Other/utility functions
-# A function to assign cores to a data.frame
-assign_cores <- function(df, n_core) {
-  df$core <- sort(rep(seq(n_core), length.out = nrow(df)))
-  return(df)
-}
-
-# A function to replace a character vector and convert it to a factor
-as_replaced_factor <- function(x, replacement) {
-  x_repl <- str_replace_all(string = x, pattern = replacement)
-  factor(x_repl, levels = replacement)
-}
-
-
-
 ## Phenotypic distance method
 dist_env <- function(x, gen.col = "gen", env.col = "env", pheno.col = "yield") {
   
@@ -383,7 +367,10 @@ resample_prediction <- function(data, train.exp, test.exp) {
 
 
 ## Function to perform model-based clustering
-env_mclust <- function(data, min_env = 2, test.env) {
+env_mclust <- function(data, min_env = 2, test.env, method = c("mclust", "pam"), diss = FALSE) {
+  
+  ## Method argument
+  method <- match.arg(method)
   
   ## If test.env is present, remove them from the original dataset
   if (!missing(test.env)) {
@@ -396,24 +383,79 @@ env_mclust <- function(data, min_env = 2, test.env) {
     train_data <- data
   }
   
-  # Cluster
-  clusmod <- Mclust(data = train_data)
-  # K
-  k <- G <- clusmod$G
   
-  # Do any clusters have less than the minimum number of environments?
-  while (any(table(clusmod$classification) < min_env)) {
-    # New G
-    G <- G - 1
-    # Recluster
-    clusmod <- Mclust(data = train_data, verbose = FALSE, G = seq(G))
+  ## Control flow based on method
+  if (method == "mclust") {
+  
+    # Cluster
+    clusmod <- Mclust(data = train_data)
+    # K
+    k <- G <- clusmod$G
+    
+    # Do any clusters have less than the minimum number of environments?
+    while (any(table(clusmod$classification) < min_env)) {
+      # New G
+      G <- G - 1
+      # Recluster
+      clusmod <- Mclust(data = train_data, verbose = FALSE, G = seq(G))
+    }
+    
+    ## Get the classification of the environments
+    classif <- data_frame(environment = row.names(clusmod$data), cluster = clusmod$classification)
+    # Get the mean from each cluster
+    clusmean <- t(clusmod$parameters$mean) %>% 
+      `row.names<-`(., paste0("cluster", seq(nrow(.))))
+    
+  } else if (method == "pam") {
+    
+    # If diss is true, determine the number of environments
+    if (diss) {
+      envs <- row.names(as.matrix(train_data))
+      
+    } else {
+      envs <- row.names(train_data)
+
+    }
+    
+    n_env <- length(envs)
+    
+    ## Iterate over possible clusters
+    min_cluster <- 2
+    max_cluster <- n_env - 1
+    k_seq <- seq(min_cluster, max_cluster, by = 1)
+    
+    # Fit pam for each k
+    k_seq_pam <- map(k_seq, ~pam(x = train_data, k = ., diss = diss))
+    # Calculate the average silhouette width
+    avg_silo <- map_dbl(k_seq_pam, ~.$silinfo$avg.width)
+    # Get the cluster assignments, then determine if any environments are by themselves
+    clust_assign <- map(k_seq_pam, "clustering")
+    any_env_alone <- map_lgl(clust_assign, ~any(table(.) < min_env))
+    
+    ## Find k such that the silhouette width is maximized and the number of environments in any cluster is >= min_env
+    k_choose <- k_seq[!any_env_alone][which.max(avg_silo[!any_env_alone])]
+    # If length(k_choose) = 0, k = 1
+    if (length(k_choose) == 0) {
+      ## Get the classification of the environments
+      classif <- data_frame(environment = envs, cluster = 1)
+      # Get the mediods from each cluster
+      clusmean <- t(colMeans(train_data)) %>% 
+        `row.names<-`(., paste0("cluster", seq(nrow(.))))
+      
+    } else {
+      
+      pam_choose <- pam(x = train_data, k = k_choose, diss = diss)
+      
+      ## Get the classification of the environments
+      classif <- data_frame(environment = envs, cluster = pam_choose$clustering)
+      # Get the mediods from each cluster
+      clusmean <- pam_choose$medoids %>% 
+        `row.names<-`(., paste0("cluster", seq(nrow(.))))
+      
+    }
+      
   }
-  
-  ## Get the classification of the environments
-  classif <- data_frame(environment = row.names(clusmod$data), cluster = clusmod$classification)
-  # Get the mean from each cluster
-  clusmean <- t(clusmod$parameters$mean) %>% 
-    `row.names<-`(., paste0("cluster", seq(nrow(.))))
+
   
   ## If test.env is present, use the data to determine the cluster assignment for each test environment
   ## based on the means of the assigned clusters
@@ -673,6 +715,130 @@ model5 <- function(train, test, Kg, Ke) {
 }
 
 
+
+
+## Function for calculating growing degree days
+## tmin and tmax are vectors of the same size
+## 
+## This function assumes temperature in F
+## adjust = T will adjust GDD depending growth stage (< 384 AGDD)
+gdd <- function(tmin, tmax, adjust = FALSE, return = c("gdd", "agdd"), base = c("C", "F")) {
+  
+  # Make sure tmin and tmax are the same length
+  stopifnot(length(tmin) == length(tmax))
+  
+  # Match arguments
+  return <- match.arg(return)
+  base <- match.arg(base)
+  
+  ## Designate temperature cutoffs
+  minT <- ifelse(base == "C", 0, 32)
+  maxT1 <- ifelse(base == "C", 21, 70)
+  maxT2 <- ifelse(base == "C", 35, 95)
+  
+  ## Adjust tmax and tmin so if less than 32, set to 32
+  tmax1 <- ifelse(tmax < minT, minT, tmax)
+  tmin1 <- ifelse(tmin < minT, minT, tmin)
+  
+  ## Adjust tmax so if > 70 (before 384 AGDD), set to 70
+  ## If > 95 (after 384 AGDD), set to 95
+  tmax70 <- ifelse(tmax1 > maxT1, maxT1, tmax1)
+  tmax95 <- ifelse(tmax1 > maxT2, maxT2, tmax1)
+  
+  
+  # Calculate average temperature
+  tavg1 <- (tmax70 + tmin1) / 2
+  tavg2 <- (tmax95 + tmin1) / 2
+  
+  # Calculate GDD
+  gdd1 <- tavg1 - minT
+  gdd2 <- tavg2 - minT
+  gdd_use <- agdd <- numeric(length(gdd1))
+  
+  ## Calculate AGDD
+  agdd1 <- cumsum(gdd1)
+  agdd2 <- cumsum(gdd2)
+  
+  ## If adjust = F, just use agdd2
+  if (!adjust) {
+    agdd <- agdd2
+    gdd_use <- gdd2
+    
+  } else {
+    # Find the point of 384 AGDD
+    which384 <- agdd1 >= 384
+    
+    # When which384 == T, accumulate from gdd1, otherwise accumulate from gdd2
+    gdd_use[!which384] <- gdd1[!which384]
+    gdd_use[which384] <- gdd2[which384]
+    
+    agdd <- cumsum(gdd_use)
+    
+  }
+  
+  ## Return GDD or AGDD
+  if (return == "gdd") {
+    return(gdd_use)
+  } else {
+    return(agdd)
+  }
+  
+}
+  
+
+## Predict Haun stage using GDD
+predict_haun_stage <- function(x) (0.0154 * x) - (0.00000000391 * (x^3)) + 0.24
+
+## A function that designates growth stage (vegetative, flowering, grain fill) based
+## on AGDD
+## See  for information
+## on staging
+stage_growth <- function(x, method = c("bauer", "montana")) {
+  
+  method <- match.arg(method)
+  
+  # Empty stage string
+  stage <- rep(NA, length(x))
+  
+  ## If Bauer, use https://library.ndsu.edu/ir/bitstream/handle/10365/8301/farm_49_06_05.pdf
+  
+  if (method == "bauer") {
+    
+    ## Predict Haun growth stage given AGDD
+    haun <- predict_haun_stage(x = x)
+  
+    ## Vegetative stage is emergence to flowering (0.5 - 9.5)
+    ## Flowering is 9.5 - 10.2
+    ## Grain fill is 10.2 - maturity (max)
+    
+    stage[haun < 0.5] <- "pre-emergence"
+    stage[between(haun, 0.5, 9.5)] <- "vegetative"
+    stage[between(haun, 9.5, 10.2)] <- "flowering"
+    stage[between(haun, 10.2, max(haun))] <- "grainfill"
+    # Add maturity for those that are less than the max
+    stage[which(seq_along(haun) > which.max(haun) & haun < max(haun))] <- "maturity"
+    
+    # If Montana, use http://landresources.montana.edu/soilfertility/documents/PDF/pub/GDDPlantStagesMT200103AG.pdf
+  } else if (method == "montana") {
+    
+    # Vegetative is 110 AGDD - 730
+    # Flowering is 730 - 930
+    # Grain fill is > 930
+    
+    stage[x < 110] <- "pre-emergence"
+    stage[between(x, 110, 730)] <- "vegetative"
+    stage[between(x, 730, 930)] <- "flowering"
+    stage[between(x, 930, 1300)] <- "grainfill"
+    stage[x > 1300] <- "maturity"
+    
+    
+  }
+    
+  
+  ## Convert to ordered factor
+  factor(x = stage, levels = c("pre-emergence", "vegetative", "flowering", "grainfill", "maturity"), ordered = TRUE)
+
+}
 
 
 

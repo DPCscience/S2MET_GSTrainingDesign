@@ -19,6 +19,7 @@ library(ggridges)
 # Load a new optimizer
 library(optimx)
 library(lme4qtl)
+library(lmerTest)
 library(cowplot)
 ## ggrepel
 library(ggrepel)
@@ -204,13 +205,14 @@ loc_info_toplot <- trial_info_toplot %>%
   mutate(n_years = factor(n_years, levels = sort(unique(n_years))))
 
 ## Now create labels for each location (as a combination of all environments)
-loc_info_toplot <-  trial_info %>% 
+use_loc_info_toplot <-  trial_info %>% 
   filter(environment %in% tp_vp_env) %>%
   filter(is.na(notes)) %>%
   group_by(location, latitude, longitude) %>%
   summarize(n_years = n_distinct(year)) %>%
   ungroup() %>%
-  mutate(n_years = factor(n_years, levels = sort(unique(n_years))))
+  mutate(n_years = factor(n_years, levels = sort(unique(n_years))),
+         location = str_to_title(str_replace_all(location, "_", " ")))
 
 
 
@@ -221,7 +223,8 @@ g_map <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
   geom_polygon(fill = "white") +
   geom_polygon(data = canada, fill = NA, color = "grey50", lwd = 0.3) + # Add canada
   geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "grey50", lwd = 0.3) +
-  geom_point(data = loc_info_toplot, aes(x = longitude, y = latitude, group = location, color = location, size = n_years), alpha = 0.70) +
+  # geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, group = location, color = location, size = n_years), alpha = 0.70) +
+  geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, size = n_years, group = location), alpha = 0.70, color = neyhart_palette("umn2")[3]) +
   coord_fixed(ratio = 1.5, xlim = c(-125, -65), ylim = c(35, 50), ) +
   scale_color_manual(guide = FALSE, values = colors_use) + 
   scale_size_discrete(name = "Number of years observed\nat location", guide = guide_legend(title.position = "left", order = 1, title.hjust = 1)) +
@@ -239,6 +242,51 @@ g_map <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
 
 # Save the figure
 ggsave(filename = "site_map_paper.jpg", plot = g_map, path = fig_dir, width = 3.5, height = 3, dpi = 1000)
+
+
+## Collapse Ithaca
+use_loc_info_toplot1 <- use_loc_info_toplot %>% 
+  mutate(location = str_remove(location, "[0-9]{1}"), 
+         n_years = parse_number(as.character(n_years))) %>% 
+  group_by(location) %>% 
+  mutate(n_trials = sum(n_years)) %>% 
+  slice(1) %>%
+  ungroup()
+  
+
+# Coordinate limits
+long_limit <- c(-115, -70)
+lat_limit <- c(37, 50)
+
+## Different version of the map - grey
+g_map_alt <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "grey85") +
+  geom_polygon(data = canada, fill = NA, color = "white", lwd = 0.3) + # Add canada
+  geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "white", lwd = 0.3) +
+  # geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, group = location, color = location, size = n_years), alpha = 0.70) +
+  geom_point(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location), size = 3.5) +
+  ggrepel::geom_text_repel(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location, label = location), 
+                           size = 2, hjust = 0.5, nudge_x = -1, segment.size = 0.2, point.padding = unit(2, "pt"),
+                           min.segment.length = 1) +
+  geom_text(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location, label = n_trials), size = 2, 
+            color = ifelse(use_loc_info_toplot1$location == "Arlington", "black", "white")) +
+  coord_fixed(ratio = 1.5, xlim = long_limit, ylim = lat_limit) +
+  scale_color_manual(guide = FALSE, values = colors_use) + 
+  scale_x_continuous(breaks = NULL, name = NULL, labels = NULL) + 
+  scale_y_continuous(breaks = NULL, name = NULL, labels = NULL) +
+  theme_classic() +
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        panel.border = element_rect(colour = "black", fill = alpha("white", 0)), axis.line = element_blank()) +
+  ggsn::north(location = "bottomleft", symbol = 12, x.min = min(long_limit) - 2, x.max = max(long_limit), 
+              y.min = min(lat_limit) + 2, y.max = max(lat_limit)) + 
+  ggsn::scalebar(x.min = min(long_limit), x.max = max(long_limit), y.min = min(lat_limit), y.max = max(lat_limit), dist = 500, 
+                 dd2km = TRUE, model = "WGS84", location = "bottomleft", st.size = 1.5,
+                 st.dist = 0.05, st.bottom = FALSE)
+
+
+# Save the figure
+ggsave(filename = "site_map_paper_alt.jpg", plot = g_map_alt, path = fig_dir, width = 3.5, height = 1.75, dpi = 1000)
+
 
 
 
@@ -275,6 +323,48 @@ g_map1 <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
 # Save the figure
 ggsave(filename = "site_map1.jpg", plot = g_map1, path = fig_dir,
        width = 4, height = 3, dpi = 1000)
+
+
+## Project map - no color
+g_map_nocolor_base <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "white") +
+  geom_polygon(data = canada, fill = NA, color = "grey50", lwd = 0.3) + # Add canada
+  geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "grey50", lwd = 0.3) +
+  coord_map(projection = "albers", lat0 = 35, lat1 = 50,  xlim = c(-125, -65), ylim = c(35, 48.1)) +
+  # scale_color_manual(guide = FALSE, values = colors_use) + 
+  scale_size_discrete(name = "Number of trial years at a location", guide = guide_legend(title.position = "left", order = 1, title.hjust = 1)) +
+  scale_x_continuous(breaks = pretty) + 
+  scale_y_continuous(breaks = pretty) +
+  xlab("Longitude") +
+  ylab("Latitude") + 
+  theme_presentation2(base_size = 10) + 
+  theme(panel.background = element_blank(), panel.grid = element_blank(), panel.border = element_blank(), axis.line = element_blank(),
+        legend.position = "bottom", legend.direction = "horizontal", legend.justification = "center", plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank())
+
+# Save the figure
+ggsave(filename = "site_map_nocolor_blank.jpg", plot = g_map_nocolor_base, path = fig_dir,
+       width = 5, height = 2.5, dpi = 1000)
+
+g_map_nocolor <- g_map_nocolor_base +
+  geom_point(data = loc_info_toplot, aes(x = longitude, y = latitude, group = location, size = n_years), 
+             color = neyhart_palette("barley")[1], alpha = 0.70)
+
+# Save the figure
+ggsave(filename = "site_map_nocolor.jpg", plot = g_map_nocolor, path = fig_dir,
+       width = 5, height = 4, dpi = 1000)
+
+
+g_map_nocolor1 <- g_map_nocolor_base + 
+  geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, group = location, size = n_years), 
+             color = neyhart_palette("barley")[1], alpha = 0.70)
+
+# Save the figure
+ggsave(filename = "site_map_nocolor_filter.jpg", plot = g_map_nocolor1, path = fig_dir,
+       width = 5, height = 4, dpi = 1000)
+
+
+
 
 
 
@@ -330,29 +420,6 @@ detach("package:maps")
 
 
 
-## Fit a one-step model to analyze GxE
-# Subset the traits and relevant trials
-data_to_model <- s2_tidy_pheno %>%
-  filter(year %in% 2015:2017, !str_detect(trial, "FHB|PVV"), trait %in% traits) %>%
-  mutate(location = ifelse(location == "CNY", "HNY", location),
-         environment = ifelse(environment == "CNY15", "HNY15", environment)) %>%
-  group_by(trait) %>%
-  filter(n_distinct(environment) > 35) %>%
-  group_by(trial, trait, line_name) %>% 
-  ungroup() %>%
-  mutate(line_name = as.character(line_name),
-         line = ifelse(!line_name %in% checks, line_name, "00check"),
-         check = ifelse(line_name %in% checks, line_name, "00line")) %>%
-  mutate_at(vars(rep, line, check, row, column, blk), as.factor)
-
-
-
-
-
-
-
-
-
 
 ## Stage-Two analysis
 
@@ -385,355 +452,168 @@ boot_reps <- 10
 #### 
 
 
-stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
-  mutate_at(vars(location, year, line_name), as.factor) %>%
-  group_by(trait, population) %>%
-  do({
-    
-    df <- droplevels(.)
-    
-    # Table of lines by environments (i.e. plots)
-    plot_table <- xtabs(formula = ~ line_name + environment, data = df)
-    
-    ## Harmonic means
-    # Locations
-    harm_env <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
-      ifelse(. > 1, 1, .) %>%
-      rowSums() %>% 
-      harm_mean()
-    
-    # Reps
-    harm_rep <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
-      harm_mean()
-    
-    # # Lmer control
-    # lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore", calc.derivs = FALSE,
-    #                             optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE))
-    
-    lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-    
-    # Get the weights
-    wts <- pull(df, std_error)^2
-
-    ## Fit the full model
-    fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment),
-                data = df, control = lmer_control, weights = wts)
-    
-    # ## Fit the full model
-    # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
-    #             data = df, control = lmer_control)
-    
-    ## Likelihood ratio tests
-    lrt <- ranova(fit) %>% 
-      tidy() %>% 
-      filter(!str_detect(term, "none")) %>% 
-      mutate(term = str_remove(term, "\\(1 \\| ") %>% 
-               str_remove("\\)")) %>% 
-      select(term, LRT, df, p.value)
-    
-    ## Calculate heritability
-    exp <- "line_name / (line_name + (line_name:environment / n_e) + (Residual / (n_e * n_r)))"
-    
-    ## Use bootstrapping to calculate a confidence interval
-    # Generate bootstrapping samples and calculate heritability using the bootMer function
-    h2_boot <- bootMer(x = fit, nsim = boot_reps, FUN = function(x) 
-      herit(object = x, exp = exp, n_e = harm_env, n_r = harm_rep)$heritability)
-    
-    h2 <- herit(object = fit, n_e = harm_env, n_r = harm_rep, exp = exp)
-    
-    # Add the bootstrapping results with a confidence interval
-    h2$heritability <- tidy(h2_boot) %>% 
-      cbind(., t(quantile(h2_boot$t, probs = c(alpha / 2, 1 - (alpha / 2))))) %>% 
-      rename_at(vars(4, 5), ~c("lower", "upper"))
-    
-    # Return data_frame
-    data_frame(fit = list(fit), lrt = list(lrt), h2 = list(h2), n_e = harm_env, n_r = harm_rep) 
-    
-  }) %>% ungroup()
-
-
-
-
-# Everything is significant
-
-## Plot the proportion of variance from each source
-stage_two_fits_GE_varprop <- stage_two_fits_GE %>%
-  mutate(h2 = map(h2, "var_comp")) %>%
-  unnest(h2) %>% 
-  group_by(trait, population) %>% 
-  mutate(var_prop = variance / sum(variance),
-         source = str_replace_all(source, c("line_name:environment" = "Genotype x Environment",
-                                            "environment" = "Environment", "line_name" = "Genotype")),
-         source = factor(source, levels = c("Environment", "Genotype", "Genotype x Environment",
-                                            "Residual"))) %>%
-  ungroup()
-
-## Plot both populations and all traits
-g_varprop <- stage_two_fits_GE_varprop %>% 
-  mutate(population = str_to_upper(population)) %>% 
-  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
-  geom_col() +
-  ylab("Proportion of Variance") +
-  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
-  facet_grid(~ population) + 
-  theme_acs() +
-  theme(axis.title.x = element_blank(),
-        legend.position = "bottom")
-
-# Save
-# ggsave(filename = "variance_components.jpg", plot = g_varprop, path = fig_dir, width = 8, height = 4, dpi = 1000)
-ggsave(filename = "variance_components_withAGDD.jpg", plot = g_varprop, path = fig_dir, width = 8, height = 4, dpi = 1000)
-
-
-
-## Plot just the TP and remove AGDD heading date
-g_varprop_tp <- stage_two_fits_GE_varprop %>% 
-  filter(population == "tp") %>%
-  mutate(population = str_to_upper(population)) %>% 
-  ggplot(aes(x = trait, y = var_prop, fill = source)) + 
-  geom_col() +
-  ylab("Proportion of Variance") +
-  scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
-  theme_acs() +
-  theme(axis.title.x = element_blank(),
-        legend.position = "bottom")
-
-# Save
-# ggsave(filename = "variance_components_tp.jpg", plot = g_varprop_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
-ggsave(filename = "variance_components_tp_withAGDD.jpg", plot = g_varprop_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
-
-
-
-## Look at the heritability and plot
-g_herit <- stage_two_fits_GE %>% 
-  mutate(h2 = map(h2, "heritability"), population = str_to_upper(population)) %>% 
-  unnest(h2) %>% 
-  mutate(statistic = statistic + bias) %>%
-  ggplot(aes(x = trait, y = statistic, ymin = lower, ymax = upper, fill = population)) + 
-  geom_col(position = position_dodge(0.9)) + 
-  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
-  geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
-  # geom_hline(aes(yintercept = unbiased_statistic)) +
-  scale_fill_brewer(palette = "Set2", name = NULL) +
-  ylab("Heritability") +
-  xlab("Trait") +
-  labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
-  theme_acs() +
-  theme(legend.position = c(0.20, 0.85), legend.direction = "horizontal")
-
-# ggsave(filename = "heritability.jpg", plot = g_herit, path = fig_dir, width = 6, height = 4, dpi = 1000)
-ggsave(filename = "heritability_withADGG.jpg", plot = g_herit, path = fig_dir, width = 6, height = 4, dpi = 1000)
-
-
-
-# Plot just the TP
-g_herit_tp <- stage_two_fits_GE %>% 
-  filter(population == "tp") %>%
-  mutate(h2 = map(h2, "heritability"), population = str_to_upper(population)) %>% 
-  unnest(h2) %>% 
-  mutate(statistic = statistic + bias) %>%
-  ggplot(aes(x = trait, y = statistic, ymin = lower, ymax = upper, fill = population)) + 
-  geom_col(position = position_dodge(0.9)) + 
-  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
-  geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
-  scale_fill_brewer(palette = "Set2", name = "Population", guide = FALSE) +
-  ylab("Heritability") +
-  xlab("Trait") +
-  labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
-  theme_acs() +
-  theme(legend.position = c(0.15, 0.20))
-
-# ggsave(filename = "heritability_tp.jpg", plot = g_herit_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
-ggsave(filename = "heritability_tp_withAGDD.jpg", plot = g_herit_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
-
-
-
-
-
-
-
-### Calculate the proportion of GxE that is due to environmental genetic variance
-### heterogeneity versus lack of environmental correlation
-
-control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-
-# For each environment, calculate the genetic variance via reml
-env_varG <- S2_MET_BLUEs_tomodel %>% 
-  group_by(population, trait, environment) %>%
-  do(varG = {
-    df <- .
-    wts <- df$std_error^2
-    
-    # If more than one trial is present, average over trials
-    if (n_distinct(df$trial) > 1) {
-      formula <- value ~ 1 + trial + (1|line_name)
-    } else {
-      formula <- value ~ 1 + (1|line_name)
-    }
-    
-    fit <- lmer(formula = formula, data = df, control = control, weights = wts)  
-    
-    as.data.frame(VarCorr(fit))[1,"vcov"]
-    
-  }) %>% ungroup() %>%
-  mutate(varG = unlist(varG))
-
-# Calculate the genetic heterogeneity, V
-env_varG_V <- env_varG %>% 
-  group_by(population, trait) %>% 
-  summarize(V = var(sqrt(varG))) %>%
-  ungroup()
-
-
-## Use the variance components estinated in the previous random model
-prop_varcomp <- stage_two_fits_GE %>%
-  mutate(varcomp = map(h2, "var_comp")) %>% 
-  unnest(varcomp)
-
-
-# Use the estimate of varGE across all environments to calculate L
-env_L <- left_join(env_varG_V, subset(prop_varcomp, source == "line_name:environment", c(population, trait, variance))) %>% 
-  rename(varGE = variance) %>%
-  mutate(L = varGE - V)
-
-# Use the estimate of genetic variance across all environments to calculate the 
-# genetic correlation
-env_r <- left_join(env_L, subset(prop_varcomp, source == "line_name", c(population, trait, variance)), by = c("population", "trait")) %>% 
-  rename(varG = variance) %>%
-  mutate(r_G = varG / (varG + L))
-
-env_r %>% 
-  select(population, trait, r_G) %>% 
-  spread(population, r_G)
-
-# trait         all    tp    vp
-# 1 GrainYield      0.273 0.275 0.196
-# 2 HeadingDate     0.620 0.701 0.456
-# 3 HeadingDateAGDD 0.624 0.695 0.446
-# 4 PlantHeight     0.343 0.345 0.370
-
-
-## What proportion do V and L make up of varGE?
-## This is from Li et al 2018 or Cooper and DeLacey 1994
-## Add to the variance component table
-varGE_components <- env_r %>% 
-  mutate_at(vars(V, L), funs(prop = . / varGE)) 
-
-
-varGE_components %>%
-  mutate(heterogeneity = str_c(round(V, 3), " (", round(V_prop, 2) * 100, "%)"), 
-         lackCorrelation = str_c(round(L, 3), " (", round(L_prop, 2) * 100, "%)")) %>% 
-  select(population, trait, heterogeneity, lackCorrelation) %>% 
-  gather(grp, value, -trait, -population) %>% 
-  spread(grp, value)
-
-
-# population trait           heterogeneity  lackCorrelation 
-# 1 all        GrainYield      22853.898 (8%) 276513.747 (92%)
-# 2 all        HeadingDate     1.057 (13%)    6.816 (87%)     
-# 3 all        HeadingDateAGDD 1301.759 (13%) 8518.083 (87%)  
-# 4 all        PlantHeight     2.034 (10%)    18.469 (90%)    
-# 5 tp         GrainYield      19983.738 (7%) 285343.381 (93%)
-# 6 tp         HeadingDate     1.271 (18%)    5.611 (82%)     
-# 7 tp         HeadingDateAGDD 1444.957 (17%) 7308.586 (83%)  
-# 8 tp         PlantHeight     2 (10%)        18.054 (90%)    
-# 9 vp         GrainYield      19347.096 (8%) 232695.993 (92%)
-# 10 vp         HeadingDate     1.181 (20%)    4.748 (80%)     
-# 11 vp         HeadingDateAGDD 1205.73 (16%)  6355.147 (84%)  
-# 12 vp         PlantHeight     2.41 (12%)     17.173 (88%)
-
-
-# Plot
-g_varGE_comp <- varGE_components %>% 
-  select(population, trait, GeneticHeterogen = V_prop, LackCorrelation = L_prop) %>% 
-  gather(group, proportion, -population, -trait) %>% 
-  mutate(group = factor(group, levels = rev(unique(group))),
-         population = str_to_upper(population)) %>%
-  ggplot(data = ., aes(x = trait, y = proportion, fill = group)) + 
-  geom_col() +
-  geom_text(aes(y = proportion / 2, label = round(proportion, 2))) +
-  scale_fill_brewer(name = NULL, palette = "Set2") +
-  facet_grid(~ population) +
-  ylab(expression("Proportion of"~sigma[GE]^2)) +
-  xlab("Trait") +
-  theme_acs() +
-  theme(legend.position = c(0.87, 0.75))
-
-# ggsave(filename = "varGE_components.jpg", plot = g_varGE_comp, width = 8, height = 3, path = fig_dir, dpi = 1000)
-ggsave(filename = "varGE_components_withAGDD.jpg", plot = g_varGE_comp, width = 8, height = 3, path = fig_dir, dpi = 1000)
-
-
-
-## Combine the plots for all variance components with the GxE variance components
-# Plot
-g_varGE_comp_tp <- varGE_components %>% 
-  filter(population == "tp") %>%
-  select(population, trait, GeneticHeterogen = V_prop, LackCorrelation = L_prop) %>% 
-  gather(group, proportion, -population, -trait) %>% 
-  mutate(group = factor(group, levels = rev(unique(group))),
-         population = str_to_upper(population)) %>%
-  ggplot(data = ., aes(x = trait, y = proportion, fill = group)) + 
-  geom_col() +
-  # geom_text(aes(y = proportion / 2, label = round(proportion, 2))) +
-  scale_fill_manual(name = NULL, values = c(neyhart_palette("umn1")[3], neyhart_palette("umn2", 8)[8])) +
-  ylab(expression("Proportion of"~sigma[GE]^2)) +
-  xlab("Trait") +
-  theme_acs() +
-  theme(legend.position = "bottom")
-
-g_varcomp_combine <- plot_grid(g_varprop_tp + theme(legend.position = "top"), 
-                               g_varGE_comp_tp, ncol = 1, rel_heights = c(1, 0.4), axis = "lr", align = "v")
-
-ggsave(filename = "variance_components_combined.jpg", plot = g_varcomp_combine, path = fig_dir,
-       height = 8, width = 5, dpi = 1000)
-
-
-## Output a table of all variance components for all populations
-prop_varcomp1 <- prop_varcomp %>% 
-  select(trait, population, source, variance) %>% 
-  group_by(trait, population) %>% 
-  mutate(proportion = variance / sum(variance),
-         source = str_replace_all(source, ":", " x "), 
-         source = str_replace_all(source, "line_name", "Genotype"), 
-         source = str_to_title(source))
-  
-
-varGE_components1 <- varGE_components %>% 
-  select(trait, population, V, L) %>% 
-  gather(source, variance, V, L) %>%
-  group_by(trait, population) %>% 
-  mutate(source = ifelse(source == "V", "GeneticHeterogeneity", "LackOfCorrelation"),  
-         proportion = variance / sum(variance))
-
-# Component order
-comp_order <- c("Genotype", "Environment", "Genotype X Environment", "GeneticHeterogeneity", 
-                "LackOfCorrelation", "Residual")
-
-## Combine and output
-var_comp_table <- bind_rows(prop_varcomp1, varGE_components1) %>%
-  ungroup() %>%
-  mutate(annotation = paste0(formatC(x = variance, digits = 3), " (", formatC(proportion * 100, digits = 2, width = 2), "%)"),
-         annotation = str_trim(annotation)) %>%
-  select(trait, population, source, annotation) %>%
-  # spread(source, annotation) %>%
-  # select(Trait = trait, Population = population, Genotype, Environment, `Genotype X Environment`, GeneticHeterogeneity, LackOfCorrelation,
-  #        Residual)
-  spread(trait, annotation) %>%
-  mutate(source = factor(source, levels = comp_order)) %>% arrange(population, source) %>%
-  rename(Population = population, Source = source)
-  
-  
-
-# write_csv(x = var_comp_table, path = file.path(fig_dir, "population_variance_components.csv"))
-write_csv(x = var_comp_table, path = file.path(fig_dir, "population_variance_components_withAGDD.csv"))
-
-
-## Just the TP
-# var_comp_table %>% filter(Population == "tp") %>% select(-Population) %>% 
-#   write_csv(x = ., path = file.path(fig_dir, "tp_population_variance_components.csv"))
-
-var_comp_table %>% filter(Population == "tp") %>% select(-Population) %>% 
-  write_csv(x = ., path = file.path(fig_dir, "tp_population_variance_components_withAGDD.csv"))
+# stage_two_fits_GE <- S2_MET_BLUEs_tomodel %>%
+#   mutate_at(vars(location, year, line_name), as.factor) %>%
+#   group_by(trait, population) %>%
+#   do({
+#     
+#     df <- droplevels(.)
+#     
+#     # Table of lines by environments (i.e. plots)
+#     plot_table <- xtabs(formula = ~ line_name + environment, data = df)
+#     
+#     ## Harmonic means
+#     # Locations
+#     harm_env <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+#       ifelse(. > 1, 1, .) %>%
+#       rowSums() %>% 
+#       harm_mean()
+#     
+#     # Reps
+#     harm_rep <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+#       harm_mean()
+#     
+#     # # Lmer control
+#     # lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore", calc.derivs = FALSE,
+#     #                             optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE))
+#     
+#     lmer_control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
+#     
+#     # Get the weights
+#     wts <- pull(df, std_error)^2
+# 
+#     ## Fit the full model
+#     ## Environment fixed
+#     fit <- lmer(formula = value ~ 1 + environment + (1|line_name) + (1|line_name:environment),
+#                 data = df, control = lmer_control, weights = wts)
+#     
+#     # ## Fit the full model
+#     # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|environment) + (1|line_name:environment), 
+#     #             data = df, control = lmer_control)
+#     
+#     ## Likelihood ratio tests
+#     lrt <- ranova(fit) %>% 
+#       tidy() %>% 
+#       filter(!str_detect(term, "none")) %>% 
+#       mutate(term = str_remove(term, "\\(1 \\| ") %>% 
+#                str_remove("\\)")) %>% 
+#       select(term, LRT, df, p.value)
+#     
+#     ## Calculate heritability
+#     exp <- "line_name / (line_name + (line_name:environment / n_e) + (Residual / (n_e * n_r)))"
+#     
+#     ## Use bootstrapping to calculate a confidence interval
+#     # Generate bootstrapping samples and calculate heritability using the bootMer function
+#     h2_boot <- bootMer(x = fit, nsim = boot_reps, FUN = function(x) 
+#       herit(object = x, exp = exp, n_e = harm_env, n_r = harm_rep)$heritability)
+#     
+#     h2 <- herit(object = fit, n_e = harm_env, n_r = harm_rep, exp = exp)
+#     
+#     # Add the bootstrapping results with a confidence interval
+#     h2$heritability <- tidy(h2_boot) %>% 
+#       cbind(., t(quantile(h2_boot$t, probs = c(alpha / 2, 1 - (alpha / 2))))) %>% 
+#       rename_at(vars(4, 5), ~c("lower", "upper"))
+#     
+#     # Return data_frame
+#     data_frame(fit = list(fit), lrt = list(lrt), h2 = list(h2), n_e = harm_env, n_r = harm_rep) 
+#     
+#   }) %>% ungroup()
+# 
+# 
+# 
+# 
+# # Everything is significant
+# 
+# ## Plot the proportion of variance from each source
+# stage_two_fits_GE_varprop <- stage_two_fits_GE %>%
+#   mutate(h2 = map(h2, "var_comp")) %>%
+#   unnest(h2) %>% 
+#   group_by(trait, population) %>% 
+#   mutate(var_prop = variance / sum(variance),
+#          source = str_replace_all(source, c("line_name:environment" = "Genotype x Environment",
+#                                             "environment" = "Environment", "line_name" = "Genotype")),
+#          source = factor(source, levels = c("Environment", "Genotype", "Genotype x Environment",
+#                                             "Residual"))) %>%
+#   ungroup()
+# 
+# ## Plot both populations and all traits
+# g_varprop <- stage_two_fits_GE_varprop %>% 
+#   mutate(population = str_to_upper(population)) %>% 
+#   ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+#   geom_col() +
+#   ylab("Proportion of Variance") +
+#   scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+#   facet_grid(~ population) + 
+#   theme_acs() +
+#   theme(axis.title.x = element_blank(),
+#         legend.position = "bottom")
+# 
+# # Save
+# # ggsave(filename = "variance_components.jpg", plot = g_varprop, path = fig_dir, width = 8, height = 4, dpi = 1000)
+# ggsave(filename = "variance_components_withAGDD.jpg", plot = g_varprop, path = fig_dir, width = 8, height = 4, dpi = 1000)
+# 
+# 
+# 
+# ## Plot just the TP and remove AGDD heading date
+# g_varprop_tp <- stage_two_fits_GE_varprop %>% 
+#   filter(population == "tp") %>%
+#   mutate(population = str_to_upper(population)) %>% 
+#   ggplot(aes(x = trait, y = var_prop, fill = source)) + 
+#   geom_col() +
+#   ylab("Proportion of Variance") +
+#   scale_fill_manual(values = umn_palette(3, 4), name = NULL) +
+#   theme_acs() +
+#   theme(axis.title.x = element_blank(),
+#         legend.position = "bottom")
+# 
+# # Save
+# # ggsave(filename = "variance_components_tp.jpg", plot = g_varprop_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
+# ggsave(filename = "variance_components_tp_withAGDD.jpg", plot = g_varprop_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
+# 
+# 
+# 
+# ## Look at the heritability and plot
+# g_herit <- stage_two_fits_GE %>% 
+#   filter(trait %in% traits) %>%
+#   mutate(h2 = map(h2, "heritability"), population = str_to_upper(population)) %>% 
+#   unnest(h2) %>% 
+#   mutate(statistic = statistic + bias) %>%
+#   ggplot(aes(x = trait, y = statistic, ymin = lower, ymax = upper, fill = population)) + 
+#   geom_col(position = position_dodge(0.9)) + 
+#   geom_errorbar(position = position_dodge(0.9), width = 0.5) +
+#   geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
+#   # geom_hline(aes(yintercept = unbiased_statistic)) +
+#   scale_fill_brewer(palette = "Set2", name = NULL) +
+#   ylab("Heritability") +
+#   xlab("Trait") +
+#   labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
+#   theme_acs() +
+#   theme(legend.position = c(0.20, 0.85), legend.direction = "horizontal")
+# 
+# ggsave(filename = "heritability1.jpg", plot = g_herit, path = fig_dir, width = 6, height = 4, dpi = 1000)
+# # ggsave(filename = "heritability_withADGG1.jpg", plot = g_herit, path = fig_dir, width = 6, height = 4, dpi = 1000)
+# 
+# 
+# 
+# # Plot just the TP
+# g_herit_tp <- stage_two_fits_GE %>% 
+#   filter(population == "tp") %>%
+#   mutate(h2 = map(h2, "heritability"), population = str_to_upper(population)) %>% 
+#   unnest(h2) %>% 
+#   mutate(statistic = statistic + bias) %>%
+#   ggplot(aes(x = trait, y = statistic, ymin = lower, ymax = upper, fill = population)) + 
+#   geom_col(position = position_dodge(0.9)) + 
+#   geom_errorbar(position = position_dodge(0.9), width = 0.5) +
+#   geom_text(aes(y = 0.60, label = round(statistic, 2)), position = position_dodge(0.9)) +
+#   scale_fill_brewer(palette = "Set2", name = "Population", guide = FALSE) +
+#   ylab("Heritability") +
+#   xlab("Trait") +
+#   labs(caption = paste0("Error bars represent a 95% confidence interval\ncalculated using ", boot_reps, " bootsrapping replicates.")) + 
+#   theme_acs() +
+#   theme(legend.position = c(0.15, 0.20))
+# 
+# # ggsave(filename = "heritability_tp.jpg", plot = g_herit_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
+# ggsave(filename = "heritability_tp_withAGDD.jpg", plot = g_herit_tp, path = fig_dir, width = 4, height = 4, dpi = 1000)
 
 
 
@@ -883,9 +763,6 @@ ggsave(filename = "variance_components_expanded.jpg", plot = g_varprop, path = f
 
 
 
-
-
-
 ## Look at genetic components
 stage_two_fits_GYL_varprop2 <- stage_two_fits_GYL_varprop %>%
   filter(str_detect(source, "Genotype")) %>%
@@ -956,40 +833,208 @@ ggsave(filename = "heritability_expanded.jpg", plot = g_herit, path = fig_dir, w
 
 
 
+
+
+
+
+
+
+
+### Calculate the proportion of GxE that is due to environmental genetic variance
+### heterogeneity versus lack of environmental correlation
+
+# For each environment, calculate the genetic variance via reml
+env_varG <- S2_MET_BLUEs_tomodel %>% 
+  group_by(population, trait, environment) %>%
+  do(varG = {
+    df <- .
+    wts <- df$std_error^2
+    
+    # If more than one trial is present, average over trials
+    if (n_distinct(df$trial) > 1) {
+      formula <- value ~ 1 + trial + (1|line_name)
+    } else {
+      formula <- value ~ 1 + (1|line_name)
+    }
+    
+    fit <- lmer(formula = formula, data = df, control = lmer_control, weights = wts)  
+    
+    as.data.frame(VarCorr(fit))[1,"vcov"]
+    
+  }) %>% ungroup() %>%
+  mutate(varG = unlist(varG))
+
+# Calculate the genetic heterogeneity, V
+env_varG_V <- env_varG %>% 
+  group_by(population, trait) %>% 
+  summarize(V = var(sqrt(varG))) %>%
+  ungroup()
+
+
+## Use the variance components estinated in the previous random model
+# prop_varcomp <- stage_two_fits_GE %>%
+prop_varcomp <- stage_two_fits_GYL %>%
+  mutate(varcomp = map(h2, "var_comp")) %>% 
+  unnest(varcomp)
+
+
+# Use the estimate of varGE across all environments to calculate L
+env_L <- env_varG_V %>%
+  # left_join(., subset(prop_varcomp, source == "line_name:environment", c(population, trait, variance))) %>% 
+  left_join(., subset(prop_varcomp, source == "line_name:location:year", c(population, trait, variance))) %>% 
+  rename(varGE = variance) %>%
+  mutate(L = varGE - V)
+
+# Use the estimate of genetic variance across all environments to calculate the 
+# genetic correlation
+env_r <- left_join(env_L, subset(prop_varcomp, source == "line_name", c(population, trait, variance)), by = c("population", "trait")) %>% 
+  rename(varG = variance) %>%
+  mutate(r_G = varG / (varG + L))
+
+env_r %>% 
+  select(population, trait, r_G) %>% 
+  spread(population, r_G)
+
+# # A tibble: 4 x 4
+# trait             all    tp    vp
+# 1 GrainYield      0.303 0.308 0.222
+# 2 HeadingDate     0.642 0.733 0.490
+# 3 HeadingDateAGDD 0.647 0.725 0.485
+# 4 PlantHeight     0.360 0.363 0.387
+
+
+## What proportion do V and L make up of varGE?
+## This is from Li et al 2018 or Cooper and DeLacey 1994
+## Add to the variance component table
+varGE_components <- env_r %>% 
+  mutate_at(vars(V, L), funs(prop = . / varGE)) 
+
+
+varGE_components %>%
+  mutate(heterogeneity = str_c(round(V, 3), " (", round(V_prop, 2) * 100, "%)"), 
+         lackCorrelation = str_c(round(L, 3), " (", round(L_prop, 2) * 100, "%)")) %>% 
+  select(population, trait, heterogeneity, lackCorrelation) %>% 
+  gather(grp, value, -trait, -population) %>% 
+  spread(grp, value)
+
+# population trait           heterogeneity  lackCorrelation 
+# 1 all        GrainYield      22853.898 (9%) 233134.396 (91%)
+# 2 all        HeadingDate     1.057 (15%)    6.127 (85%)     
+# 3 all        HeadingDateAGDD 1301.759 (15%) 7646.485 (85%)  
+# 4 all        PlantHeight     2.034 (11%)    16.958 (89%)    
+# 5 tp         GrainYield      19983.738 (8%) 239570.652 (92%)
+# 6 tp         HeadingDate     1.271 (21%)    4.78 (79%)      
+# 7 tp         HeadingDateAGDD 1444.957 (19%) 6300.711 (81%)  
+# 8 tp         PlantHeight     2 (11%)        16.474 (89%)    
+# 9 vp         GrainYield      19347.096 (9%) 190971.903 (91%)
+# 10 vp         HeadingDate     1.181 (22%)    4.135 (78%)     
+# 11 vp         HeadingDateAGDD 1205.73 (18%)  5435.906 (82%)  
+# 12 vp         PlantHeight     2.41 (13%)     15.976 (87%)
+
+
+# Plot
+g_varGE_comp <- varGE_components %>% 
+  select(population, trait, GeneticHeterogen = V_prop, LackCorrelation = L_prop) %>% 
+  gather(group, proportion, -population, -trait) %>% 
+  mutate(group = factor(group, levels = rev(unique(group))),
+         population = str_to_upper(population)) %>%
+  ggplot(data = ., aes(x = trait, y = proportion, fill = group)) + 
+  geom_col() +
+  geom_text(aes(y = proportion / 2, label = round(proportion, 2))) +
+  scale_fill_brewer(name = NULL, palette = "Set2") +
+  facet_grid(~ population) +
+  ylab(expression("Proportion of"~sigma[GE]^2)) +
+  xlab("Trait") +
+  theme_acs() +
+  theme(legend.position = c(0.87, 0.75))
+
+# ggsave(filename = "varGE_components.jpg", plot = g_varGE_comp, width = 8, height = 3, path = fig_dir, dpi = 1000)
+ggsave(filename = "varGE_components_withAGDD.jpg", plot = g_varGE_comp, width = 8, height = 3, path = fig_dir, dpi = 1000)
+
+
+
+## Combine the plots for all variance components with the GxE variance components
+# Plot
+g_varGE_comp_tp <- varGE_components %>% 
+  filter(population == "tp") %>%
+  select(population, trait, GeneticHeterogen = V_prop, LackCorrelation = L_prop) %>% 
+  gather(group, proportion, -population, -trait) %>% 
+  mutate(group = factor(group, levels = rev(unique(group))),
+         population = str_to_upper(population)) %>%
+  ggplot(data = ., aes(x = trait, y = proportion, fill = group)) + 
+  geom_col() +
+  # geom_text(aes(y = proportion / 2, label = round(proportion, 2))) +
+  scale_fill_manual(name = NULL, values = c(neyhart_palette("umn1")[3], neyhart_palette("umn2", 8)[8])) +
+  ylab(expression("Proportion of"~sigma[GE]^2)) +
+  xlab("Trait") +
+  theme_acs() +
+  theme(legend.position = "bottom")
+
+g_varcomp_combine <- plot_grid(g_varprop_tp + theme(legend.position = "top"), 
+                               g_varGE_comp_tp, ncol = 1, rel_heights = c(1, 0.4), axis = "lr", align = "v")
+
+ggsave(filename = "variance_components_combined.jpg", plot = g_varcomp_combine, path = fig_dir,
+       height = 8, width = 5, dpi = 1000)
+
+
+## Output a table of all variance components for all populations
+prop_varcomp1 <- prop_varcomp %>% 
+  select(trait, population, source, variance) %>% 
+  group_by(trait, population) %>% 
+  mutate(proportion = variance / sum(variance),
+         source = str_replace_all(source, ":", " x "), 
+         source = str_replace_all(source, "line_name", "Genotype"), 
+         source = str_to_title(source))
+
+
+varGE_components1 <- varGE_components %>% 
+  select(trait, population, V, L) %>% 
+  gather(source, variance, V, L) %>%
+  group_by(trait, population) %>% 
+  mutate(source = ifelse(source == "V", "GeneticHeterogeneity", "LackOfCorrelation"),  
+         proportion = variance / sum(variance))
+
+# Component order
+comp_order <- unique(stage_two_fits_GYL_varprop1$source) %>% 
+  {.[order(str_count(., "x"))]} %>%
+  {c(str_subset(., "[^Residual]"), "Genetic Heterogeneity", "Lack Of Correlation", "Residual")}
+
 ## Combine and output
-var_comp_table_gyl <- stage_two_fits_GYL_varprop1 %>%
+var_comp_table <- select(stage_two_fits_GYL_varprop1, trait, population, source, variance, proportion = var_prop, p.value) %>%
+  bind_rows(., varGE_components1) %>%
+  ungroup() %>%
   mutate(significance = case_when(p.value < 0.001 ~ "***",
                                   p.value < 0.01 ~ "**",
                                   p.value < 0.05 ~ "*",
                                   TRUE ~ ""),
          variance = signif(variance, 3) %>% formatC(x = ., digits = 3, format = "f") %>% str_remove(., "[0]*$") %>% str_remove(., "\\.$"),
-         var_prop = signif(var_prop * 100, 3) %>% formatC(x = ., digits = 3, format = "f") %>% str_remove(., "[0]*$") %>% str_remove(., "\\.$"),
-         annotation = paste0(variance, significance, " (", var_prop, "%)"),
+         proportion = signif(proportion * 100, 3) %>% formatC(x = ., digits = 3, format = "f") %>% str_remove(., "[0]*$") %>% str_remove(., "\\.$"),
+         annotation = paste0(variance, significance, " (", proportion, "%)"),
          annotation = str_trim(annotation)) %>%
   select(trait, population, source, annotation) %>%
-  # spread(source, annotation) %>%
-  # select(Trait = trait, Population = population, Genotype, Environment, `Genotype X Environment`, GeneticHeterogeneity, LackOfCorrelation,
-  #        Residual)
-  spread(population, annotation) %>%
-  rename(Trait = trait, Source = source) %>% rename_at(vars(all, vp, tp), toupper)
-  # rename(Population = population, Source = source)
+  mutate(source = str_add_space(source),
+         trait = str_add_space(trait),
+         source = factor(source, levels = comp_order),
+         population = toupper(population)) %>% 
+  arrange(population, source) %>%
+  rename_all(str_to_title) %>%
+  spread(Population, Annotation)
 
 
-
-write_csv(x = var_comp_table_gyl, path = file.path(fig_dir, "population_variance_components_decomposed_withAGDD.csv"))
+write_csv(x = var_comp_table, path = file.path(fig_dir, "population_variance_components_decomposed_withAGDD.csv"))
 
 # Remove AGDD
-write_csv(x = filter(var_comp_table_gyl, Trait %in% traits), path = file.path(fig_dir, "population_variance_components_decomposed.csv"))
+write_csv(x = filter(var_comp_table, Trait %in% str_add_space(traits)), path = file.path(fig_dir, "population_variance_components_decomposed.csv"))
 
 
 ## Just the TP
-var_comp_table_gyl %>% 
+var_comp_table %>% 
   select(Trait, Source, TP) %>% 
   spread(Trait, TP) %>% 
   write_csv(x = ., path = file.path(fig_dir, "tp_population_variance_components_decomposed_withAGDD.csv"))
 
-var_comp_table_gyl %>% 
-  filter(Trait %in% traits) %>%
+var_comp_table %>% 
+  filter(Trait %in% str_add_space(traits)) %>%
   select(Trait, Source, TP) %>% 
   spread(Trait, TP) %>% 
   write_csv(x = ., path = file.path(fig_dir, "tp_population_variance_components_decomposed.csv"))
@@ -997,8 +1042,7 @@ var_comp_table_gyl %>%
 
 
 
-
-    
+##
 
 
 
@@ -1053,7 +1097,7 @@ env_cor_all <- S2_MET_BLUEs_use %>%
 
 
 # Convert to a data.frame for visualization 
-env_cor_df <- list(all = env_cor_all, tp = env_cor_tp, vp = env_cor_vp) %>% 
+env_cor_df <- list(all = env_cor_all, train = env_cor_tp, test = env_cor_vp) %>% 
   map(~{
     map(., ~as.data.frame(.) %>% rownames_to_column("environment1") %>% 
           gather(environment2, correlation, -environment1) %>% 
@@ -1061,7 +1105,8 @@ env_cor_df <- list(all = env_cor_all, tp = env_cor_tp, vp = env_cor_vp) %>%
       list(., names(.)) %>%
       pmap_df(~mutate(.x, trait = .y))
   }) %>%
-  map2_df(.x = ., names(.), ~mutate(.x, population = .y))
+  map2_df(.x = ., names(.), ~mutate(.x, population = .y)) %>%
+  mutate(population = factor(population, levels = c("all", "train", "test")))
 
 
 
@@ -1098,10 +1143,10 @@ g_env_cor_df <- env_cor_df %>%
       geom_tile() +
       scale_fill_gradientn(colors = heat_colors[c(1,3,5)], na.value = "transparent", 
                            breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
-                           guide = guide_colorbar(title = "Correlation")) +
+                           guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
       ylab("Environment 2") +
       xlab("Environment 1") +
-      facet_wrap(~ trait + population, labeller = labeller(trait = str_add_space, population = toupper)) +
+      facet_wrap(~ trait + population, labeller = labeller(trait = str_add_space, population = str_to_title)) +
       theme_presentation2(base_size = 10) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5),
             axis.text.y = element_text(size = 5),
@@ -1123,11 +1168,14 @@ g_env_cor1 <- g_env_cor +
   draw_label("Environment 1", x = 0.5, y = 0, vjust=-0.5, angle= 0) +
   draw_label("Environment 2", x = 0, y = 0.5, vjust= 1.5, angle=90)
 
-g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_list[[1]]), nrow = 1, rel_widths = c(1, 0.1))
+g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_df$plot[[1]]), nrow = 1, rel_widths = c(1, 0.1))
 
 
 # Save this plot
 ggsave(filename = "environmental_correlation.jpg", path = fig_dir, plot = g_env_cor2, height = 8, width = 8, dpi = 1000)
+
+
+
 
 
 
@@ -1143,6 +1191,17 @@ g_env_cor1 <- g_env_cor +
 g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_list[[1]]), nrow = 1, rel_widths = c(1, 0.1))
 
 ggsave(filename = "environmental_correlation_withAGDD.jpg", path = fig_dir, plot = g_env_cor2, height = 12, width = 9, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1622,6 +1681,9 @@ ammi_fitted_clusters <- ammi_fitted %>%
 
 year_levels <- c(sort(unique(S2_MET_BLUEs$year)), "Genotype")
 
+## Year color scheme
+year_color <- setNames( c(neyhart_palette("umn1", 5)[3:5], "grey"), year_levels)
+
 ## Plot the AMMI axes and the proportion of variance explained
 g_ammi <- ammi_out1 %>%
   left_join(., ammi_fitted_clusters) %>%
@@ -1717,6 +1779,10 @@ ggsave(filename = "ammi_biplots_complete.jpg", plot = ammi_grid1, path = fig_dir
 
 
 
+
+
+
+
 # Rename an object
 ammi_out <- ammi_out1
 
@@ -1727,6 +1793,154 @@ save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_G
     
 
 
+
+
+
+## Year color scheme
+year_shape <- setNames(c(15, 17, 18, 16), names(year_shape))
+
+
+## Re-plot AMMI using different shaped points
+## Plot the AMMI axes and the proportion of variance explained
+g_ammi_alt <- ammi_out1 %>%
+  left_join(., ammi_fitted_clusters) %>%
+  # filter(set == "complete") %>%
+  group_by(set, trait) %>%
+  do(plot = {
+    df <- .
+    
+    out <- df$ammi[[1]]
+    res <- df$results[[1]]
+    trait <- df$trait
+    
+    ## Combine the g and e scores into one DF
+    scores_df <- map_df(out[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
+    
+    # Create a renaming vector
+    res1 <- mutate(res, annotation = paste0(str_replace_all(term, "PC", "IPCA"), " (", round(cumprop, 2) * 100, "%)"))
+    propvar_rename <- setNames(object = res1$term, nm = res1$annotation)
+    
+    # Renaming function
+    label_rename <- function(x) str_replace_all(x, propvar_rename)
+    
+    scores_toplot <- scores_df %>%
+      select(-eigen) %>%
+      spread(PC, score) %>%
+      # Add year
+      mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
+             trait = trait)
+
+    
+    ## Figure out the range for x and y axis for the trait
+    effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "effect") %>% unlist()) %>% 
+      unlist() %>% range()
+    
+    scores_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "score") %>% unlist()) %>% 
+      unlist() %>% range()
+    
+    ## Units
+    unit_use <- traits_unit1[df$trait]
+    
+    # Plot
+    scores_toplot %>% 
+      mutate(trait_use = paste0(str_add_space(trait), " (", unit_use, ")"),
+             trait_use = str_replace_all(trait_use, " ", "~")) %>%
+      ggplot(aes(x = effect, y = PC1)) + 
+      geom_point(aes(color = year, shape = year), size = 1.5) +
+      geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term), size = 2) +
+      scale_color_manual(values = year_color, name = NULL, guide = guide_legend(override.aes = list(size = 3, label.size = 0))) + 
+      scale_shape_manual(values = year_shape, name = NULL) + 
+      scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
+      scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
+      ylab(names(propvar_rename)[1]) +
+      xlab(expression("Effect (deviation from"~mu*")")) +
+      facet_grid(~ trait_use, labeller = labeller(trait_use = label_parsed)) + 
+      theme_presentation2(base_size = 10) +
+      theme(legend.position = "bottom")
+    # theme(legend.position = "right", legend.direction = "vertical")
+    
+  })
+
+
+
+## Remove AGDD
+plot_list_complete <- subset(g_ammi_alt, set == "complete" & trait %in% traits, plot, drop = T)
+# ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 1)
+ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(rep(0.9, length(plot_list_complete) - 1), 1), 
+                                plotlist = c(head(plot_list_complete, -1) %>% map(~. + theme(legend.position = "none", axis.title.x = element_blank())),
+                                             list(tail(plot_list_complete, 1)[[1]] + theme(legend.position = "none"))))
+
+# Add legend
+ammi_grid1 <- plot_grid(ammi_grid_complete, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
+
+# Save
+ggsave(filename = "ammi_biplots_complete_greyscale.jpg", plot = ammi_grid1, path = fig_dir, height = 6.5, width = 3, dpi = 1000)
+
+
+
+## Phenotypic Correlation Heatmap in greyscale
+# One trait at a time
+g_env_cor_df <- env_cor_df %>%
+  group_by(trait) %>%
+  do(plot = {
+    
+    df <- .
+    
+    # Use the heatmap function to construct a dendrogram
+    # Use only data from the whole population
+    mat <- df %>% 
+      filter(population == "all") %>%
+      select(-trait, -population) %>% 
+      spread(environment2, correlation) %>% 
+      as.data.frame() %>% 
+      column_to_rownames("environment1") %>% 
+      as.matrix()
+    
+    hm <- heatmap(mat)
+    
+    # Extract the ordered factor for environments
+    eLevels <- sort(unique(df$environment1))[hm$rowInd]
+    
+    df %>% 
+      mutate_at(vars(contains("environment")), funs(factor(., levels = eLevels))) %>%
+      ggplot(., aes(x = environment1, y = environment2, fill = correlation)) +
+      geom_tile() +
+      # scale_fill_gradientn(colors = heat_colors[c(1,3,5)], na.value = "transparent", 
+      #                      breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
+      #                      guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
+      scale_fill_gradientn(colours = rev(grey.colors(n = 10)), na.value = "transparent", breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
+                      guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
+      ylab("Environment 2") +
+      xlab("Environment 1") +
+      facet_wrap(~ trait + population, labeller = labeller(trait = str_add_space, population = str_to_title)) +
+      theme_presentation2(base_size = 10) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5),
+            axis.text.y = element_text(size = 5),
+            # legend.position = "bottom", legend.direction = "horizontal")
+            legend.position = "right", legend.direction = "vertical")
+    
+    
+  }) %>% ungroup()
+
+
+
+
+## Combine plots
+g_env_cor <- plot_grid(plotlist = subset(g_env_cor_df, trait %in% traits, plot, drop = T) %>% 
+                         map(~. + theme(legend.position = "none", axis.title = element_blank())), 
+                       nrow = length(subset(g_env_cor_df, trait != "HeadingDateAGDD", trait, drop = T)), scale = 0.9)
+
+g_env_cor1 <- g_env_cor + 
+  draw_label("Environment 1", x = 0.5, y = 0, vjust=-0.5, angle= 0) +
+  draw_label("Environment 2", x = 0, y = 0.5, vjust= 1.5, angle=90)
+
+g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_df$plot[[1]]), nrow = 1, rel_widths = c(1, 0.1))
+
+
+# Save this plot
+ggsave(filename = "environmental_correlation_greyscale.jpg", path = fig_dir, plot = g_env_cor2, height = 8, width = 8, dpi = 1000)
 
 
 

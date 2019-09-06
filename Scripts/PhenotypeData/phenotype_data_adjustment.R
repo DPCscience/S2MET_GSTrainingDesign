@@ -24,6 +24,11 @@ repo_dir <- getwd()
 # Source the main project script
 source(file.path(repo_dir, "source.R"))
 
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+# Calculate the K matrix for all entries
+K <- A.mat(X = s2_imputed_mat, min.MAF = 0, max.missing = 1)
+
 
 
 # Load the tidy S2 data
@@ -88,9 +93,12 @@ data_to_model1 <- bind_rows(data_to_model, data_to_model_HD)
 # I will include row, column, and blk as random effects and use backwards elimination to reduce
 # the models
 rand_eff <- c("row", "column", "blk")
+# rand_eff <- c("row", "column", "blk", "check")
+
 
 # The base formula will have line and check as fixed effects
 base_form <- value ~ -1 + line + check
+# base_form <- value ~ -1 + line
 
 ## Create a empty data frame of the distinct trials and traits
 stage_one_results <- data_to_model1 %>% 
@@ -156,6 +164,14 @@ for (i in seq(nrow(stage_one_results))) {
     as.formula()
   
   fit_ran <- lmer(formula = ran_form, data = df)
+  
+  # ## List of line names in both the pheno and the K
+  # K_lines <- intersect(levels(df$line), colnames(K))
+  # K_use <- K[K_lines, K_lines]
+  # K_use <- rbind(cbind(K_use, `00check` = 0), `00check` = 0); K_use["00check", "00check"] <- 2
+  # fit_ran1 <- lme4qtl::relmatLmer(formula = ran_form, data = df, relmat = list(line = K_use), 
+  #                                 subset = line %in% K_lines | line == "00check")
+  
   
   # Find the harmonic mean of the number of replicates
   n_r <- table(df$line_name) %>%
