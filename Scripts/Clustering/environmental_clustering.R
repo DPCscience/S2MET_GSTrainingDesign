@@ -381,7 +381,8 @@ dist_method_df_realistic <- ec_sim_mat_df1 %>%
 ## Combine
 ## Remove the distance matrices
 dist_method_df <- bind_rows(ammi_distance, dist_method_df_complete, dist_method_df_realistic) %>%
-  filter(set == "realistic2017")
+  filter(set %in% c("complete", "realistic2017")) %>%
+  filter(trait %in% traits)
 
 
 
@@ -1141,8 +1142,8 @@ write_csv(x = cluster_varcomp_table, path = file.path(fig_dir, "cluster_varcomp_
 
 
 
-### Rank environments according to a prediction environment
-### This will be used for prediction and heritability calculations
+### Rank environments according to a test environment
+### This will be used for prediction
 ### 
 
 # Modify the BLUEs for predictions
@@ -1159,6 +1160,7 @@ train_envs <- c(tp_vp_env, tp_only_env)
 
 
 # Summarize the traits available in those environments
+# # First for test environments
 val_envs_traits <- S2_MET_BLUEs_use %>%
   filter(environment %in% pred_envs) %>% 
   filter(trait %in% traits) %>%
@@ -1171,6 +1173,7 @@ val_envs_traits <- S2_MET_BLUEs_use %>%
               mutate(val_environments = map(test_env, ~data.frame(environment = .))) %>% select(-test_env))
 
 
+# Now for training environments
 train_envs_traits <- S2_MET_BLUEs_use %>%
   filter(environment %in% train_envs) %>% 
   group_by(environment) %>% 

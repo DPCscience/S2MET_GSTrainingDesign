@@ -66,6 +66,7 @@ cv_pov_results <- map(all_data_preds, get) %>%
 
 ## Analyze together?
 all_cv_pov_predictions_out <- cv_pov_results %>%
+  filter(trait %in% traits) %>%
   left_join(., env_herit) %>%
   mutate(ability = accuracy, accuracy = ability / sqrt(heritability),
          set = ifelse(is.na(set), "complete", set)) %>%
@@ -79,11 +80,11 @@ homo_var_tests_schemes <- all_cv_pov_predictions_out %>%
   mutate(p_value = map_dbl(test, ~subset(., term == "group", p.value, drop = T)))
 
 ## Test for homogeneity of variance across scheme numbers
-homo_var_tests_scheme_num <- all_cv_pov_predictions_out %>% 
+(homo_var_tests_scheme_num <- all_cv_pov_predictions_out %>% 
   group_by(set, trait, scheme_number) %>% 
   do(test = tidy(leveneTest(y = .$accuracy, group = .$scheme))) %>% 
   ungroup() %>%
-  mutate(p_value = map_dbl(test, ~subset(., term == "group", p.value, drop = T)))
+  mutate(p_value = map_dbl(test, ~subset(., term == "group", p.value, drop = T))))
 
 ### Evidence suggests testing each individually
 
@@ -374,7 +375,7 @@ pov00_predictions_analysis_toplot <- pov00_predictions_analysis %>%
   mutate(set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", ""),
          model = factor(model, levels = rev(dist_method_abbr_use)),
-         nTrainEnv = parse_number(nTrainEnv),
+         nTrainEnv = parse_number(as.character(nTrainEnv)),
          scheme = toupper(scheme),
          size = model == "Random")
 
