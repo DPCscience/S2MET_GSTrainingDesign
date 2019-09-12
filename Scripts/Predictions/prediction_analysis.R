@@ -209,6 +209,10 @@ separate_cv_pov_predictions_analysis1 <- separate_cv_pov_predictions_analysis %>
   mutate(set = str_replace_all(set, "[0-9]{4}", "")) %>%
   rename(accuracy = fit)
 
+
+
+#### Plot ###
+
 g_cv_pov_all_data <- separate_cv_pov_predictions_analysis1 %>%
   ggplot(aes(x = scheme, y = accuracy, ymin = lower, ymax = upper)) +
   geom_point() +
@@ -255,6 +259,15 @@ separate_cv_pov_predictions_analysis1 %>%
 
 
 
+
+
+
+
+
+
+
+
+
 #### Environmental distance predictions ####
 
 ## Make sure all observations were recorded
@@ -278,7 +291,7 @@ environment_rank_df %>%
   filter(model == "great_circle_dist") %>% 
   select(-model) %>% 
   crossing(., model = paste0("sample", seq(25))) %>%
-  left_join(., bind_rows(pov00_environment_rank_random_predictions)) %>%
+  left_join(., mutate(pov00_environment_rank_random_predictions, model = paste0("sample", rep))) %>%
   filter(is.na(accuracy))
 
 
@@ -516,7 +529,7 @@ cv00_predictions_analysis_toplot <- cv00_predictions_analysis %>%
   mutate(set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", ""),
          model = factor(model, levels = rev(dist_method_abbr_use)),
-         nTrainEnv = parse_number(nTrainEnv),
+         nTrainEnv = parse_number(as.character(nTrainEnv)),
          scheme = toupper(scheme),
          size = model == "Random")
 
@@ -656,57 +669,60 @@ dev.off()
 
 
 
+# 
+# 
+# ### Example for presentation
+# traits_present <- c("GrainYield", "HeadingDate")
+# model_present <- c("Random", "IPCA-EC", "GCD", "PD")
+# 
+# ### Just leave-one-environment-out
+# g_rank_pred_base <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
+#   # filter(trait %in% traits) %>%
+#   filter(trait %in% traits_present) %>%
+#   filter(model %in% model_present) %>%
+#   filter(set == "Leave-one-environment-out") %>%
+#   mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+#   ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
+#   geom_line(aes(size = size), color = "white") +
+#   geom_hline(aes(yintercept = accuracy, lty = "Accuracy using\nall data")) +
+#   facet_grid(trait ~ scheme, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
+#   scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
+#                      guide = guide_legend(keyheight = unit(1, "line"), reverse = TRUE)) +
+#   scale_linetype_manual(values = 2, name = NULL) +
+#   scale_size_manual(values = c(0.5, 1), guide = FALSE) +
+#   scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
+#   scale_x_continuous(breaks = pretty, name = expression("Number of training set environments ("*italic(N[TE])*")")) +
+#   theme_presentation2(base_size = 12) +
+#   theme(legend.position = "right", strip.placement = "outside")
+# 
+# ggsave(filename = "cumulative_env_pred_LOEO_presentation_base.jpg", path = fig_dir, plot = g_rank_pred_base, 
+#        width = 6.5, height = 5, units = "in", dpi = 1000)
+# 
+# 
+# g_rank_pred <- g_rank_pred_base + 
+#   geom_line(aes(size = size))
+# 
+# ## Add viewport of heading data/cv00/leave-one-out
+# g_rank_pred_vp_list <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
+#   filter(trait == "HeadingDate") %>%
+#   filter(model %in% model_present) %>%
+#   split(list(.$set, .$scheme)) %>%
+#   map2(.x = ., .y = LETTERS[seq_along(.)], ~gg_vp(x = .x, let = ""))
+# 
+# 
+# ## Coordinates for viewports
+# vp1 <- viewport(x = 0.29, y = 0.27, width = 0.29, height = 0.33)
+# vp2 <- viewport(x = 0.60, y = 0.34, width = 0.29, height = 0.33)
+# 
+# 
+# jpeg(filename = file.path(fig_dir, "cumulative_env_pred_LOEO_presentation.jpg"), width = 6.5, height = 5, units = "in", res = 1000)
+# print(g_rank_pred)
+# print(g_rank_pred_vp_list$`Leave-one-environment-out.CV00`, vp = vp1)
+# print(g_rank_pred_vp_list$`Leave-one-environment-out.POV00`, vp = vp2)
+# dev.off()
 
 
-### Example for presentation
-traits_present <- c("GrainYield", "HeadingDate")
-model_present <- c("Random", "IPCA-EC", "GCD", "PD")
 
-### Just leave-one-environment-out
-g_rank_pred_base <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
-  # filter(trait %in% traits) %>%
-  filter(trait %in% traits_present) %>%
-  filter(model %in% model_present) %>%
-  filter(set == "Leave-one-environment-out") %>%
-  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
-  ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
-  geom_line(aes(size = size), color = "white") +
-  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using\nall data")) +
-  facet_grid(trait ~ scheme, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
-  scale_color_manual(values = dist_colors_use, name = "Distance\nmeasure",
-                     guide = guide_legend(keyheight = unit(1, "line"), reverse = TRUE)) +
-  scale_linetype_manual(values = 2, name = NULL) +
-  scale_size_manual(values = c(0.5, 1), guide = FALSE) +
-  scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
-  scale_x_continuous(breaks = pretty, name = expression("Number of training set environments ("*italic(N[TE])*")")) +
-  theme_presentation2(base_size = 12) +
-  theme(legend.position = "right", strip.placement = "outside")
-
-ggsave(filename = "cumulative_env_pred_LOEO_presentation_base.jpg", path = fig_dir, plot = g_rank_pred_base, 
-       width = 6.5, height = 5, units = "in", dpi = 1000)
-
-
-g_rank_pred <- g_rank_pred_base + 
-  geom_line(aes(size = size))
-
-## Add viewport of heading data/cv00/leave-one-out
-g_rank_pred_vp_list <- cv00_pov00_environment_rank_predictions_analysis_toplot %>%
-  filter(trait == "HeadingDate") %>%
-  filter(model %in% model_present) %>%
-  split(list(.$set, .$scheme)) %>%
-  map2(.x = ., .y = LETTERS[seq_along(.)], ~gg_vp(x = .x, let = ""))
-
-
-## Coordinates for viewports
-vp1 <- viewport(x = 0.29, y = 0.27, width = 0.29, height = 0.33)
-vp2 <- viewport(x = 0.60, y = 0.34, width = 0.29, height = 0.33)
-
-
-jpeg(filename = file.path(fig_dir, "cumulative_env_pred_LOEO_presentation.jpg"), width = 6.5, height = 5, units = "in", res = 1000)
-print(g_rank_pred)
-print(g_rank_pred_vp_list$`Leave-one-environment-out.CV00`, vp = vp1)
-print(g_rank_pred_vp_list$`Leave-one-environment-out.POV00`, vp = vp2)
-dev.off()
 
 # 
 # 
@@ -769,7 +785,7 @@ cv0_pov0_predictions_analysis_toplot <- cv0_pov0_predictions_analysis %>%
   mutate(set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", ""),
          model = factor(model, levels = rev(dist_method_abbr_use)),
-         nTrainEnv = parse_number(nTrainEnv),
+         nTrainEnv = parse_number(as.character(nTrainEnv)),
          scheme = toupper(scheme),
          size = model == "Random")
 
@@ -847,13 +863,6 @@ cv_pov_rank_predictions1 %>%
 # 14 GrainYield      Leave-one-environment-out AMMI         22 CV00   0.393 FALSE    0.393  0.195 0.514 0.121       0.236    
 # 15 GrainYield      Leave-one-environment-out PD           22 CV0    0.609 FALSE    0.609 NA     0.743 0.134       0.181    
 # 16 GrainYield      Leave-one-environment-out PD           22 CV00   0.392 FALSE    0.393  0.195 0.546 0.155       0.283
-
-
-
-
-
-
-
 
 
 
@@ -948,6 +957,20 @@ dev.off()
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #### Environmental cluster predictions ####
 
 cluster_pred <- ls(pattern = "[0-9]{1,2}_cluster_predictions") %>% 
@@ -971,7 +994,8 @@ cluster_pred_df <- bind_rows(cluster_pred_df) %>%
          model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model))
 
 
-  
+## Combine predictive ability estimates with the heritability in 
+## each environment, then calculate prediction accuracy  
 cluster_predictions_base <- cluster_pred_df %>%
   left_join(., env_herit) %>% 
   mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
@@ -1013,11 +1037,11 @@ for (i in seq(nrow(separate_cv_pov_cluster_predictions_analysis))) {
   # 
   # 
   # 
-  ## One model
-  ## Model
-  fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) + 
-                (1|nTrainEnv:cluster:model), data = df)
-  
+  # One model
+  # Model
+  fit <- lmer(accuracy ~ 1 + model + scheme + model:scheme + (1|cluster:model) + (1|val_environment:cluster:model) +
+                (nTrainEnv|cluster:model), data = df)
+
   effects_keep <- as.data.frame(Effect(c("model", "scheme"), fit))
   
   fit_summary <- data_frame(
@@ -1047,7 +1071,8 @@ separate_cv_pov_cluster_predictions_analysis %>%
 ## Mostly environment nested within cluster nested within model
 
 
-## Plot all
+
+# Prepare data.frame for plotting (mostly reorder or rename factors)
 separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
@@ -1057,13 +1082,30 @@ separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predict
          set = str_replace_all(set, "[0-9]{4}", "")) %>%
   left_join(., select(separate_cv_pov_predictions_analysis1, -lower, -upper, -se)) %>%
   mutate(group = paste0(set, " - ", scheme))
-           
+     
+## Look at differences between cluster and non-cluster accuracy
+cluster_prediction_advantage <- separate_cv_pov_cluster_predictions_analysis1 %>%
+  mutate(diff = fit - accuracy) %>% 
+  select(set, trait, model, scheme, diff) %>% 
+  split(.$set) %>%
+  map(~arrange(., desc(diff)) %>% as.data.frame() )
+
+## What was the average advantage for distance measures that allow new environments?
+cluster_prediction_advantage %>%
+  map(~filter(., model %in% c("GCD", "Mean-EC", "IPCA-EC", "All-EC"))) %>%
+  map(~summarize_at(., vars(diff), list(min = min, max = max, mean = mean)))
+
+
+
+
+
+### Plot ###      
 
 g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
   geom_hline(aes(yintercept = accuracy, lty = "All data"), color = "black") +
-  geom_errorbar(width = 0.5) +
+  # geom_errorbar(width = 0.5) +
   geom_point(aes(color = model)) +
   scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
   scale_color_manual(values = dist_colors_use, guide = FALSE) +
@@ -1111,6 +1153,7 @@ ggsave(filename = "all_cv_pov_cluster_predictions.jpg", plot = g_cv_pov_cluster,
 
 
 ## Paper version
+# Determine the ylimit
 g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(trait %in% traits) %>%
   mutate(scheme = ifelse(scheme == "POCV0", "POV0", as.character(scheme)),
@@ -1118,15 +1161,15 @@ g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(!str_detect(scheme, "POCV")) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-        geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
-        geom_errorbar(width = 0.5, lwd = 0.5) +
+        geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "black") +
+        # geom_errorbar(width = 0.5, lwd = 0.5) +
         geom_point(aes(color = model), size = 1.25) +
-        scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*r[MG]*")")) +
+        scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")"), limits = c(0, 1)) +
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
-        scale_linetype_manual(values = 1, name = NULL) +
+        scale_linetype_manual(values = 2, name = NULL) +
         xlab("Distance measure") +
-        facet_grid(trait ~ scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space), switch = "y") +
-        labs(subtitle = unique(.$set))  +
+        facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space), switch = "y") +
+        labs(subtitle = "Prediction accuracy of\ndistance-defined clusters")  +
         theme_presentation2(base_size = 8) +
         theme(axis.text.x = element_text(angle = 50, hjust = 1), legend.position = "bottom") )
 
@@ -1155,13 +1198,13 @@ g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(scheme %in% c("CV00", "POV00")) %>%
   filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
-  geom_errorbar(width = 0.5) +
+  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "black") +
+  # geom_errorbar(width = 0.5) +
   geom_point(aes(color = model), size = 1.5) +
-  scale_y_continuous(breaks = pretty, name = "Prediction accuracy") +
+  scale_y_continuous(breaks = pretty, name = "Prediction accuracy", limits = c(0, 1)) +
   # scale_color_manual(values = dist_colors_use, name = "Cluster method", labels = legend_key) +
   scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
-  scale_linetype_manual(values = 1, name = NULL) +
+  scale_linetype_manual(values = 2, name = NULL) +
   xlab("Distance measure") +
   facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
   # facet_grid(trait ~ group, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
@@ -1175,27 +1218,27 @@ ggsave(filename = "cv00_pov00_cluster_predictions.jpg", plot = g_cv00_pov00_clus
 
 
 
-## Example for presentation
-
-g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
-  filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
-  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
-  filter(trait %in% traits_present, model %in% model_present) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
-  geom_errorbar(width = 0.5) +
-  geom_point(aes(color = model), size = 3) +
-  scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
-  scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
-  scale_linetype_manual(values = 1, name = NULL) +
-  xlab("Distance measure") +
-  labs(caption = "") +
-  facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
-  theme_presentation2(base_size = 12) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
-
-ggsave(filename = "cv00_pov00_cluster_predictions_presentation.jpg", plot = g_cv00_pov00_cluster, path = fig_dir, 
-       width = 4.5, height = 4.5, dpi = 1000)
+# ## Example for presentation
+# 
+# g_cv00_pov00_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
+#   filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
+#   mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+#   filter(trait %in% traits_present, model %in% model_present) %>%
+#   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+#   geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data"), color = "grey") +
+#   geom_errorbar(width = 0.5) +
+#   geom_point(aes(color = model), size = 3) +
+#   scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
+#   scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
+#   scale_linetype_manual(values = 1, name = NULL) +
+#   xlab("Distance measure") +
+#   labs(caption = "") +
+#   facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+#   theme_presentation2(base_size = 12) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
+# 
+# ggsave(filename = "cv00_pov00_cluster_predictions_presentation.jpg", plot = g_cv00_pov00_cluster, path = fig_dir, 
+#        width = 4.5, height = 4.5, dpi = 1000)
 
 
 
@@ -1310,7 +1353,7 @@ for (i in seq(nrow(random_cluster_predictions_analysis))) {
 
 
 
-## Plot all
+## Prepare DF for plotting
 random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
@@ -1322,17 +1365,37 @@ random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
          set = str_replace_all(set, "[0-9]{4}", ""))
 
 
+## Look at differences between cluster and non-cluster accuracy
+random_cluster_prediction_advantage <- random_cluster_predictions_analysis1 %>%
+  select(set, trait, model, scheme, fit) %>% 
+  split(.$set) %>%
+  map(~arrange(., desc(fit)) %>% as.data.frame() )
+
+## Look at grain yield and plant height
+random_cluster_prediction_advantage %>% 
+  map(filter, trait %in% c("GrainYield", "PlantHeight"))
+
+## What was the average advantage for distance measures that allow new environments?
+random_cluster_prediction_advantage %>%
+  map(~filter(., model %in% c("GCD", "Mean-EC", "IPCA-EC", "All-EC"))) %>%
+  map(~summarize_at(., vars(diff), list(min = min, max = max, mean = mean)))
+
+
+
+
+### Plot ###
+
 g_random_cv_pov_cluster <- random_cluster_predictions_analysis1 %>%
   filter(trait %in% traits) %>%
   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
   geom_hline(yintercept = 0) +
-  geom_errorbar(width = 0.5) +
+  # geom_errorbar(width = 0.5) +
   geom_point(aes(color = model)) +
   scale_y_continuous(breaks = pretty, name = "Advantage of clustering over random environments") +
   scale_color_manual(values = dist_colors_use, guide = FALSE) +
   scale_linetype_manual(values = 2, name = NULL) +
   xlab("Distance method") +
-  facet_grid(trait ~ set + scheme, scales = "free", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+  facet_grid(trait ~ set + scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space)) +
   theme_presentation2(base_size = 10) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
@@ -1346,14 +1409,16 @@ g_random_cv_pov_cluster_list <- random_cluster_predictions_analysis1 %>%
   filter(!str_detect(scheme, "POCV")) %>%
   split(.$set) %>%
   map(~ggplot(data = ., aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-        geom_hline(yintercept = 0, color = "grey", lty = 5) +
-        geom_errorbar(width = 0.5, lwd = 0.5) +
+        geom_hline(yintercept = 0, color = "grey", lty = 1) +
+        # geom_errorbar(width = 0.5, lwd = 0.5) +
         geom_point(aes(color = model), size = 1.25) +
-        scale_y_continuous(breaks = pretty, name = "Prediction accuracy versus random clusters") +
+        scale_y_continuous(breaks = pretty, name = expression("Marginal prediction accuracy ("*italic(r[MG])*")")) +
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
         xlab("Distance measure") +
-        labs(subtitle = unique(.$set)) +
-        facet_grid(trait ~ scheme, scales = "free", space = "free_x", switch = "y", labeller = labeller(trait = str_add_space)) +
+        # labs(subtitle = paste(unique(.$set), "Marginal prediction accuracy of informed versus random clusters", sep = "\n"))  +
+        labs(subtitle = "Marginal prediction accuracy of distance-defined \nversus random clusters")  +
+        facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", 
+                   labeller = labeller(trait = str_add_space)) +
         theme_presentation2(base_size = 8) +
         theme(axis.text.x = element_text(angle = 50, hjust = 1)) )
 
@@ -1362,27 +1427,27 @@ g_random_cv_pov_cluster1 <- plot_grid(plotlist = g_random_cv_pov_cluster_list, n
 
 ggsave(filename = "random_cv_pov_cluster_predictions_paper.jpg", plot = g_random_cv_pov_cluster1, path = fig_dir, width = 7, height = 3.5, dpi = 1000)
 
-
-## Example for presentation
-g_random_cv00_pov00_cluster <- random_cluster_predictions_analysis1 %>%
-  filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
-  mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
-  filter(trait %in% traits_present, model %in% model_present) %>%
-  ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
-  geom_hline(aes(yintercept = 0, lty = "Accuracy using random clusters"), color = "grey") +
-  geom_errorbar(width = 0.5) +
-  geom_point(aes(color = model), size = 3) +
-  scale_y_continuous(breaks = pretty, name = "Marginal prediction accuracy") +
-  scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
-  scale_linetype_manual(values = 1, name = NULL) +
-  xlab("Distance measure") +
-  labs(caption = "") +
-  facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
-  theme_presentation2(base_size = 12) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
-
-ggsave(filename = "random_cv00_pov00_cluster_predictions_presentation.jpg", plot = g_random_cv00_pov00_cluster, path = fig_dir, 
-       width = 4.5, height = 4.5, dpi = 1000)
+# 
+# ## Example for presentation
+# g_random_cv00_pov00_cluster <- random_cluster_predictions_analysis1 %>%
+#   filter(scheme %in% c("CV00", "POV00"), set == "Leave-one-environment-out") %>%
+#   mutate(scheme = ifelse(scheme == "CV00", "Cross-validation", "Parent-offspring validation")) %>%
+#   filter(trait %in% traits_present, model %in% model_present) %>%
+#   ggplot(aes(x = model, y = fit, ymin = lower, ymax = upper)) +
+#   geom_hline(aes(yintercept = 0, lty = "Accuracy using random clusters"), color = "grey") +
+#   geom_errorbar(width = 0.5) +
+#   geom_point(aes(color = model), size = 3) +
+#   scale_y_continuous(breaks = pretty, name = "Marginal prediction accuracy") +
+#   scale_color_manual(values = dist_colors_use, name = "Cluster method", guide = FALSE) +
+#   scale_linetype_manual(values = 1, name = NULL) +
+#   xlab("Distance measure") +
+#   labs(caption = "") +
+#   facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", labeller = labeller(set = str_to_title, trait = str_add_space)) +
+#   theme_presentation2(base_size = 12) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = c(0.70, -0.29), legend.margin = margin())
+# 
+# ggsave(filename = "random_cv00_pov00_cluster_predictions_presentation.jpg", plot = g_random_cv00_pov00_cluster, path = fig_dir, 
+#        width = 4.5, height = 4.5, dpi = 1000)
 
 
 
@@ -1391,17 +1456,29 @@ ggsave(filename = "random_cv00_pov00_cluster_predictions_presentation.jpg", plot
 
 
 ## Combine figure of cluster accuracy with random
-g_cv_pov_cluster_LOEO <- plot_grid(g_cv_pov_cluster_list$`Leave-one-environment-out` + theme(legend.position = c(0.75, 1.12), legend.margin = margin()), 
-                                   g_random_cv_pov_cluster_list$`Leave-one-environment-out` + labs(subtitle = NULL),
+legend_pos <- c(0.75, 1.14)
+
+## Create x axis
+x_label <- grid::textGrob(label = "Distance measure", gp = grid::gpar(fontsize = 8))
+
+# Create title
+LOEOtitle <- grid::textGrob(label = "Leave-one-environment-out", gp = grid::gpar(fontsize = 10))
+g_cv_pov_cluster_LOEO <- plot_grid(g_cv_pov_cluster_list$`Leave-one-environment-out` + theme(legend.position = legend_pos, legend.margin = margin(), axis.title.x = element_blank()), 
+                                   g_random_cv_pov_cluster_list$`Leave-one-environment-out` + theme(axis.title.x = element_blank()),
                                    nrow = 1, align = "hv", axis = "tblr", labels = LETTERS[1:2])
 
-g_cv_pov_cluster_TF <- plot_grid(g_cv_pov_cluster_list$`Time-forward` + theme(legend.position = c(0.75, 1.12), legend.margin = margin()), 
-                                 g_random_cv_pov_cluster_list$`Time-forward` + labs(subtitle = NULL),
+TFtitle <- grid::textGrob(label = "Time-forward", gp = grid::gpar(fontsize = 10))
+g_cv_pov_cluster_TF <- plot_grid(g_cv_pov_cluster_list$`Time-forward` + theme(legend.position = legend_pos, legend.margin = margin(), axis.title.x = element_blank()), 
+                                 g_random_cv_pov_cluster_list$`Time-forward`+ theme(axis.title.x = element_blank()),
                                  nrow = 1, align = "hv", axis = "tblr", labels = LETTERS[1:2])
 
 
-ggsave(filename = "all_cv_pov_and_random_cluster_predictions_LOEO_paper.jpg", plot = g_cv_pov_cluster_LOEO, path = fig_dir, width = 7, height = 4, dpi = 1000)
-ggsave(filename = "all_cv_pov_and_random_cluster_predictions_TF_paper.jpg", plot = g_cv_pov_cluster_TF, path = fig_dir, width = 7, height = 4, dpi = 1000)
+ggsave(filename = "all_cv_pov_and_random_cluster_predictions_LOEO_paper.jpg", 
+       plot = grid.arrange(g_cv_pov_cluster_LOEO, bottom = x_label, top = LOEOtitle), 
+       path = fig_dir, width = 7, height = 4, dpi = 1000)
+ggsave(filename = "all_cv_pov_and_random_cluster_predictions_TF_paper.jpg", 
+       plot = grid.arrange(g_cv_pov_cluster_TF, bottom = x_label, top = TFtitle), 
+       path = fig_dir, width = 7, height = 4, dpi = 1000)
 
 
 

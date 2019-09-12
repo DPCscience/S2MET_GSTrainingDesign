@@ -1023,33 +1023,10 @@ g_cluster_herit <- cluster_herit %>%
   mutate(set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", "")) %>%
   filter(!(model == "AMMI" & set == "Time-forward")) %>%
-  gather(group, heritability, -set, -model, -trait, -method) %>%
-  mutate(group = ifelse(group == "unclustered", paste0("H1: ", group), paste0("H2: ", group))) %>%
-  ggplot(aes(x = model, y = heritability, color = method, shape = group)) +
-  geom_point(position = position_dodge2(0.5), size = 1.5) +
-  # scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
-  scale_shape_discrete(name = NULL, labels = str_to_title, guide = guide_legend(nrow = 2)) +
-  facet_grid(trait ~ set, scales = "free_x", space = "free_x", labeller = labeller(trait = str_add_space), switch = "y") +
-  xlab("Distance measure") +
-  scale_y_continuous(breaks = pretty, name = "Heritability") +
-  theme_presentation2(base_size = 10) +
-  theme(legend.position = c(0.22, 0.07), legend.margin = margin(), legend.key.height = unit(0.5, "line"), 
-        axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside")
-
-ggsave(filename = "cluster_heritability_complete_withAGDD.jpg", plot = g_cluster_herit, path = fig_dir, width = 3.5, height = 6, dpi = 1000)
-
-
-## Remove AGDD
-g_cluster_herit <- cluster_herit %>%
-  mutate(set = str_replace_all(set, set_replace),
-         set = str_replace_all(set, "[0-9]{4}", "")) %>%
-  filter(!(model == "AMMI" & set == "Time-forward")) %>%
-  filter(trait %in% traits) %>%
   filter(method == "mclust") %>%
   gather(group, heritability, -set, -model, -trait, -method) %>%
   mutate(group = ifelse(group == "unclustered", paste0("H1: ", group), paste0("H2: ", group))) %>%
   ggplot(aes(x = model, y = heritability, color = model, shape = group)) +
-  # ggplot(aes(x = model, y = heritability, color = method, shape = group)) +
   geom_point(position = position_dodge2(0.5), size = 1.5) +
   scale_color_manual(values = dist_colors_use, name = "Distance\nmethod", guide = FALSE) +
   scale_shape_discrete(name = NULL, labels = str_to_title, guide = guide_legend(nrow = 2)) +
@@ -1060,8 +1037,8 @@ g_cluster_herit <- cluster_herit %>%
   theme(legend.position = c(0.22, 0.07), legend.margin = margin(), legend.key.height = unit(0.5, "line"), 
         axis.text.x = element_text(angle = 45, hjust = 1), strip.placement = "outside")
 
-ggsave(filename = "cluster_heritability_complete.jpg", plot = g_cluster_herit, path = fig_dir, width = 3.5, height = 5, dpi = 1000)
-
+ggsave(filename = "cluster_heritability_complete.jpg", plot = g_cluster_herit, path = fig_dir, 
+       width = 4, height = 5, dpi = 1000)
 
 
 
