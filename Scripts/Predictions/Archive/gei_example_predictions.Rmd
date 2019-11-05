@@ -1,8 +1,0 @@
----
-title: "Example GxE Prediction"
-output: html_notebook
----
-
-## Introduction
-
-This notebook will outline some procedures to predict genotypic values in the presence of GxE by using a number of different models. Each model will be introduced, its assumptions outlined, predictions made, and results interpreted.

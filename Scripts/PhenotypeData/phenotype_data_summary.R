@@ -1359,7 +1359,7 @@ mean(pvalueAlt <= 0.05)
 
 ## What about smaller populations? Different sizes? More environments?
 nEnv <- 25
-nPop <- c(175, 50)
+nPop <- c(175, 200)
 covDist <- as.dist(matrix(0, nrow = nEnv, ncol = nEnv))
 
 pvalueNull <- replicate(100, {

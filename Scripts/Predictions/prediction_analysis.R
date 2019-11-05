@@ -209,10 +209,6 @@ separate_cv_pov_predictions_analysis1 <- separate_cv_pov_predictions_analysis %>
   mutate(set = str_replace_all(set, "[0-9]{4}", "")) %>%
   rename(accuracy = fit)
 
-
-
-#### Plot ###
-
 g_cv_pov_all_data <- separate_cv_pov_predictions_analysis1 %>%
   ggplot(aes(x = scheme, y = accuracy, ymin = lower, ymax = upper)) +
   geom_point() +
@@ -867,6 +863,13 @@ cv_pov_rank_predictions1 %>%
 
 
 
+
+
+
+
+
+
+
   
 
 g_rank_pred_list <- cv_pov_rank_predictions1 %>%
@@ -994,8 +997,7 @@ cluster_pred_df <- bind_rows(cluster_pred_df) %>%
          model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model))
 
 
-## Combine predictive ability estimates with the heritability in 
-## each environment, then calculate prediction accuracy  
+  
 cluster_predictions_base <- cluster_pred_df %>%
   left_join(., env_herit) %>% 
   mutate(ability = accuracy, accuracy = ability / sqrt(heritability)) %>%
@@ -1071,8 +1073,7 @@ separate_cv_pov_cluster_predictions_analysis %>%
 ## Mostly environment nested within cluster nested within model
 
 
-
-# Prepare data.frame for plotting (mostly reorder or rename factors)
+## Plot all
 separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
@@ -1082,24 +1083,7 @@ separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predict
          set = str_replace_all(set, "[0-9]{4}", "")) %>%
   left_join(., select(separate_cv_pov_predictions_analysis1, -lower, -upper, -se)) %>%
   mutate(group = paste0(set, " - ", scheme))
-     
-## Look at differences between cluster and non-cluster accuracy
-cluster_prediction_advantage <- separate_cv_pov_cluster_predictions_analysis1 %>%
-  mutate(diff = fit - accuracy) %>% 
-  select(set, trait, model, scheme, diff) %>% 
-  split(.$set) %>%
-  map(~arrange(., desc(diff)) %>% as.data.frame() )
-
-## What was the average advantage for distance measures that allow new environments?
-cluster_prediction_advantage %>%
-  map(~filter(., model %in% c("GCD", "Mean-EC", "IPCA-EC", "All-EC"))) %>%
-  map(~summarize_at(., vars(diff), list(min = min, max = max, mean = mean)))
-
-
-
-
-
-### Plot ###      
+           
 
 g_cv_pov_cluster <- separate_cv_pov_cluster_predictions_analysis1 %>%
   filter(trait %in% traits) %>%
@@ -1169,7 +1153,7 @@ g_cv_pov_cluster_list <- separate_cv_pov_cluster_predictions_analysis1 %>%
         scale_linetype_manual(values = 2, name = NULL) +
         xlab("Distance measure") +
         facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", labeller = labeller(set = str_to_title, trait = str_add_space), switch = "y") +
-        labs(subtitle = "Prediction accuracy of\ndistance-defined clusters")  +
+        labs(subtitle = "Prediction accuracy of\ninformed clusters")  +
         theme_presentation2(base_size = 8) +
         theme(axis.text.x = element_text(angle = 50, hjust = 1), legend.position = "bottom") )
 
@@ -1353,7 +1337,7 @@ for (i in seq(nrow(random_cluster_predictions_analysis))) {
 
 
 
-## Prepare DF for plotting
+## Plot all
 random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
   mutate(effects = map(out, ~.$scheme_effects[[1]])) %>%
   unnest(effects) %>%
@@ -1364,26 +1348,6 @@ random_cluster_predictions_analysis1 <- random_cluster_predictions_analysis %>%
          set = str_replace_all(set, set_replace),
          set = str_replace_all(set, "[0-9]{4}", ""))
 
-
-## Look at differences between cluster and non-cluster accuracy
-random_cluster_prediction_advantage <- random_cluster_predictions_analysis1 %>%
-  select(set, trait, model, scheme, fit) %>% 
-  split(.$set) %>%
-  map(~arrange(., desc(fit)) %>% as.data.frame() )
-
-## Look at grain yield and plant height
-random_cluster_prediction_advantage %>% 
-  map(filter, trait %in% c("GrainYield", "PlantHeight"))
-
-## What was the average advantage for distance measures that allow new environments?
-random_cluster_prediction_advantage %>%
-  map(~filter(., model %in% c("GCD", "Mean-EC", "IPCA-EC", "All-EC"))) %>%
-  map(~summarize_at(., vars(diff), list(min = min, max = max, mean = mean)))
-
-
-
-
-### Plot ###
 
 g_random_cv_pov_cluster <- random_cluster_predictions_analysis1 %>%
   filter(trait %in% traits) %>%
@@ -1416,7 +1380,7 @@ g_random_cv_pov_cluster_list <- random_cluster_predictions_analysis1 %>%
         scale_color_manual(values = dist_colors_use, guide = FALSE) +
         xlab("Distance measure") +
         # labs(subtitle = paste(unique(.$set), "Marginal prediction accuracy of informed versus random clusters", sep = "\n"))  +
-        labs(subtitle = "Marginal prediction accuracy of distance-defined \nversus random clusters")  +
+        labs(subtitle = "Marginal prediction accuracy of informed\nversus random clusters")  +
         facet_grid(trait ~ scheme, scales = "free_x", space = "free_x", switch = "y", 
                    labeller = labeller(trait = str_add_space)) +
         theme_presentation2(base_size = 8) +

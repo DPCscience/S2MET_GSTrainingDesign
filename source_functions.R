@@ -401,11 +401,19 @@ env_mclust <- function(data, min_env = 2, test.env, method = c("mclust", "pam"),
     }
     
     ## Get the classification of the environments
-    classif <- data_frame(environment = row.names(clusmod$data), cluster = clusmod$classification)
-    # Get the mean from each cluster
-    clusmean <- t(clusmod$parameters$mean) %>% 
-      `row.names<-`(., paste0("cluster", seq(nrow(.))))
+    classif <- tibble(environment = row.names(clusmod$data), cluster = clusmod$classification)
+    # Get the mean from each cluster - convert to matrix
+    clusmean <- clusmod$parameters$mean
     
+    if (!is.matrix(clusmean)) {
+      clusmean <- t(clusmean)
+      row.names(clusmean) <- colnames(train_data)
+      
+    }
+    
+    colnames(clusmean) <- paste0("cluster", seq(ncol(clusmean)))
+    clusmean <- t(clusmean)
+
   } else if (method == "pam") {
     
     # If diss is true, determine the number of environments
@@ -466,7 +474,7 @@ env_mclust <- function(data, min_env = 2, test.env, method = c("mclust", "pam"),
     # Now figure out the minimum distance from each environment to each cluster
     test_assignment <- apply(X = test_dist[row.names(test_data),row.names(clusmean), drop = FALSE], MARGIN = 1, FUN = which.min)
     # Add this data to the classif
-    classif1 <- classif %>% add_row(environment = names(test_assignment), cluster = test_assignment)
+    classif1 <- add_row(classif, environment = names(test_assignment), cluster = test_assignment)
     
   } else {
     classif1 <- classif
@@ -787,13 +795,17 @@ gdd <- function(tmin, tmax, adjust = FALSE, return = c("gdd", "agdd"), base = c(
   
 
 ## Predict Haun stage using GDD
-predict_haun_stage <- function(x) (0.0154 * x) - (0.00000000391 * (x^3)) + 0.24
+## Version 1
+haun.bauer <- function(x) (0.0154 * x) - (0.00000000391 * (x^3)) + 0.24
+
+# Version 2
+haun.enz <- function(x) (0.01283928 * x) - 0.72346213
 
 ## A function that designates growth stage (vegetative, flowering, grain fill) based
 ## on AGDD
 ## See  for information
 ## on staging
-stage_growth <- function(x, method = c("bauer", "montana")) {
+stage_growth <- function(x, method = c("haun.bauer", "haun.enz", "montana")) {
   
   method <- match.arg(method)
   
@@ -802,21 +814,28 @@ stage_growth <- function(x, method = c("bauer", "montana")) {
   
   ## If Bauer, use https://library.ndsu.edu/ir/bitstream/handle/10365/8301/farm_49_06_05.pdf
   
-  if (method == "bauer") {
+  # If the method contains bauer, predict using two different versions (but assign GS the same)
+  if (grepl(pattern = "haun", x = method)) {
+    
+    # Assign the haun function
+    haun_function <- switch(method, haun.bauer = haun.bauer, haun.enz = haun.enz)
     
     ## Predict Haun growth stage given AGDD
-    haun <- predict_haun_stage(x = x)
+    haun <- haun_function(x = x)
   
     ## Vegetative stage is emergence to flowering (0.5 - 9.5)
     ## Flowering is 9.5 - 10.2
     ## Grain fill is 10.2 - maturity (max)
     
+    # Is max_haun max(haun) or 16?
+    max_haun <- ifelse(method == "haun.bauer", max(haun), 16)
+    
     stage[haun < 0.5] <- "pre-emergence"
-    stage[between(haun, 0.5, 9.5)] <- "vegetative"
-    stage[between(haun, 9.5, 10.2)] <- "flowering"
-    stage[between(haun, 10.2, max(haun))] <- "grainfill"
-    # Add maturity for those that are less than the max
-    stage[which(seq_along(haun) > which.max(haun) & haun < max(haun))] <- "maturity"
+    stage[between(haun, 0.5, 10.2)] <- "vegetative"
+    stage[between(haun, 10.2, 11.6)] <- "flowering"
+    stage[between(haun, 11.6, max_haun)] <- "grainfill"
+    # Add maturity for the remaining
+    stage[(max(which(stage == "grainfill")) + 1):length(stage)] <- "maturity"
     
     # If Montana, use http://landresources.montana.edu/soilfertility/documents/PDF/pub/GDDPlantStagesMT200103AG.pdf
   } else if (method == "montana") {

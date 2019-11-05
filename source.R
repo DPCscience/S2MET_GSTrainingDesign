@@ -216,8 +216,8 @@ dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" 
 dist_method_abbr <- abbreviate(dist_method_replace)
 
 ## Alternative abbreviations
-dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
-                             names(dist_method_replace))
+dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", 
+                               "Mean-EC", "IPCA-EC", "AMMI", "Random"), names(dist_method_replace))
 
 ## Color scheme for distance methods
 ## Warm colors for those that don't allow for new environments (AMMI and PD)
@@ -238,7 +238,8 @@ dist_colors <- c("AMMI" = "#FFB71E", "PD" = umn_palette(3)[2], "LocPD" = umn_pal
                  "Random" = "grey75")
   
 ## Subset for use
-dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA", "sample")]
+dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", 
+                                           "MYEC_All", "MYEC_IPCA", "sample")]
 dist_colors_use <- dist_colors[dist_method_abbr_use]
 
 
@@ -247,6 +248,17 @@ dist_colors_use <- dist_colors[dist_method_abbr_use]
 cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0", "cv00", "pov00", "pocv00") %>%
   setNames(object = toupper(.), .)
 
-## Set replacement
-set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Time-forward")
-
+## Set replacement vector and function
+set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Leave-one-year-out")
+f_set_replace <- function(x) {
+  x1 <- str_replace_all(string = x, set_replace)
+  str_replace(string = x1, pattern = "([A-Za-z-]*)([0-9]{4})", replacement = "\\1 (\\2)")
+}
+  
+  
+  
+  
+  
+  
+  
+  

@@ -91,6 +91,8 @@ one_year_daily_temp_impute <- oneyear_temp_data %>%
 ## one-year data
 one_year_growth_staging <- one_year_daily_temp_impute %>% 
   unnest() %>% 
+  # Remove dap = 0
+  filter(dap > 0) %>%
   select(-window, -n_missing) %>%
   spread(datatype, value) %>%
   split(.$environment) %>%
@@ -205,6 +207,8 @@ multiyear_mean_gdd <- multiyear_daily_temp_impute %>%
   unnest() %>% 
   ## Filter observations that are 10 years preceding the trial year (not including trial year)
   filter(year >= env_year - multiyear_window, year <= env_year - 1) %>% 
+  # Filter dap > 0
+  filter(dap > 0) %>%
   select(-window, -n_missing) %>%
   spread(datatype, value) %>%
   group_by(environment, year) %>%
