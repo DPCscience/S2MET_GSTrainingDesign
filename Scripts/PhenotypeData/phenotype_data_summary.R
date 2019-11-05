@@ -28,7 +28,7 @@ library(ggrepel)
 # Load the distance matrices
 load(file.path(result_dir, "distance_method_results.RData"))
 # Load the tidy S2 data
-load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
+load("C:/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
 
 
 
@@ -763,6 +763,96 @@ ggsave(filename = "variance_components_expanded.jpg", plot = g_varprop, path = f
 
 
 
+#### Heading Date Analysis
+#### 
+#### Remove potential outlier environments and re-analyze
+#### 
+
+# Group by trait and fit the multi-environment model
+# Fit models in the TP and the TP + VP
+stage_two_fits_HD <- S2_MET_BLUEs_tomodel %>%
+  filter(trait == "HeadingDate", ! environment %in% c("EON17", "CRM15", "HNY15")) %>%
+  mutate_at(vars(location, year, line_name), as.factor) %>%
+  group_by(trait, population) %>%
+  do({
+    
+    df <- droplevels(.)
+    
+    # Table of lines by environments (i.e. plots)
+    plot_table <- xtabs(formula = ~ line_name + location + year, data = df)
+    
+    ## Harmonic means
+    # Locations
+    harm_loc <- apply(X = plot_table, MARGIN = c(1,2), sum) %>% 
+      ifelse(. > 1, 1, .) %>%
+      rowSums() %>% 
+      harm_mean()
+    
+    # Year
+    harm_year <- apply(X = plot_table, MARGIN = c(2,3), sum) %>% 
+      ifelse(. > 1, 1, .) %>%
+      rowSums() %>% 
+      harm_mean()
+    
+    # Reps
+    harm_rep <- apply(X = plot_table, MARGIN = c(1,2,3), sum) %>% 
+      harm_mean()
+    
+    # Get the weights
+    wts <- df$std_error^2
+    
+    ## fit the full model
+    fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|location) + (1|year) + (1|location:year) + (1|line_name:location) + 
+                  (1|line_name:year) + (1|line_name:location:year),
+                data = df, control = lmer_control, weights = wts)
+    
+    # fit <- lmer(formula = value ~ 1 + (1|line_name) + (1|location) + (1|year) + (1|line_name:location) + (1|line_name:year) + (1|line_name:location:year),
+    #             data = df, control = lmer_control)
+    
+    
+    ## Likelihood ratio tests
+    lrt <- ranova(fit) %>% 
+      tidy() %>% 
+      filter(!str_detect(term, "none")) %>% 
+      mutate(term = str_remove(term, "\\(1 \\| ") %>% 
+               str_remove("\\)")) %>% 
+      select(term, LRT, df, p.value)
+
+    # Return data_frame
+    data_frame(fit = list(fit), lrt = list(lrt), n_l = harm_loc, 
+               n_y = harm_year, n_r = harm_rep)
+    
+  }) %>% ungroup()
+
+## Create a table for output
+stage_two_fits_GYL_varcomp <- stage_two_fits_HD %>%
+  mutate(var_comp = map(fit, ~as.data.frame(VarCorr(.)) %>% select(source = grp, variance = vcov)),
+         var_comp = map2(var_comp, lrt, ~full_join(.x, .y, by = c("source" = "term")))) %>% 
+  unnest(var_comp) %>%
+  mutate(source = map(source, ~str_split(., pattern = ":", simplify = FALSE) %>% map(str_to_title) %>% .[[1]]) %>% 
+           map_chr(~paste(., collapse = " x ")),
+         source = str_replace_all(source, "Line_name", "Genotype"),
+         source = factor(source, levels = c("Genotype", "Location", "Year", "Location x Year", "Genotype x Location", "Genotype x Year",
+                                            "Genotype x Location x Year", "Residual"))) %>%
+  group_by(trait, population) %>% 
+  mutate(var_prop = variance / sum(variance)) %>%
+  ungroup()
+
+
+
+#######
+#######
+#######
+
+
+
+
+
+
+
+
+
+
 ## Look at genetic components
 stage_two_fits_GYL_varprop2 <- stage_two_fits_GYL_varprop %>%
   filter(str_detect(source, "Genotype")) %>%
@@ -1194,23 +1284,120 @@ ggsave(filename = "environmental_correlation_withAGDD.jpg", path = fig_dir, plot
 
 
 
-
-
-
-
-
-
-
-
-
-
-
 #######
+
 
 ## Are the correlation matrices significantly different between populations?
 env_cor_mantel <- map2(.x = env_cor_tp, .y = env_cor_vp, ~ade4::mantel.rtest(m1 = dist(.x), m2 = dist(.y), nrepet = 5000))
+# P-value is for null hypothesis that the two matrices are unrelated
 map_dbl(env_cor_mantel, "pvalue")
 
+## Are the phenotypic distance matrices significantly different between populations?
+# First calculate the distance based on each environment
+ge_mean_D <- S2_MET_BLUEs %>%
+  filter(trait %in% traits) %>%
+  mutate(population = ifelse(line_name %in% tp, "TP", "VP")) %>%
+  # Split by trait
+split(.$trait) %>%
+  map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
+  map(~split(., .$population)) %>%
+  map(~map(., function(df){
+    dist1 <- dist_env(x = df, gen.col = "line_name", env.col = "environment", pheno.col = "value")
+    # Replace missing with the mean
+    dist1[is.na(dist1)] <- mean(dist1, na.rm = T)
+    dist1 }))
+
+
+env_PD_mantel <- map(ge_mean_D, ~ade4::mantel.rtest(m1 = .[[1]], m2 = .[[2]], nrepet = 5000))
+# P-value is for null hypothesis that the two matrices are unrelated
+map_dbl(env_PD_mantel, "pvalue")
+
+
+
+## Simulate two populations with the same correlation between environments
+nEnv <- 10
+nPop <- c(200, 200)
+covDist <- as.dist(matrix(0, nrow = nEnv, ncol = nEnv))
+
+pvalueNull <- replicate(100, {
+  covDist <- as.dist(matrix(0, nrow = nEnv, ncol = nEnv))
+  covDist[seq_along(covDist)] <- runif(n = length(covDist), min = 0.3, max = 1)
+  covMat <- as.matrix(covDist); diag(covMat) <- 1
+  
+  # Simulate genotypic values from a multi-variate distribution
+  GList <- map(nPop, ~mvtnorm::rmvnorm(n = ., mean = rep(0, nrow(covMat)), sigma = covMat)) %>%
+    map(cor) %>%
+    map(dist)
+  
+  # Test using mantel
+  mantel_out <- ade4::mantel.rtest(m1 = GList[[1]], m2 = GList[[2]], nrepet = 500)
+  mantel_out$pvalue
+})
+
+## True discovery rate
+mean(pvalueNull <= 0.05)
+
+## Simulate two populations with different correlations between environments
+pvalueAlt <- replicate(100, {
+  covDist <- replicate(2, as.dist(matrix(0, nrow = nEnv, ncol = nEnv)), simplify = FALSE) %>%
+    map(function(d) {d[seq_along(d)] <- runif(n = length(d), min = 0.3, max = 1); d})
+  covMatList <- map(covDist, ~as.matrix(.) %>% `diag<-`(., 1))
+  
+  # Simulate genotypic values from a multi-variate distribution
+  GList <- map2(nPop, covMatList, ~mvtnorm::rmvnorm(n = .x, mean = rep(0, nrow(.y)), sigma = .y)) %>%
+    map(cor) %>%
+    map(dist)
+  
+  # Test using mantel
+  mantel_out <- ade4::mantel.rtest(m1 = GList[[1]], m2 = GList[[2]], nrepet = 500)
+  mantel_out$pvalue
+})
+
+## FDR?
+mean(pvalueAlt <= 0.05)
+
+
+## What about smaller populations? Different sizes? More environments?
+nEnv <- 25
+nPop <- c(175, 200)
+covDist <- as.dist(matrix(0, nrow = nEnv, ncol = nEnv))
+
+pvalueNull <- replicate(100, {
+  covDist <- as.dist(matrix(0, nrow = nEnv, ncol = nEnv))
+  covDist[seq_along(covDist)] <- runif(n = length(covDist), min = 0.3, max = 1)
+  covMat <- as.matrix(covDist); diag(covMat) <- 1
+  
+  # Simulate genotypic values from a multi-variate distribution
+  GList <- map(nPop, ~mvtnorm::rmvnorm(n = ., mean = rep(0, nrow(covMat)), sigma = covMat)) %>%
+    map(cor) %>%
+    map(dist)
+  
+  # Test using mantel
+  mantel_out <- ade4::mantel.rtest(m1 = GList[[1]], m2 = GList[[2]], nrepet = 500)
+  mantel_out$pvalue
+})
+
+## True discovery rate
+mean(pvalueNull <= 0.05)
+
+## Simulate two populations with different correlations between environments
+pvalueAlt <- replicate(100, {
+  covDist <- replicate(2, as.dist(matrix(0, nrow = nEnv, ncol = nEnv)), simplify = FALSE) %>%
+    map(function(d) {d[seq_along(d)] <- runif(n = length(d), min = 0.3, max = 1); d})
+  covMatList <- map(covDist, ~as.matrix(.) %>% `diag<-`(., 1))
+  
+  # Simulate genotypic values from a multi-variate distribution
+  GList <- map2(nPop, covMatList, ~mvtnorm::rmvnorm(n = .x, mean = rep(0, nrow(.y)), sigma = .y)) %>%
+    map(cor) %>%
+    map(dist)
+  
+  # Test using mantel
+  mantel_out <- ade4::mantel.rtest(m1 = GList[[1]], m2 = GList[[2]], nrepet = 500)
+  mantel_out$pvalue
+})
+
+## FDR?
+mean(pvalueAlt <= 0.05)
 
 
 
@@ -1662,7 +1849,7 @@ ammi_fitted <- ammi_out %>%
     
     ## Return the fitted values, the top, and bottom
     fitted_effect1 <- as.data.frame(fitted_effect) %>% rownames_to_column("line_name") %>% gather(environment, fitted, -line_name)
-    data_frame(fitted = list(fitted_effect1), top = list(top), bottom = list(bottom))
+    tibble(fitted = list(fitted_effect1), top = list(top), bottom = list(bottom))
     
   })
 
@@ -1684,8 +1871,13 @@ year_levels <- c(sort(unique(S2_MET_BLUEs$year)), "Genotype")
 ## Year color scheme
 year_color <- setNames( c(neyhart_palette("umn1", 5)[3:5], "grey"), year_levels)
 
+
+
+# Rename an object
+ammi_out <- ammi_out1
+
 ## Plot the AMMI axes and the proportion of variance explained
-g_ammi <- ammi_out1 %>%
+g_ammi <- ammi_out %>%
   left_join(., ammi_fitted_clusters) %>%
   # filter(set == "complete") %>%
   group_by(set, trait) %>%
@@ -1712,9 +1904,7 @@ g_ammi <- ammi_out1 %>%
       # Add year
       mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
              trait = trait)
-    
-    ## Year color scheme
-    year_color <- setNames( c(neyhart_palette("umn1", 5)[3:5], "grey"), year_levels)
+  
     
     ## Figure out the range for x and y axis for the trait
     effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
@@ -1777,22 +1967,130 @@ ggsave(filename = "ammi_biplots_complete.jpg", plot = ammi_grid1, path = fig_dir
 
 
 
+### Plot clusters as colors, years as different shapes; keep genotype constant
+
+
+## Year shape scheme
+year_shape <- setNames(c(15, 17, 18, 16), names(year_color))
+
+
+## Plot the AMMI axes and the proportion of variance explained
+g_ammi <- ammi_out %>%
+  left_join(., ammi_fitted_clusters) %>%
+  # filter(set == "complete") %>%
+  group_by(set, trait) %>%
+  do(plot = {
+    df <- .
+    
+    out <- df$ammi[[1]]
+    res <- df$results[[1]]
+    trait <- df$trait
+    clus <- df$clusters[[1]] %>%
+      ## Assign cluster number in descending order of size
+      group_by(cluster) %>% 
+      mutate(nEnv = n()) %>% 
+      ungroup() %>% 
+      mutate(cluster2 = factor(nEnv, levels = sort(unique(nEnv), decreasing = TRUE)), 
+             cluster2 = as.numeric(cluster2))
+    
+    ## Combine the g and e scores into one DF
+    scores_df <- map_df(out[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
+    
+    # Create a renaming vector
+    res1 <- mutate(res, annotation = paste0(str_replace_all(term, "PC", "IPCA"), " (", round(cumprop, 2) * 100, "%)"))
+    propvar_rename <- setNames(object = res1$term, nm = res1$annotation)
+    
+    # Renaming function
+    label_rename <- function(x) str_replace_all(x, propvar_rename)
+    
+    scores_toplot <- scores_df %>%
+      select(-eigen) %>%
+      spread(PC, score) %>%
+      # Add year
+      mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
+             trait = trait) %>%
+      # Add clusters
+      left_join(., select(clus, term = environment, cluster = cluster2), by = "term") %>%
+      mutate(cluster = ifelse(is.na(cluster), 0, cluster),
+             cluster = as.factor(cluster))
+    
+
+    ## Vector for cluster colors
+    cluster_colors <- setNames(c("grey", neyhart_palette("umn1")[-1:-2][seq(n_distinct(scores_toplot$cluster) - 1)]), 
+                                sort(unique(scores_toplot$cluster)))
+    
+    
+    ## Figure out the range for x and y axis for the trait
+    effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "effect") %>% unlist()) %>% 
+      unlist() %>% range()
+    
+    scores_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+      map(~.[-1]) %>% map(., ~map(., "score") %>% unlist()) %>% 
+      unlist() %>% range()
+    
+    ## Units
+    unit_use <- traits_unit1[df$trait]
+    
+    ## Annotation specs for labelling cluster
+    cluster_annotation_df <- scores_toplot %>% 
+      distinct(cluster) %>%
+      filter(cluster != "0") %>%
+      mutate(clusterN = as.numeric(cluster) - 1,
+             label = paste0("Cluster ", cluster),
+             x = Inf, y = -Inf, hjust = 1.2,
+             vjust = rev(clusterN) * -1.1,
+             color = cluster_colors[-1][clusterN])
+    
+    # Plot
+    scores_toplot %>% 
+      mutate(trait_use = paste0(str_add_space(trait), " (", unit_use, ")"),
+             trait_use = str_replace_all(trait_use, " ", "~")) %>%
+      # ggplot(aes(x = effect, y = PC1, color = year)) + 
+      ggplot(aes(x = effect, y = PC1, color = cluster, shape = year)) + 
+      geom_point(size = ifelse(scores_toplot$group == "environment", 1.5, 0.5)) +
+      geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term), size = 2) +
+      scale_color_manual(values = cluster_colors, name = NULL, guide = FALSE) +
+      scale_shape_manual(values = year_shape, name = NULL, guide = guide_legend(override.aes = list(size = 3))) + 
+      scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
+      scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
+      ylab(names(propvar_rename)[1]) +
+      xlab(expression("Effect (deviation from"~italic(mu)*")")) +
+      facet_grid(~ trait_use, labeller = labeller(trait_use = label_parsed)) + 
+      theme_presentation2(base_size = 10) +
+      theme(legend.position = "bottom") +
+      ## Annotate with cluster color
+      annotate(geom = "text", size = 2, x = cluster_annotation_df$x, y = cluster_annotation_df$y, 
+               label = cluster_annotation_df$label, hjust = cluster_annotation_df$hjust,
+               vjust = cluster_annotation_df$vjust, color = cluster_annotation_df$color)
+    
+  })
+
+## Combine plots
+plot_list_complete <- subset(g_ammi, set == "complete" & trait %in% traits, plot, drop = T)
+# ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 1)
+ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(rep(0.9, length(plot_list_complete) - 1), 1), 
+                                plotlist = c(head(plot_list_complete, -1) %>% map(~. + theme(legend.position = "none", axis.title.x = element_blank())),
+                                             list(tail(plot_list_complete, 1)[[1]] + theme(legend.position = "none"))))
+
+# Add legend
+ammi_grid1 <- plot_grid(ammi_grid_complete, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
+
+# Save
+ggsave(filename = "ammi_biplots_complete_alt1.jpg", plot = ammi_grid1, path = fig_dir, 
+       height = 6.5, width = 3, dpi = 1000)
 
 
 
 
 
 
-# Rename an object
-ammi_out <- ammi_out1
+
+
 
 ## Save all of this
 save_file <- file.path(result_dir, "genotype_environment_phenotypic_analysis.RDAta")
 save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_GE", file = save_file)
-
-    
-
-
 
 
 

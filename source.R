@@ -14,7 +14,7 @@ library(lmerTest)
 proj_dir <- repo_dir
 
 ## Google drive directory
-gdrive_dir <- "C:/Users/jln54//GoogleDrive"
+gdrive_dir <- "C:/GoogleDrive"
 
 # Geno, pheno, and enviro data
 geno_dir <-  file.path(gdrive_dir, "BarleyLab/Breeding/GenotypicData/GBS_Genotype_Data/")
@@ -216,23 +216,30 @@ dist_method_replace <- c("pheno_dist" = "Phenotypic Distance", "pheno_loc_dist" 
 dist_method_abbr <- abbreviate(dist_method_replace)
 
 ## Alternative abbreviations
-dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", "Mean-EC", "IPCA-EC", "AMMI", "Random"),
-                             names(dist_method_replace))
+dist_method_abbr <- setNames(c("PD", "LocPD", "GCD", "1Yr-All-EC", "1Yr-Mean-EC", "1Yr-IPCA-EC", "All-EC", 
+                               "Mean-EC", "IPCA-EC", "AMMI", "Random"), names(dist_method_replace))
 
-colors <- umn_palette(3)
-colors2 <- umn_palette(2)
-colors3 <- umn_palette(4)
+## Color scheme for distance methods
+## Warm colors for those that don't allow for new environments (AMMI and PD)
+## Intermediate for LocPD (allows new years, but not new locations)
+## Cool colors for those that do allow new environments (GCD, All-EC, Mean-EC, IPCA-EC)
+## Grey for random
+## Black for all data
 
-colors_use <- c("#FFB71E", "#FFDE7A", "#F21A00", colors[5:7], colors[c(3, 8)], colors2[3], colors2[4], "grey75")
+## Create a cool colors palette
+cool_colors <- rev(colorRampPalette(colors = c(umn_palette(4)[3], umn_palette(3)[3]))(4))
 
 # colors <- wesanderson::wes_palette(name = "Darjeeling1", n = 9, type = "continuous")
 # colors2 <- wesanderson::wes_palette(name = "Darjeeling2", n = 10, type = "continuous")
 # colors_use <- c(colors[c(1:3, 5:7)], colors2[2:4], colors[4], "grey75")
 
-dist_colors <- setNames(colors_use, dist_method_abbr)
-
+dist_colors <- c("AMMI" = "#FFB71E", "PD" = umn_palette(3)[2], "LocPD" = umn_palette(3)[5], "GCD" = cool_colors[1],
+                 "All-EC" = cool_colors[2], "Mean-EC" = cool_colors[3], "IPCA-EC" = cool_colors[4], 
+                 "Random" = "grey75")
+  
 ## Subset for use
-dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", "MYEC_All", "MYEC_Mean", "MYEC_IPCA", "sample")]
+dist_method_abbr_use <- dist_method_abbr[c("AMMI", "pheno_dist", "pheno_loc_dist", "great_circle_dist", 
+                                           "MYEC_All", "MYEC_IPCA", "sample")]
 dist_colors_use <- dist_colors[dist_method_abbr_use]
 
 
@@ -241,6 +248,17 @@ dist_colors_use <- dist_colors[dist_method_abbr_use]
 cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0", "cv00", "pov00", "pocv00") %>%
   setNames(object = toupper(.), .)
 
-## Set replacement
-set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Time-forward")
-
+## Set replacement vector and function
+set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Leave-one-year-out")
+f_set_replace <- function(x) {
+  x1 <- str_replace_all(string = x, set_replace)
+  str_replace(string = x1, pattern = "([A-Za-z-]*)([0-9]{4})", replacement = "\\1 (\\2)")
+}
+  
+  
+  
+  
+  
+  
+  
+  

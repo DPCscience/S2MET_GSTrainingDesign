@@ -45,13 +45,23 @@ n_random <- nCV
 k <- 5
 
 
-
-
-## Data.frame of test environments
-test_env_df <- bind_rows(
-  tibble(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
-  tibble(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
-)
+## Data.frame of training and test environments per trait
+test_env_df <- cluster_df %>%
+  group_by(set, trait) %>%
+  do({
+    df <- .
+    test_env1 <- reduce(df$test_env, intersect)
+    
+    if (unique(df$set) == "complete") {
+      train_env1 <- test_env1
+    } else {
+      train_env1 <- map(df$cluster, "environment") %>% 
+        reduce(intersect) %>%
+        setdiff(., test_env1)
+    }
+    
+    tibble(test_env = list(test_env1), train_env = list(train_env1))
+  }) %>% ungroup()
 
 
 ## Data.frame of the training lines for CV
@@ -66,7 +76,7 @@ environment_rank_df <- pred_env_dist_rank %>%
   rename(val_environment = validation_environment) %>%
   filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>%
   filter(model %in% names(dist_method_abbr_use)) %>%
-  filter(set %in% c("complete", "realistic2017")) %>%
+  # filter(set %in% c("complete", "realistic2017")) %>%
   select(-mat_set) %>%
   mutate(data = list(NULL))
 
@@ -116,7 +126,7 @@ pov00_environment_rank_predictions <- environment_rank_df1 %>%
       
       ## output data.frame 
       
-      out[[i]] <- data.frame(nTrainEnv = seq_along(eRank), scheme = "pov00", accuracy = pred1)
+      out[[i]] <- data.frame(nTrainEnv = seq_along(eRank), scheme = "pov00", accuracy = pred1, stringsAsFactors = FALSE)
       
     }
     

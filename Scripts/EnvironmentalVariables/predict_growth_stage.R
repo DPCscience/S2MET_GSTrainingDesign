@@ -91,6 +91,8 @@ one_year_daily_temp_impute <- oneyear_temp_data %>%
 ## one-year data
 one_year_growth_staging <- one_year_daily_temp_impute %>% 
   unnest() %>% 
+  # Remove dap = 0
+  filter(dap > 0) %>%
   select(-window, -n_missing) %>%
   spread(datatype, value) %>%
   split(.$environment) %>%
@@ -205,6 +207,8 @@ multiyear_mean_gdd <- multiyear_daily_temp_impute %>%
   unnest() %>% 
   ## Filter observations that are 10 years preceding the trial year (not including trial year)
   filter(year >= env_year - multiyear_window, year <= env_year - 1) %>% 
+  # Filter dap > 0
+  filter(dap > 0) %>%
   select(-window, -n_missing) %>%
   spread(datatype, value) %>%
   group_by(environment, year) %>%
@@ -309,7 +313,11 @@ compare_flowering_oneyear <- env_means_all %>%
   filter(trait == "HeadingDate") %>%
   left_join(., flowering_oneyear) %>%
   # Calculate bias
-  mutate(bias = dap - mean)
+  mutate(bias = dap - mean) %>%
+  # Prepare for plotting
+  filter(set %in% c("complete", "realistic2017")) %>%
+  mutate(set = str_remove_all(set, "2017"),
+         set = str_replace_all(set, set_replace))
 
 aggregate(bias ~ set, compare_flowering_oneyear, mean)
 
@@ -317,21 +325,28 @@ aggregate(bias ~ set, compare_flowering_oneyear, mean)
 ## Summarize
 compare_flowering_oneyear %>%
   group_by(set) %>%
-  summarize(cor = cor(mean, dap))
+  do(test = cor.test(.$mean, .$dap)) %>%
+  ungroup() %>%
+  mutate(cor = map_dbl(test, "estimate"),
+         pvalue = map_dbl(test, "p.value"))
 
 # Plot
 limits <- select(compare_flowering_oneyear, mean, dap) %>% 
   {c(min(.), max(.))}
 
-compare_flowering_oneyear %>%
+g_compare_flowering_oneyear <- compare_flowering_oneyear %>%
   ggplot(aes(x = dap, y = mean)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  ggrepel::geom_text_repel(aes(label = environment), size = 3) +
+  ggrepel::geom_text_repel(data = subset(compare_flowering_oneyear, abs(bias) - 5 > 5), aes(label = environment), size = 3) +
   facet_wrap(~ set, ncol = 2) +
   scale_y_continuous(name = "Average observed heading date", breaks = pretty, limits = limits) +
   scale_x_continuous(name = "GDD predicted flowering date", breaks = pretty, limits = limits) +
   theme_presentation2()
+
+## Save
+ggsave(filename = "one_year_gdd_predicted_FT.jpg", plot = g_compare_flowering_oneyear,
+       path = fig_dir, width = 6, height = 4, dpi = 1000)
 
 
 ## Repeat for multiyear growth staging
@@ -350,7 +365,11 @@ compare_flowering_multiyear <- env_means_all %>%
   filter(trait == "HeadingDate") %>%
   left_join(., flowering_multiyear) %>%
   # Calculate bias
-  mutate(bias = dap - mean)
+  mutate(bias = dap - mean) %>%
+  # Prepare for plotting
+  filter(set %in% c("complete", "realistic2017")) %>%
+  mutate(set = str_remove_all(set, "2017"),
+         set = str_replace_all(set, set_replace))
 
 ## Average bias
 aggregate(bias ~ set, compare_flowering_multiyear, mean)
@@ -364,16 +383,20 @@ compare_flowering_multiyear %>%
 limits <- select(compare_flowering_multiyear, mean, dap) %>% 
   {c(min(.), max(.))}
 
-compare_flowering_multiyear %>%
+g_compare_flowering_multiyear <- compare_flowering_multiyear %>%
   ggplot(aes(x = dap, y = mean)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  ggrepel::geom_text_repel(aes(label = environment), size = 3) +
+  ggrepel::geom_text_repel(data = subset(compare_flowering_multiyear, abs(bias) - 5 > 5), 
+                           aes(label = environment), size = 3) +
   facet_wrap(~ set, ncol = 2) +
   scale_y_continuous(name = "Average observed heading date", breaks = pretty, limits = limits) +
   scale_x_continuous(name = "GDD predicted flowering date", breaks = pretty, limits = limits) +
   theme_presentation2()
 
+## Save
+ggsave(filename = "multiyear_gdd_predicted_FT.jpg", plot = g_compare_flowering_multiyear,
+       path = fig_dir, width = 6, height = 4, dpi = 1000)
 
 
 

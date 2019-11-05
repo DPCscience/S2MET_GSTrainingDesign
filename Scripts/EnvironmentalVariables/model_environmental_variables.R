@@ -187,23 +187,34 @@ scale_length <- function(x) {
 }
   
 
+# # Remove intervals with insufficient observations
+# environ_covariate_data2 <- environ_covariate_data1 %>% 
+#   filter(str_detect(variable, "interval")) %>%
+#   mutate(interval = str_extract(variable, "interval_[0-9]"), 
+#          variable = str_remove(variable, "interval_[0-9]_")) %>% 
+#   group_by(variable, interval, ec_group) %>% 
+#   filter(n() == n_distinct(.$environment)) %>%
+#   ungroup() %>%
+#   unite(variable, interval, variable, sep = "_") %>%
+#   bind_rows(., filter(environ_covariate_data1, !str_detect(variable, "interval"))) %>%
+#   # Center each covariate and scale to achive the squared length of the vector = 1
+#   split(list(.$ec_group, .$variable, .$timeframe)) %>%
+#   map_df(~mutate(., scaled_value = scale_length(x = value),
+#                  center = attr(scaled_value, "scaled:center"),
+#                  scale = attr(scaled_value, "scaled:scale"),
+#                  scaled_value = as.numeric(scaled_value)))
 
-# Remove intervals with insufficient observations
-environ_covariate_data2 <- environ_covariate_data1 %>% 
-  filter(str_detect(variable, "interval")) %>%
-  mutate(interval = str_extract(variable, "interval_[0-9]"), 
-         variable = str_remove(variable, "interval_[0-9]_")) %>% 
-  group_by(variable, interval, ec_group) %>% 
-  filter(n() == n_distinct(.$environment)) %>%
-  ungroup() %>%
-  unite(variable, interval, variable, sep = "_") %>%
-  bind_rows(., filter(environ_covariate_data1, !str_detect(variable, "interval"))) %>%
-  # Center each covariate and scale to achive the squared length of the vector = 1
+
+## Only use growth stage information moving forward
+# Center each covariate and scale to achive the squared length of the vector = 1
+environ_covariate_data2 <- environ_covariate_data1 %>%
+  filter(timeframe == "growth_stage") %>%
   split(list(.$ec_group, .$variable, .$timeframe)) %>%
   map_df(~mutate(., scaled_value = scale_length(x = value),
-              center = attr(scaled_value, "scaled:center"),
-              scale = attr(scaled_value, "scaled:scale"),
-              scaled_value = as.numeric(scaled_value)))
+                 center = attr(scaled_value, "scaled:center"),
+                 scale = attr(scaled_value, "scaled:scale"),
+                 scaled_value = as.numeric(scaled_value)))
+
 
 ## Look at histogram of all covariates
 # Determine the number of rows/cols
@@ -245,7 +256,7 @@ environ_covariate_data3 <- environ_covariate_data2 %>%
                           "om_r_subsoil"))
 
 ## Correlate covariates with the environmental mean
-## Here we used the actual value of the covariates
+## Here we used the actual value of the covariates (later it will be scaled)
 env_mean_cor <- environ_covariate_data3 %>%
   group_by(set, trait, ec_group, variable, timeframe) %>% 
   do(test = cor.test(.$h, .$value)) %>%
@@ -343,17 +354,11 @@ for (i in seq(nrow(env_mean_mr))) {
   df <- environ_covariate_data4 %>% 
     filter(trait == tr, set == st, ec_group == grp, timeframe == tf)
 
-  ## Run correlations and rank the ECs by correlation
-  cors <- df %>% 
-    group_by(variable) %>% 
-    summarize(correlation = cor(h, value)) %>% 
-    arrange(desc(abs(correlation)))
-  
-  # Extract EC names in order of decreasing corelation
-  ecs <- ordered(cors$variable)
+  # Extract EC names in arbitrary order
+  ecs <- distinct(df, variable)$variable
   
   # Formula
-  base_formula <- formula(paste("h ~ ", paste(ecs[1], collapse = " + ")))
+  base_formula <- h ~ 1
   full_formula <- formula(paste("h ~ ", paste(ecs, collapse = " + ")))
   
   
@@ -376,6 +381,21 @@ for (i in seq(nrow(env_mean_mr))) {
   ## Get the significant ECs
   sig_ecs <- attr(terms(fit_step), "term.labels")
   
+  ## If the number of sig_ecs, is 0, choose the most correlated ec
+  if (length(sig_ecs) == 0) {
+    sig_ecs <- summarize_at(df1, vars(-trait:-h), list(~cor(., h))) %>% 
+      gather(variable, correlation) %>% 
+      top_n(x = ., n = 1, wt = abs(correlation)) %>%
+      pull(variable)
+    
+    fit_step <- lm(formula(paste("h ~ ", paste(sig_ecs, collapse = " + "))), data = df1)
+    
+    fit_step_tidy <- tidy(anova(fit_step)) %>%
+      filter(term != "Residuals") %>%
+      select(variable = term, sumsq, p_value = p.value)
+      
+  }
+  
   
   ### Fit a model with genotype, environment, and genotype-specific slopes to each ECs
   ## Get the relevant phenotypic data
@@ -384,11 +404,14 @@ for (i in seq(nrow(env_mean_mr))) {
     # Add ECs
     left_join(., select(df1, trait, environment, sig_ecs), by = c("trait", "environment"))
   
+  # Base formula
+  base_formula2 <- value ~ line_name + environment
+  
+  
   ## If no sig_ecs, skip the next step
   if (length(sig_ecs) > 0) {
   
     # Formula
-    base_formula2 <- value ~ line_name + environment
     full_formula2 <- add_predictors(base_formula2, as.formula(paste0("~", paste0("line_name:", sig_ecs, collapse = " + "))))
     
     # Fit just the base model
@@ -397,7 +420,6 @@ for (i in seq(nrow(env_mean_mr))) {
     full_fit2 <- lm(full_formula2, pheno_df)
     
   } else {
-    base_formula2 <- value ~ line_name + environment
     base_fit2 <- lm(base_formula2, pheno_df)
     full_fit2 <- NULL
   }
@@ -470,10 +492,20 @@ length(common_ecs)
 
 ## For each set, trait, and ec_group, determine the overlap in ECs that were determined
 ## to be significant
-(overlap <- env_mean_mr2 %>% 
-  select(set:timeframe, ecs) %>% 
-  spread(timeframe, ecs) %>%
-  mutate(ec_overlap = map2(.x = growth_stage, .y = interval, intersect)))
+
+# (overlap <- env_mean_mr2 %>% 
+#   select(set:timeframe, ecs) %>% 
+#   spread(timeframe, ecs) %>%
+#   mutate(ec_overlap = map2(.x = growth_stage, .y = interval, intersect)))
+
+
+## Determine EC overlap between LOYO years
+(overlap <- env_mean_mr2 %>%
+    select(set:timeframe, ecs) %>%
+    filter(set != "complete") %>%
+    spread(set, ecs) %>%
+    mutate(ec_overlap = select(., contains("realistic")) %>% pmap(., ~reduce(., intersect))) %>%
+    mutate_at(vars(contains("realistic")), list(~map2(., ec_overlap, setdiff))) )
 
 
 ## Plot the significant ECs
@@ -530,7 +562,7 @@ dev.off()
 #### Repeat, but include only pages that are relevant to paper
 env_mean_mr_plot_df_paper <- env_mean_mr_plot_df %>%
   filter(trait %in% traits,
-         set %in% c("complete", "realistic2017"),
+         # set %in% c("complete", "realistic2017"),
          ec_group == "multiyear",
          timeframe == "growth_stage")
 
@@ -582,7 +614,7 @@ ec_env_mean_sig <- env_mean_mr_plot_df_paper %>%
 ## Create a similar data.frame for all variables - this will be used later.
 ## This will include 
 env_combine <- environ_covariate_data3 %>%
-  filter(set %in% c("complete", "realistic2017"), timeframe == "growth_stage", ec_group == "multiyear") %>%
+  filter(timeframe == "growth_stage", ec_group == "multiyear") %>%
   distinct(trait, set, ec_group, timeframe, variable_newname, environment, value)
 
 
@@ -759,17 +791,11 @@ for (i in seq(nrow(env_ipca_mr))) {
   
   df <- unnest(row, data)
   
-  ## Run correlations and rank the ECs by correlation
-  cors <- df %>% 
-    group_by(variable) %>% 
-    summarize(correlation = cor(h, value)) %>% 
-    arrange(desc(abs(correlation)))
-  
-  # Extract EC names in order of decreasing corelation
-  ecs <- factor(cors$variable, levels = cors$variable)
+  # Extract EC names in arbitrary order
+  ecs <- distinct(df, variable)$variable
   
   # Formula
-  base_formula <- formula(paste("score ~ ", paste(ecs[1], collapse = " + ")))
+  base_formula <- score ~ 1
   full_formula <- formula(paste("score ~ ", paste(ecs, collapse = " + ")))
   
   
@@ -791,6 +817,22 @@ for (i in seq(nrow(env_ipca_mr))) {
   
   ## Get the significant ECs
   sig_ecs <- attr(terms(fit_step), "term.labels")
+  
+  ## If the number of sig_ecs, is 0, choose the most correlated ec
+  if (length(sig_ecs) == 0) {
+    sig_ecs <- summarize_at(df1, vars(-trait:-score), list(~cor(., score))) %>% 
+      gather(variable, correlation) %>% 
+      top_n(x = ., n = 1, wt = abs(correlation)) %>%
+      pull(variable)
+    
+    fit_step <- lm(formula(paste("score ~ ", paste(sig_ecs, collapse = " + "))), data = df1)
+    
+    fit_step_tidy <- tidy(anova(fit_step)) %>%
+      filter(term != "Residuals") %>%
+      select(variable = term, sumsq, p_value = p.value)
+    
+  }
+  
   
   ## New DF that includes the centered values of the ECs, instead of the scaled values
   df1 <- df %>% 
@@ -891,12 +933,21 @@ length(common_ecs)
 ## 21 without
 
 
-## For each set, trait, and ec_group, determine the overlap in ECs that were determined
-## to be significant
-(overlap <- env_ipca_mr2 %>% 
-    select(set:timeframe, ecs) %>% 
-    spread(timeframe, ecs) %>%
-    mutate(ec_overlap = map2(.x = growth_stage, .y = interval, intersect)))
+# ## For each set, trait, and ec_group, determine the overlap in ECs that were determined
+# ## to be significant
+# (overlap <- env_ipca_mr2 %>% 
+#     select(set:timeframe, ecs) %>% 
+#     spread(timeframe, ecs) %>%
+#     mutate(ec_overlap = map2(.x = growth_stage, .y = interval, intersect)))
+
+## Determine EC overlap between LOYO years
+(overlap <- env_ipca_mr2 %>%
+    select(set:timeframe, ecs) %>%
+    filter(set != "complete") %>%
+    spread(set, ecs) %>%
+    mutate(ec_overlap = select(., contains("realistic")) %>% pmap(., ~reduce(., intersect))) %>%
+    mutate_at(vars(contains("realistic")), list(~map2(., ec_overlap, setdiff))) )
+
 
 
 ## Plot the significant ECs
@@ -953,7 +1004,7 @@ dev.off()
 #### Repeat, but include only pages that are relevant to paper
 env_ipca_mr_plot_df_paper <- env_ipca_mr_plot_df %>%
   filter(trait %in% traits,
-         set %in% c("complete", "realistic2017"),
+         # set %in% c("complete", "realistic2017"),
          ec_group == "multiyear",
          timeframe == "growth_stage")
 
@@ -1032,7 +1083,7 @@ write_csv(x = ec_top5_cor_towrite, path = file.path(fig_dir, "top5_correlated_ec
 ec_env_sig_combine <- bind_rows(mutate(ec_env_mean_sig, group = "EC_Mean"), mutate(ec_env_ipca_sig, group = "EC_IPCA")) %>%
   filter(ec_group == "multiyear", trait %in% traits, timeframe == "growth_stage") %>%
   distinct(set, trait, variable_newname, group) %>% 
-  filter(set %in% c("complete", "realistic2017")) %>%
+  # filter(set %in% c("complete", "realistic2017")) %>%
   group_by(set, group, trait) %>% 
   mutate(n = seq(n())) %>%
   ungroup() %>%
