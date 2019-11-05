@@ -47,11 +47,23 @@ k <- 5
 
 
 
-## Data.frame of test environments
-test_env_df <- bind_rows(
-  tibble(set = "complete", trait = names(complete_train_env), train_env = complete_train_env, test_env = complete_train_env),
-  tibble(set = "realistic2017", trait = names(complete_train_env), train_env = realistic_train_env, test_env = realistic_test_env)
-)
+## Data.frame of training and test environments per trait
+test_env_df <- cluster_df %>%
+  group_by(set, trait) %>%
+  do({
+    df <- .
+    test_env1 <- reduce(df$test_env, intersect)
+    
+    if (unique(df$set) == "complete") {
+      train_env1 <- test_env1
+    } else {
+      train_env1 <- map(df$cluster, "environment") %>% 
+        reduce(intersect) %>%
+        setdiff(., test_env1)
+    }
+    
+    tibble(test_env = list(test_env1), train_env = list(train_env1))
+  }) %>% ungroup()
 
 
 ## Data.frame of the training lines for CV
@@ -66,7 +78,8 @@ cv_tp_df <- data.frame(line_name = tp_geno, stringsAsFactors = FALSE)
 ###### Leave-one-environment-out predictions
 
 loeo_prediction_df <- test_env_df %>%
-  mutate(test_env = map2(train_env, test_env, ~data_frame(val_environment = .y, train_env = lapply(X = .y, function(.y1) setdiff(.x, .y1))))) %>%
+  mutate(test_env = map2(train_env, test_env, 
+                         ~tibble(val_environment = .y, train_env = lapply(X = .y, function(.y1) setdiff(.x, .y1))))) %>%
   unnest(test_env)
 
 
