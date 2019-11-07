@@ -216,6 +216,7 @@ all_pred_list <- c("cv00_predictions", "pov00_predictions", "cv0_predictions")
 
 
 clusters <- cluster_df %>% 
+  select(-test_env) %>%
   inner_join(., test_env_df) %>%
   mutate(nClusters = map_dbl(cluster, ~n_distinct(.$cluster))) %>%
   ## You can't have AMMI and "realistic"
@@ -1184,13 +1185,6 @@ cluster_pred_list <- c("cv00_cluster_predictions", "pov00_cluster_predictions", 
 ## Number of random cluster assignments
 n_random <- nCV
 
-
-clusters <- cluster_df %>% 
-  inner_join(., test_env_df) %>%
-  mutate(nClusters = map_dbl(cluster, ~n_distinct(.$cluster))) %>%
-  ## You can't have AMMI and "realistic"
-  filter(!(set == "realistic" & model == "AMMI"))
-  
 
 ## Training lines for CV
 cv_train_df <- data.frame(line_name = tp_geno, stringsAsFactors = FALSE)
