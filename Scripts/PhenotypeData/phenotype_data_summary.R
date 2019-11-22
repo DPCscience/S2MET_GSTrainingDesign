@@ -1856,6 +1856,7 @@ ammi_fitted <- ammi_out %>%
 
 ## Assign clusters
 nTop <- 1
+
 ammi_fitted_clusters <- ammi_fitted %>% 
   mutate(favorable = ifelse(trait == "GrainYield", top, bottom),
          clusters = map(favorable, ~.[seq_len(nTop),,drop = F] %>% apply(X = ., MARGIN = 2, FUN = paste, collapse = "/") %>% 
@@ -2084,23 +2085,9 @@ ggsave(filename = "ammi_biplots_complete_alt1.jpg", plot = ammi_grid1, path = fi
 
 
 
+### Create a "winners plot" by adding lines demarking clusters
 
-
-
-
-## Save all of this
-save_file <- file.path(result_dir, "genotype_environment_phenotypic_analysis.RDAta")
-save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_GE", file = save_file)
-
-
-
-## Year color scheme
-year_shape <- setNames(c(15, 17, 18, 16), names(year_shape))
-
-
-## Re-plot AMMI using different shaped points
-## Plot the AMMI axes and the proportion of variance explained
-g_ammi_alt <- ammi_out1 %>%
+g_ammi_alt <- ammi_out %>%
   left_join(., ammi_fitted_clusters) %>%
   # filter(set == "complete") %>%
   group_by(set, trait) %>%
@@ -2110,6 +2097,13 @@ g_ammi_alt <- ammi_out1 %>%
     out <- df$ammi[[1]]
     res <- df$results[[1]]
     trait <- df$trait
+    clus <- df$clusters[[1]] %>%
+      ## Assign cluster number in descending order of size
+      group_by(cluster) %>% 
+      mutate(nEnv = n()) %>% 
+      ungroup() %>% 
+      mutate(cluster2 = factor(nEnv, levels = sort(unique(nEnv), decreasing = TRUE)), 
+             cluster2 = as.numeric(cluster2))
     
     ## Combine the g and e scores into one DF
     scores_df <- map_df(out[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
@@ -2126,8 +2120,19 @@ g_ammi_alt <- ammi_out1 %>%
       spread(PC, score) %>%
       # Add year
       mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
-             trait = trait)
-
+             trait = trait) %>%
+      # Add clusters
+      left_join(., select(clus, term = environment, cluster = cluster2, winner = line), by = "term") %>%
+      mutate(cluster = ifelse(is.na(cluster), 0, cluster),
+             cluster = as.factor(cluster)) %>%
+      # Select environments and winners
+      filter(group == "environment" | term %in% winner)
+    
+    
+    ## Vector for cluster colors
+    cluster_colors <- setNames(c("grey", neyhart_palette("umn1")[-1:-2][seq(n_distinct(scores_toplot$cluster) - 1)]), 
+                               sort(unique(scores_toplot$cluster)))
+    
     
     ## Figure out the range for x and y axis for the trait
     effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
@@ -2141,29 +2146,52 @@ g_ammi_alt <- ammi_out1 %>%
     ## Units
     unit_use <- traits_unit1[df$trait]
     
+    ## Annotation specs for labelling cluster
+    cluster_annotation_df <- scores_toplot %>% 
+      distinct(cluster) %>%
+      filter(cluster != "0") %>%
+      mutate(clusterN = as.numeric(cluster) - 1,
+             label = paste0("Cluster ", cluster),
+             x = Inf, y = -Inf, hjust = 1.2,
+             vjust = rev(clusterN) * -1.1,
+             color = cluster_colors[-1][clusterN])
+    
+    ## Find the average IPCA score between environments in each clusters
+    ## Use this to plot hlines
+    cluster_hlines <- scores_toplot %>%
+      filter(group == "environment") %>% 
+      split(.$cluster) %>%
+      map(~filter(.x, PC1 %in% c(max(PC1), min(PC1)))) %>%
+      # Remove lines if the minimum or maximum IPCA score  is the maximum of the whole dataset
+      map(~filter(.x, ! PC1 %in% range(subset(scores_toplot, group == "environment", PC1, drop = T)))) %>%
+      map("PC1") %>%
+      unlist()
+    
+    cluster_hlines1 <- cluster_hlines[-1] - diff(cluster_hlines)/2
+    
     # Plot
     scores_toplot %>% 
       mutate(trait_use = paste0(str_add_space(trait), " (", unit_use, ")"),
              trait_use = str_replace_all(trait_use, " ", "~")) %>%
-      ggplot(aes(x = effect, y = PC1)) + 
-      geom_point(aes(color = year, shape = year), size = 1.5) +
-      geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term), size = 2) +
-      scale_color_manual(values = year_color, name = NULL, guide = guide_legend(override.aes = list(size = 3, label.size = 0))) + 
-      scale_shape_manual(values = year_shape, name = NULL) + 
+      # ggplot(aes(x = effect, y = PC1, color = year)) + 
+      ggplot(aes(x = effect, y = PC1, color = cluster, shape = year)) + 
+      geom_hline(yintercept = cluster_hlines1, lwd = 0.5, lty = 2, color = "black") +
+      geom_point(size = 1.5) +
+      geom_text_repel(data = scores_toplot, aes(label = term), size = 2) +
+      scale_color_manual(values = cluster_colors, name = NULL, guide = FALSE) +
+      scale_shape_manual(values = year_shape, name = NULL, guide = guide_legend(override.aes = list(size = 3))) + 
       scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
       scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
       ylab(names(propvar_rename)[1]) +
-      xlab(expression("Effect (deviation from"~mu*")")) +
+      xlab(expression("Effect (deviation from"~italic(mu)*")")) +
       facet_grid(~ trait_use, labeller = labeller(trait_use = label_parsed)) + 
       theme_presentation2(base_size = 10) +
       theme(legend.position = "bottom")
-    # theme(legend.position = "right", legend.direction = "vertical")
     
   })
 
 
-
-## Remove AGDD
+## Combine plots
 plot_list_complete <- subset(g_ammi_alt, set == "complete" & trait %in% traits, plot, drop = T)
 # ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 1)
 ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(rep(0.9, length(plot_list_complete) - 1), 1), 
@@ -2174,71 +2202,180 @@ ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(rep(0.9, length(plot_l
 ammi_grid1 <- plot_grid(ammi_grid_complete, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
 # Save
-ggsave(filename = "ammi_biplots_complete_greyscale.jpg", plot = ammi_grid1, path = fig_dir, height = 6.5, width = 3, dpi = 1000)
-
-
-
-## Phenotypic Correlation Heatmap in greyscale
-# One trait at a time
-g_env_cor_df <- env_cor_df %>%
-  group_by(trait) %>%
-  do(plot = {
-    
-    df <- .
-    
-    # Use the heatmap function to construct a dendrogram
-    # Use only data from the whole population
-    mat <- df %>% 
-      filter(population == "all") %>%
-      select(-trait, -population) %>% 
-      spread(environment2, correlation) %>% 
-      as.data.frame() %>% 
-      column_to_rownames("environment1") %>% 
-      as.matrix()
-    
-    hm <- heatmap(mat)
-    
-    # Extract the ordered factor for environments
-    eLevels <- sort(unique(df$environment1))[hm$rowInd]
-    
-    df %>% 
-      mutate_at(vars(contains("environment")), funs(factor(., levels = eLevels))) %>%
-      ggplot(., aes(x = environment1, y = environment2, fill = correlation)) +
-      geom_tile() +
-      # scale_fill_gradientn(colors = heat_colors[c(1,3,5)], na.value = "transparent", 
-      #                      breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
-      #                      guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
-      scale_fill_gradientn(colours = rev(grey.colors(n = 10)), na.value = "transparent", breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
-                      guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
-      ylab("Environment 2") +
-      xlab("Environment 1") +
-      facet_wrap(~ trait + population, labeller = labeller(trait = str_add_space, population = str_to_title)) +
-      theme_presentation2(base_size = 10) +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5),
-            axis.text.y = element_text(size = 5),
-            # legend.position = "bottom", legend.direction = "horizontal")
-            legend.position = "right", legend.direction = "vertical")
-    
-    
-  }) %>% ungroup()
+ggsave(filename = "ammi_winner_plot_complete.jpg", plot = ammi_grid1, path = fig_dir, 
+       height = 6.5, width = 3, dpi = 1000)
 
 
 
 
-## Combine plots
-g_env_cor <- plot_grid(plotlist = subset(g_env_cor_df, trait %in% traits, plot, drop = T) %>% 
-                         map(~. + theme(legend.position = "none", axis.title = element_blank())), 
-                       nrow = length(subset(g_env_cor_df, trait != "HeadingDateAGDD", trait, drop = T)), scale = 0.9)
-
-g_env_cor1 <- g_env_cor + 
-  draw_label("Environment 1", x = 0.5, y = 0, vjust=-0.5, angle= 0) +
-  draw_label("Environment 2", x = 0, y = 0.5, vjust= 1.5, angle=90)
-
-g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_df$plot[[1]]), nrow = 1, rel_widths = c(1, 0.1))
 
 
-# Save this plot
-ggsave(filename = "environmental_correlation_greyscale.jpg", path = fig_dir, plot = g_env_cor2, height = 8, width = 8, dpi = 1000)
+
+
+
+## Save all of this
+save_file <- file.path(result_dir, "genotype_environment_phenotypic_analysis.RDAta")
+save("training_sets_twoway", "ammi_out", "stage_two_fits_GYL", "stage_two_fits_GE", file = save_file)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ## Year color scheme
+# year_shape <- setNames(c(15, 17, 18, 16), names(year_color))
+# 
+# 
+# ## Re-plot AMMI using different shaped points
+# ## Plot the AMMI axes and the proportion of variance explained
+# g_ammi_alt <- ammi_out %>%
+#   left_join(., ammi_fitted_clusters) %>%
+#   # filter(set == "complete") %>%
+#   group_by(set, trait) %>%
+#   do(plot = {
+#     df <- .
+#     
+#     out <- df$ammi[[1]]
+#     res <- df$results[[1]]
+#     trait <- df$trait
+#     
+#     ## Combine the g and e scores into one DF
+#     scores_df <- map_df(out[c("escores", "gscores")], ~mutate(., group = names(.)[1]) %>% `names<-`(., c("term", names(.)[-1])))
+#     
+#     # Create a renaming vector
+#     res1 <- mutate(res, annotation = paste0(str_replace_all(term, "PC", "IPCA"), " (", round(cumprop, 2) * 100, "%)"))
+#     propvar_rename <- setNames(object = res1$term, nm = res1$annotation)
+#     
+#     # Renaming function
+#     label_rename <- function(x) str_replace_all(x, propvar_rename)
+#     
+#     scores_toplot <- scores_df %>%
+#       select(-eigen) %>%
+#       spread(PC, score) %>%
+#       # Add year
+#       mutate(year = ifelse(group == "environment", paste0("20", str_extract(term, "[0-9]{2}")), "Genotype"),
+#              trait = trait)
+# 
+#     
+#     ## Figure out the range for x and y axis for the trait
+#     effect_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+#       map(~.[-1]) %>% map(., ~map(., "effect") %>% unlist()) %>% 
+#       unlist() %>% range()
+#     
+#     scores_breaks <- subset(ammi_out, trait == df$trait, ammi, drop = T) %>% 
+#       map(~.[-1]) %>% map(., ~map(., "score") %>% unlist()) %>% 
+#       unlist() %>% range()
+#     
+#     ## Units
+#     unit_use <- traits_unit1[df$trait]
+#     
+#     # Plot
+#     scores_toplot %>% 
+#       mutate(trait_use = paste0(str_add_space(trait), " (", unit_use, ")"),
+#              trait_use = str_replace_all(trait_use, " ", "~")) %>%
+#       ggplot(aes(x = effect, y = PC1)) + 
+#       geom_point(aes(color = year, shape = year), size = 1.5) +
+#       geom_text_repel(data = filter(scores_toplot, group == "environment"), aes(label = term), size = 2) +
+#       scale_color_manual(values = year_color, name = NULL, guide = guide_legend(override.aes = list(size = 3, label.size = 0))) + 
+#       scale_shape_manual(values = year_shape, name = NULL) + 
+#       scale_y_continuous(breaks = pretty, limits = range(scores_breaks)) +
+#       scale_x_continuous(breaks = pretty, limits = range(effect_breaks)) +
+#       ylab(names(propvar_rename)[1]) +
+#       xlab(expression("Effect (deviation from"~mu*")")) +
+#       facet_grid(~ trait_use, labeller = labeller(trait_use = label_parsed)) + 
+#       theme_presentation2(base_size = 10) +
+#       theme(legend.position = "bottom")
+#     # theme(legend.position = "right", legend.direction = "vertical")
+#     
+#   })
+# 
+# 
+# 
+# ## Remove AGDD
+# plot_list_complete <- subset(g_ammi_alt, set == "complete" & trait %in% traits, plot, drop = T)
+# # ammi_grid <- plot_grid(plotlist = plot_list %>% map(~. + theme(legend.position = "none")), ncol = 1)
+# ammi_grid_complete <- plot_grid(ncol = 1, rel_heights = c(rep(0.9, length(plot_list_complete) - 1), 1), 
+#                                 plotlist = c(head(plot_list_complete, -1) %>% map(~. + theme(legend.position = "none", axis.title.x = element_blank())),
+#                                              list(tail(plot_list_complete, 1)[[1]] + theme(legend.position = "none"))))
+# 
+# # Add legend
+# ammi_grid1 <- plot_grid(ammi_grid_complete, get_legend(plot_list_complete[[1]]), ncol = 1, rel_heights = c(1, 0.05))
+# 
+# # Save
+# ggsave(filename = "ammi_biplots_complete_greyscale.jpg", plot = ammi_grid1, path = fig_dir, height = 6.5, width = 3, dpi = 1000)
+# 
+# 
+# 
+# ## Phenotypic Correlation Heatmap in greyscale
+# # One trait at a time
+# g_env_cor_df <- env_cor_df %>%
+#   group_by(trait) %>%
+#   do(plot = {
+#     
+#     df <- .
+#     
+#     # Use the heatmap function to construct a dendrogram
+#     # Use only data from the whole population
+#     mat <- df %>% 
+#       filter(population == "all") %>%
+#       select(-trait, -population) %>% 
+#       spread(environment2, correlation) %>% 
+#       as.data.frame() %>% 
+#       column_to_rownames("environment1") %>% 
+#       as.matrix()
+#     
+#     hm <- heatmap(mat)
+#     
+#     # Extract the ordered factor for environments
+#     eLevels <- sort(unique(df$environment1))[hm$rowInd]
+#     
+#     df %>% 
+#       mutate_at(vars(contains("environment")), funs(factor(., levels = eLevels))) %>%
+#       ggplot(., aes(x = environment1, y = environment2, fill = correlation)) +
+#       geom_tile() +
+#       # scale_fill_gradientn(colors = heat_colors[c(1,3,5)], na.value = "transparent", 
+#       #                      breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
+#       #                      guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
+#       scale_fill_gradientn(colours = rev(grey.colors(n = 10)), na.value = "transparent", breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1), 
+#                       guide = guide_colorbar(title = "Phenotypic\ncorrelation")) +
+#       ylab("Environment 2") +
+#       xlab("Environment 1") +
+#       facet_wrap(~ trait + population, labeller = labeller(trait = str_add_space, population = str_to_title)) +
+#       theme_presentation2(base_size = 10) +
+#       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5),
+#             axis.text.y = element_text(size = 5),
+#             # legend.position = "bottom", legend.direction = "horizontal")
+#             legend.position = "right", legend.direction = "vertical")
+#     
+#     
+#   }) %>% ungroup()
+# 
+# 
+# 
+# 
+# ## Combine plots
+# g_env_cor <- plot_grid(plotlist = subset(g_env_cor_df, trait %in% traits, plot, drop = T) %>% 
+#                          map(~. + theme(legend.position = "none", axis.title = element_blank())), 
+#                        nrow = length(subset(g_env_cor_df, trait != "HeadingDateAGDD", trait, drop = T)), scale = 0.9)
+# 
+# g_env_cor1 <- g_env_cor + 
+#   draw_label("Environment 1", x = 0.5, y = 0, vjust=-0.5, angle= 0) +
+#   draw_label("Environment 2", x = 0, y = 0.5, vjust= 1.5, angle=90)
+# 
+# g_env_cor2 <- plot_grid(g_env_cor1, get_legend(g_env_cor_df$plot[[1]]), nrow = 1, rel_widths = c(1, 0.1))
+# 
+# 
+# # Save this plot
+# ggsave(filename = "environmental_correlation_greyscale.jpg", path = fig_dir, plot = g_env_cor2, height = 8, width = 8, dpi = 1000)
 
 
 

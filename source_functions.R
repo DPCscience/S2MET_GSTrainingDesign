@@ -861,4 +861,55 @@ stage_growth <- function(x, method = c("haun.bauer", "haun.enz", "montana")) {
 
 
 
+
+## A function to compare clusters
+## This is VERY ad hoc and should not be generalized
+compare_clusters <- function(x) {
+  comparison <- select(x, model, cluster) %>% 
+    crossing(., .)
+  
+  comparison1 <- map2_dbl(.x = comparison$cluster, .y = comparison$cluster1, ~{
+    
+    # This calculate the proportion of pairs of environments assigned to the same cluster
+    comp1 <- crossing(environment = .x[[1]], environment1 = .y[[1]]) %>%
+      filter(environment != environment1) %>%
+      mutate(same_cluster_x = NA, same_cluster_y = NA)
+    
+    for (i in seq(nrow(comp1))) {
+      e1 <- comp1$environment[[i]]
+      e2 <- comp1$environment1[[i]]
+      
+      comp1$same_cluster_x[[i]] <- n_distinct(subset(.x, environment %in% c(e1, e2), cluster, drop = T)) == 1
+      comp1$same_cluster_y[[i]] <- n_distinct(subset(.y, environment %in% c(e1, e2), cluster, drop = T)) == 1
+      
+    }
+    
+    comp2 <- comp1 %>%
+      mutate(same_cluster = same_cluster_x == same_cluster_y)
+    
+    mean(comp2$same_cluster)
+    
+  })
+  
+  
+  
+  ## Find the number of clusters and the mean (and range) of the number 
+  ## of environments in each cluster
+  model_nCluster <- group_by(x, model) %>%
+    do({
+      tb <- table(.$cluster[[1]]$cluster)
+      data.frame(nCluster = length(tb), nEnv_mean = mean(tb), nEnv_min = min(tb), nEnv_max = max(tb)) %>%
+        mutate(annotation = paste0(round(nEnv_mean, 1), "\n(", nEnv_min, ",", nEnv_max, ")"),
+               annotation1 = paste0(nCluster, "\n(", round(nEnv_mean, 1), ")"))
+      
+    }) %>% ungroup()
+  
+  
+  ## Add the mean
+  comparison %>%
+    select(model, model1) %>%
+    mutate(prop_common = comparison1) %>%
+    left_join(., model_nCluster, by = "model")
+  
+}
   

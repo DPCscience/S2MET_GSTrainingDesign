@@ -250,9 +250,18 @@ cv_replace <- c("cv1", "pov1", "pocv1",  "cv2" , "pocv2", "cv0", "pov0", "pocv0"
 
 ## Set replacement vector and function
 set_replace <- c("complete" = "Leave-one-environment-out", "realistic" = "Leave-one-year-out")
-f_set_replace <- function(x) {
+
+f_set_replace <- function(x, abbr = FALSE) {
   x1 <- str_replace_all(string = x, set_replace)
-  str_replace(string = x1, pattern = "([A-Za-z-]*)([0-9]{4})", replacement = "\\1 (\\2)")
+  # Abbreviate?
+  if (abbr) {
+    x2 <- str_replace_all(string = x1, pattern = "-", replacement = " ") %>% abbreviate(4) %>% toupper()
+  } else {
+    x2 <- x1
+  }
+  
+  str_replace(string = x2, pattern = "([A-Za-z-]*)([0-9]{4})", replacement = "\\1 (\\2)")
+
 }
   
   

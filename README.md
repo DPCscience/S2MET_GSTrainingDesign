@@ -37,8 +37,9 @@ distance matrices.
 Clustering  
 1\. `environmental_clustering.R` - Calculate great circle distance and
 phenotypic distance, then create hierarchical clusters based on the
-distance objects.  
-2\. `cluster_heritability.R` -
+distance objects.
+
+Prediction 1.
 
 ## Software version
 

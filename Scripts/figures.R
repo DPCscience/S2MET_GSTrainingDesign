@@ -1,14 +1,17 @@
-## S2MET
+## S2MET Predictions
 ## 
-## Visualizations
+## Script for recreating all figures
 ## 
 ## 1. Population structure
 ## 2. Map of trial locations
 ## 
 ## 
 
+
+# Packages to load
 library(broom)
 library(cowplot)
+library(patchwork)
 
 # The head directory
 repo_dir <- getwd()
@@ -16,6 +19,8 @@ source(file.path(repo_dir, "source.R"))
 
 ## Calculate genomic relationship
 genom_rel <- matrix(data = 0, nrow = nrow(K), ncol = ncol(K), dimnames = dimnames(K))
+
+
 
 # Iterate over rows and columns
 for (j in seq(ncol(K))) {
@@ -64,15 +69,15 @@ genom_rel_df1 <- bind_rows(genome_rel_tptp_df, genome_rel_tpvp_df) %>%
          pop = as.factor(pop))
 
 
-## Resample the genomeic relatedness of size n_test,
+## Resample the genomic relatedness of size n_test,
 ## calculate genomic relationship. Repeat
-null_genome_rel_mean <- replicate(10000, sample(c(tp_geno, vp_geno), size = length(vp_geno)), simplify = FALSE) %>%
+null_genome_rel_mean <- replicate(100000, sample(c(tp_geno, vp_geno), size = length(vp_geno)), simplify = FALSE) %>%
   map(~subset(genom_rel_df1, line_name2 %in% ., G, drop = T)) %>%
   map_dbl(mean)
 
 ## Calculate realized mean relatedness between tp and vp
 real_genome_rel_mean <- group_by(genom_rel_df1, pop_x, pop_y) %>% 
-  summarize_at(vars(G), funs(mean, sd, n())) %>% 
+  summarize_at(vars(G), list(~mean, ~sd, ~n())) %>% 
   mutate(se = sd / sqrt(n),
          comparison = paste0(pop_y, "-", pop_x))
 
@@ -80,20 +85,20 @@ real_genome_rel_mean <- group_by(genom_rel_df1, pop_x, pop_y) %>%
 tibble(x = null_genome_rel_mean) %>% 
   ggplot(aes(x = x)) + 
   geom_histogram(fill = "grey85", color = "black") +
-  geom_vline(data = real_genome_rel_mean, aes(xintercept = mean, color = comparison))
+  geom_vline(data = real_genome_rel_mean, aes(xintercept = mean, color = comparison), lwd = 2 )
 
+## Calculate p-value for trait-test relatedness
+real_genome_rel_mean %>%
+  mutate(p.value = mean(null_genome_rel_mean < mean))
 
+# pop_x pop_y      mean    sd     n      se comparison 
+# 1 Train Train  0.000780 0.188 15225 0.00152 Train-Train
+# 2 Test  Train -0.0213   0.129  8400 0.00141 Train-Test
 
 
 
 
 ## Model
-fit <- lm(G ~ pop, data = genom_rel_df, subset = line_name != line_name2)
-effects::allEffects(fit) %>% plot
-
-## Visualize via density
-qplot(x = G, fill = pop, data = genom_rel_df, geom = "density")
-
 
 ## Visualize with heatmap
 heat_colors <- wesanderson::wes_palette(name = "Zissou1")
@@ -108,6 +113,7 @@ g_relatedness_heat <- ggplot(data = genom_rel_df1, aes(x = line_name2, y = line_
 
 ## Plot average relatedness
 g_relatedness_bar <- genom_rel_df1 %>% 
+  ## Create a variable to determine the width of the facet strip
   distinct(line_name2, pop_x) %>% 
   split(.$pop_x) %>%
   map_df(~mutate(., row = seq(nrow(.)))) %>%
@@ -115,7 +121,9 @@ g_relatedness_bar <- genom_rel_df1 %>%
   mutate(row_mean = round(mean(row))) %>%
   left_join(., real_genome_rel_mean) %>%
   mutate_at(vars(mean, se), funs(ifelse(row != row_mean, NA, .))) %>%
+  ## Plot
   ggplot(aes(x = line_name2, y = mean, ymin = mean - se, ymax = mean + se, fill = pop_x)) +
+  geom_hline(yintercept = 0, lwd = 0.5) +
   geom_col(width = 35) +
   geom_errorbar(width = 10) +
   scale_fill_manual(values = heat_colors[c(5,1)], guide = FALSE) +
@@ -125,9 +133,11 @@ g_relatedness_bar <- genom_rel_df1 %>%
   theme_presentation(base_size = 10) +
   theme(panel.grid = element_blank(), axis.ticks.y = element_line(), axis.text.x = element_blank(), axis.title.x = element_blank(), panel.spacing.x = unit(0.1, "line"))
 
+## Use patchwork to combine the plots
+g_relatedness <- g_relatedness_heat + g_relatedness_bar + 
+  plot_layout(ncol = 1) + 
+  plot_annotation(tag_levels = "a")
 
-g_relatedness <- plot_grid(g_relatedness_heat, g_relatedness_bar, ncol = 1, align = "hv", axis = "lr", rel_heights = c(1, 0.5),
-                            labels = LETTERS[1:2])
 ggsave(filename = "tp_vp_relatedness.jpg", plot = g_relatedness, path = fig_dir, width = 4, height = 6, dpi = 1000)
 
 
