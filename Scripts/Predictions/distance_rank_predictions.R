@@ -74,10 +74,8 @@ cv_tp_df <- data.frame(line_name = tp_geno, stringsAsFactors = FALSE)
 # Use the clusters based on the TP-only data
 environment_rank_df <- pred_env_dist_rank %>%
   rename(val_environment = validation_environment) %>%
-  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>%
   filter(model %in% names(dist_method_abbr_use)) %>%
   # filter(set %in% c("complete", "realistic2017")) %>%
-  select(-mat_set) %>%
   mutate(data = list(NULL))
 
 ## Assign cores and split
