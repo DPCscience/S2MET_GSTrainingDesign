@@ -17,6 +17,7 @@ library(lme4)
 library(broom)
 library(lubridate)
 library(cowplot)
+library(patchwork)
 
 # Load the clustering results
 load(file.path(result_dir, "distance_method_results.RData"))
@@ -27,12 +28,358 @@ load(file.path(result_dir, "environmental_genetic_correlations.RData"))
 
 
 
+
 ## Assign traits to whether a higher value is favorable
 higher_favorable_traits <- "GrainYield"
 
 # Edit the traits to make higher value more favorable
 S2_MET_BLUEs_use <- S2_MET_BLUEs %>% 
   mutate(value = if_else(trait %in% higher_favorable_traits, value, value * -1))
+
+## Plot heatmaps
+heat_colors <- wesanderson::wes_palette("Zissou1")
+
+
+
+#############################
+## Distance rank analysis
+#############################
+
+## Edit model names
+pred_env_dist_rank_use <- pred_env_dist_rank %>%
+  mutate(model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model),
+         model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr_use)) %>%
+  filter(model %in% dist_method_abbr_use,
+         set == "complete")
+
+
+## For every environment, take the first 5 most similar environments.
+## Look for patterns
+
+pred_env_dist_rank_first_five <- pred_env_dist_rank_use %>%
+  mutate(first_five = map(rank, ~.[1:5])) %>%
+  # How many of these match the year of the validation environment?
+  mutate(match_year = map2_dbl(validation_environment, first_five, 
+                               ~sum(str_count(string = .y, pattern = str_extract(.x, "[0-9]{2}")))),
+         # How many match location?
+         match_loc = map2_dbl(validation_environment, first_five, 
+                              ~sum(str_count(string = .y, pattern = str_extract(.x, "[A-Z]{3}")))))
+
+## Find the number of shared first-five environments between ranks
+pred_env_dist_rank_first_five_avg <- pred_env_dist_rank_first_five %>%
+  mutate(nE = map_dbl(rank, length)) %>% # Number of available environments
+  select(-rank, -contains("match")) %>%
+  group_by(set, trait, validation_environment) %>%
+  do(crossing(., select(., model, first_five))) %>%
+  ungroup() %>%
+  mutate(num_overlap = map2_dbl(.x = first_five, .y = first_five1, ~length(intersect(.x, .y))),
+         prop_overlap = num_overlap / 5,
+         prop_overlap_chance = 5 / nE) %>%
+  select(-contains("first_five"))
+  
+
+
+## Find the pairwise spearman rank correlation between rankings for a particular test environment
+pred_env_dist_rank_cor <- pred_env_dist_rank_use %>%
+  group_by(trait, set, validation_environment) %>%
+  do({
+    df <- .
+    
+    # Crossing
+    crossing(df, select(df, model, rank)) %>%
+      # filter(model != model1) %>%
+      # Use xtfrm to convert a factor into a numeric
+      mutate(rank_cor = map2_dbl(.x = rank, .y = rank1, ~cor(x = xtfrm(.x), y = xtfrm(.y), method = "spearman"))) %>%
+      select(-rank, -rank1)
+    
+  }) %>% ungroup()
+
+
+## Add the proportion of overalp of first five
+## Determine the average correlation between rankings for each pair of similarity
+## measures for each trait
+pred_env_dist_rank_cor_avg <- pred_env_dist_rank_cor %>%
+  left_join(., pred_env_dist_rank_first_five_avg) %>%
+  group_by(set, trait, model, model1) %>%
+  summarize_at(vars(rank_cor, num_overlap, prop_overlap, prop_overlap_chance), mean) %>%
+  ungroup() %>%
+  split(list(.$set, .$trait)) %>%
+  # Assign the lower triangle
+  map_df(~mutate(., lower_triangle = duplicated(
+    map2_chr(.x = model, .y = model1, ~paste(sort(c(as.character(.x), as.character(.y))), collapse = "_")))) )
+
+## What is the range in correlation coefficients?
+pred_env_dist_rank_cor_avg %>% 
+  filter(model != model1) %>%
+  group_by(trait) %>% 
+  summarize_at(vars(rank_cor), list(~mean, ~min, ~max))
+  
+# trait         mean      min   max
+# 1 GrainYield  0.128   0.00675 0.299
+# 2 HeadingDate 0.0622 -0.0599  0.197
+# 3 PlantHeight 0.0248 -0.0659  0.297
+
+
+## Compare AMMI with others
+pred_env_dist_rank_cor_avg %>%
+  filter_at(vars(contains("model")), any_vars(. == "AMMI")) %>%
+  filter(model != model1, !lower_triangle) %>%
+  as.data.frame() %>%
+  arrange(trait, set, desc(rank_cor)) %>%
+  split(.$trait)
+
+
+## AMMI is most correlated with PD or LocPD,
+## but then the next model is often IPCA-EC
+
+## Compare PD with others
+pred_env_dist_rank_cor_avg %>%
+  filter_at(vars(contains("model")), any_vars(. == "PD")) %>%
+  filter(model != model1, !lower_triangle) %>%
+  as.data.frame() %>%
+  arrange(trait, set, desc(rank_cor)) %>%
+  split(.$trait)
+
+
+## PD is most correlated with PD or LocPD, but it is consistently
+## correlated with IPCA-EC (0.073 - 0.15)
+
+
+## Compare IPCA-EC with others
+pred_env_dist_rank_cor_avg %>%
+  filter_at(vars(contains("model")), any_vars(. == "IPCA-EC")) %>%
+  filter(model != model1, !lower_triangle) %>%
+  as.data.frame() %>%
+  arrange(trait, set, desc(rank_cor)) %>%
+  split(.$trait)
+
+# IPCA-EC is not consistently correlated with anything,
+# but it is often correlated with LocPD (0.16 - 0.30)
+
+
+
+# Glyph modifier
+draw_key_text1 <- function(data, params, size) {
+  
+  grobTree(
+    textGrob(label = "3.3", x = 0.5, y = 0.5),
+    gp = gpar(
+      col = data$colour %||% "grey20",
+      fill = alpha(data$fill %||% "grey85", data$alpha),
+      lwd = (data$size %||% 0.5) * .pt,
+      lty = data$linetype %||% 1
+    )
+  )
+  
+  
+}
+
+## Plot using a heatmap
+# The upper triangle will be a heat color,
+# the lower triangle will be the proportion of overapping first-five environments
+g_dist_rank_cor_heatmap <- pred_env_dist_rank_cor_avg %>% 
+  filter(set == "complete") %>%
+  mutate(set = f_set_replace(set, abbr = T),
+         # If lower triangle, make rank_cor blank
+         rank_cor = case_when(lower_triangle ~ as.numeric(NA), model == model1 ~ as.numeric(NA), TRUE ~ rank_cor), 
+         overlap_use = num_overlap,
+         label = ifelse(lower_triangle, round(overlap_use, 1), NA)) %>% # If lower triangle, make the label
+  ## Create plot
+  ggplot(aes(x = model, y = model1, fill = rank_cor)) + 
+  geom_tile() + 
+  # Add alternative tile for the diagonal
+  geom_tile(data = subset(pred_env_dist_rank_cor_avg, model == model1), fill = "white") +
+  geom_text(aes(label = label, size = overlap_use), key_glyph = draw_key_text1) +
+  scale_fill_gradient2(low = heat_colors[1], mid = heat_colors[3], high = heat_colors[5], 
+                       na.value = "grey95", name = "Rank\ncorrelation", midpoint = median(pred_env_dist_rank_cor_avg$rank_cor),
+                       guide = guide_colorbar(title.position = "top")) +
+  facet_grid(trait ~ ., labeller = labeller(trait = str_add_space), switch = "y", scales = "free", space = "free") +
+  scale_x_discrete(position = "bottom", name = "Similarity measure") +
+  scale_size_continuous(name = "Overlapping\nfirst five\nenvironments", labels = NULL, breaks = 3.3,
+                        guide = guide_legend(override.aes = list(fill = "grey85"))) +
+  # labs(subtitle = unique(.$set)) +
+  theme_presentation2(base_size = 8) +
+  theme(axis.title.y = element_blank(), axis.text.x = element_text(angle = 35, hjust = 1), strip.placement = "outside",
+        legend.position = "right", panel.border = element_blank() )
+
+## Save
+ggsave(filename = "dist_rank_cor_heatmap.jpg", plot = g_dist_rank_cor_heatmap, path = fig_dir,
+       height = 6, width = 3.5, dpi = 1000)
+
+  
+  
+  
+  
+  
+#### Compare distance rankings to phenotypic correlations #####
+
+
+## Filter out undesirable rankings
+environment_rank_df <- bind_rows(pred_env_dist_rank, pred_env_rank_random) %>%
+  mutate(model = ifelse(model == "pheno_location_dist", "pheno_loc_dist", model),
+         model = ifelse(str_detect(model, "sample"), "sample", model),
+         model = str_replace_all(model, dist_method_abbr),
+         model = factor(model, levels = dist_method_abbr_use)) %>%
+  filter(model %in% dist_method_abbr_use,
+         set == "complete") %>%
+  rename(val_environment = validation_environment)
+
+
+## Compare environment rankings with the correlation matrix
+environment_rank_df1 <- environment_rank_df %>%
+  split(.$trait) %>%
+  map2_df(.x = ., .y = env_cor_tp[traits], ~{
+    mutate(.x, rank = map(rank, function(e) subset(e, e %in% colnames(.y)))) %>%
+      mutate(rank_cor_window = map2(val_environment, rank, function(ve, te) .y[ve, te]))
+  }) %>%
+  mutate(rank_cor_cummean = map(rank_cor_window, cummean)) %>%
+  mutate_at(vars(rank_cor_window, rank_cor_cummean), ~map(., ~tibble(step = seq_along(.), mean_cor = .)))
+
+
+## Summarize the correlation of the next environment at each step
+environment_rank_cor_window <- environment_rank_df1 %>%
+  unnest(rank_cor_window) %>%
+  group_by(trait, set, model, step) %>%
+  summarize_at(vars(mean_cor), list(~mean, ~sd, ~n())) %>%
+  ungroup() %>%
+  mutate(se = ifelse(model == "Random", sd / sqrt(n), NA))
+
+## Plot
+g_environment_rank_cor_window <- environment_rank_cor_window %>%
+  ggplot(aes(x = step, y = mean, color = model)) +
+  # geom_line(data = filter(environment_rank_avg_cor, model == "Random"), lwd = 1.5) +
+  geom_line(lwd = ifelse(environment_rank_cor_window$model == "Random", 1.25, 0.5)) +
+  scale_color_manual(values = dist_colors, guide = guide_legend(override.aes = list(lwd = 1)),
+                     name = "Similarity measure") +
+  facet_grid(trait ~ ., switch = "y", scales = "free", 
+             labeller = labeller(trait = str_add_space)) +
+  scale_x_continuous(name = "Number of training environments", breaks = pretty) +
+  scale_y_continuous(name = "Phenotypic correlation with testing environment", breaks = pretty) +
+  labs(subtitle = "Moving phenotypic correlation of training and test environments") +
+  theme_presentation2(12) +
+  theme(legend.position = "bottom")
+# Save
+ggsave(filename = "environment_correlation_window.jpg", plot = g_environment_rank_cor_window, 
+       path = fig_dir, width = 5, height = 8, dpi = 1000)
+
+
+
+## Summarize the average correlation at each step
+environment_rank_avg_cor <- environment_rank_df1 %>%
+  unnest(rank_cor_cummean) %>%
+  group_by(trait, set, model, step) %>%
+  summarize_at(vars(mean_cor), list(~mean, ~sd, lower = ~quantile(., probs = c(alpha / 2)),
+                                    upper = ~quantile(., probs = 1 - (alpha / 2)))) %>%
+  ungroup()
+
+
+## Plot
+g_environment_rank_avg_cor <- environment_rank_avg_cor %>%
+  ggplot(aes(x = step, y = mean, color = model)) +
+  # geom_ribbon(data = filter(environment_rank_avg_cor, model == "Random"), aes(ymin = lower, ymax = upper), fill = "grey85",
+  #             color = NA, alpha = 0.5) +
+  # geom_line(data = filter(environment_rank_avg_cor, model == "Random"), lwd = 1.5) +
+  geom_line(lwd = ifelse(environment_rank_avg_cor$model == "Random", 1.25, 0.5)) +
+  scale_color_manual(values = dist_colors, guide = guide_legend(override.aes = list(lwd = 1)),
+                     name = "Similarity\nmeasure") +
+  facet_grid(trait ~ ., switch = "y", scales = "free", space = "free_x", 
+             labeller = labeller(trait = str_add_space)) +
+  scale_x_continuous(name = "Number of training environments", breaks = pretty) +
+  scale_y_continuous(name = "Phenotypic correlation with testing environment", breaks = pretty) +
+  labs(subtitle = "Cumulative phenotypic correlation of\ntraining and test environments") +
+  theme_presentation2(12) +
+  theme(legend.position = "bottom")
+# Save
+ggsave(filename = "environment_correlation_cummean.jpg", plot = g_environment_rank_avg_cor, 
+       path = fig_dir, width = 5, height = 8, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#############################
+## cluster analysis
+#############################
+
+
+
+
+### Are clusters defined more by location or environment?
+## Compare the proportion of each year/location in a cluster with the expectation of random
+## environment assignments and the cluster assignments 
+## What is the proportion of environments assigned to the same cluster across distance method
+cluster_grouping <- cluster_df %>% 
+  select(-data) %>% 
+  group_by(set, trait, model) %>% 
+  do({
+    row <- .
+    
+    clus <- row$cluster[[1]] %>%
+      mutate(location = str_extract(environment, "[A-Z]{3}"),
+             year = str_extract(environment, "[0-9]{2}"))
+    
+    # List of all locations/years
+    locs <- clus$location
+    yrs <- clus$year
+    
+    ## Calculate proportions of locations and year
+    clus_props <- clus %>% 
+      group_by(cluster) %>% 
+      summarize_at(vars(location, year), funs(list(as.data.frame(table(.))))) %>%
+      mutate(nEnv = map(location, "Freq") %>% map_dbl(sum),
+             nLoc = map_dbl(location, ~n_distinct(.$location)),
+             nYr = map_dbl(year, ~n_distinct(.$year))) %>%
+      # Calculate expectations
+      mutate(expLoc = map_dbl(nEnv, ~mean(replicate(1000, n_distinct(sample(locs, .))))),
+             expYr = map_dbl(nEnv, ~mean(replicate(1000, n_distinct(sample(yrs, .)))))) %>%
+      # Calculate p value from exact binomial test
+      mutate(LocTest = pmap_dbl(list(nLoc, nEnv, expLoc), ~binom.test(x = ..1, n = ..2, p = ..3 / ..2)$p.value),
+             YrTest = pmap_dbl(list(nYr, nEnv, expYr), ~binom.test(x = ..1, n = ..2, p = ..3 / ..2)$p.value))
+    
+    
+    ## Calculate some summary
+    summarize_at(clus_props, vars(nEnv:expYr), mean) %>%
+      mutate(LocTest = prop.test(x = nLoc, n = nEnv, p = expLoc / nEnv )$p.value,
+             YrTest = prop.test(x = nYr, n = nEnv, p = expYr / nEnv)$p.value)
+    
+    
+  }) %>% ungroup()
+
+
+
+## Analyze tests
+cluster_grouping %>%
+  select(set:model, LocTest, YrTest) %>%
+  gather(test, p_value, LocTest, YrTest) %>%
+  # filter(p_value < alpha)
+  arrange(p_value)
+
+
+## Table
+cluster_grouping %>%
+  mutate(LocDev = nLoc - expLoc, YrDev = nYr - expYr) %>% 
+  select(set:model, LocDev, YrDev) %>% 
+  gather(term, deviation, LocDev, YrDev) %>% 
+  split(list(.$set, .$trait, .$term)) %>%
+  map_df(~arrange(., desc(abs(deviation)))) %>%
+  write_csv(x = ., path = file.path(fig_dir, "cluster_location_year_bias.csv"))
+
+
+
+
+
+
+
 
 
 
@@ -91,8 +438,7 @@ cluster_compare1 %>%
 ## Subset some silimarity measures for publication
 similarity_measure_subset <- c("AMMI", "LocPD", "GCD", "IPCA-EC")
 
-## Plot heatmaps
-heat_colors <- wesanderson::wes_palette("Zissou1")
+
 
 cluster_compare_hm_list <- cluster_compare1 %>% 
   filter(!(str_detect(set,"realistic") & model == "AMMI")) %>%
@@ -332,90 +678,6 @@ write_csv(x = cluster_varcomp_table, path = file.path(fig_dir, "cluster_varcomp_
 
 
 
-
-
-
-
-## Analyze clustering and distance rank results
-
-
-## Filter out undesirable rankings
-environment_rank_df <- bind_rows(pred_env_dist_rank, pred_env_rank_random) %>%
-  rename(val_environment = validation_environment) %>%
-  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>%
-  # filter(model %in% names(dist_method_abbr_use)) %>%
-  filter(set %in% c("complete", "realistic2017")) %>%
-  select(-mat_set)
-
-
-
-
-## Compare environment rankings with the correlation matrix
-environment_rank_df1 <- environment_rank_df %>%
-  split(.$trait) %>%
-  map2_df(.x = ., .y = env_cor_tp[traits], ~{
-    mutate(.x, rank = map(rank, function(e) subset(e, e %in% colnames(.y)))) %>%
-      mutate(rank2 = map2(val_environment, rank, function(ve, te) .y[ve, te]))
-  }) %>%
-  mutate(rank2_summ = map(rank2, cummean)) %>%
-  # mutate(rank2 = map(rank2, ~tibble(step = seq_along(.), mean_cor = .)))
-  mutate_at(vars(rank2, rank2_summ), ~map(., ~tibble(step = seq_along(.), mean_cor = .)))
-
-
-## Summarize the correlation of the next environment at each step
-environment_rank_next_cor <- environment_rank_df1 %>%
-  unnest(rank2) %>%
-  mutate(model = ifelse(str_detect(model, "sample"), "sample", model),
-         model = str_replace_all(model, dist_method_abbr_use)) %>%
-  group_by(trait, set, model, step) %>%
-  summarize_at(vars(mean_cor), list(~mean, ~sd)) %>%
-  ungroup() %>%
-  mutate(model = factor(model, levels = dist_method_abbr_use))
-
-## Plot
-environment_rank_next_cor %>%
-  ggplot(aes(x = step, y = mean, color = model)) +
-  # geom_line(data = filter(environment_rank_avg_cor, model == "Random"), lwd = 1.5) +
-  geom_line(lwd = ifelse(environment_rank_next_cor$model == "Random", 1.25, 0.5)) +
-  scale_color_manual(values = dist_colors, guide = guide_legend(override.aes = list(lwd = 1))) +
-  facet_grid(trait ~ set, switch = "y", scales = "free_x", space = "free_x", 
-             labeller = labeller(trait = str_add_space, set = ~str_replace_all(., set_replace))) +
-  scale_x_continuous(name = "Number of training environments", breaks = pretty) +
-  scale_y_continuous(name = "Correlation with testing environment", breaks = pretty) +
-  labs(subtitle = "Average correlation of next-ranked training\nenvironment with testing environment") +
-  theme_presentation2(12) +
-  theme(legend.position = "bottom")
-# Save
-ggsave(filename = "environment_correlation_next.jpg", path = fig_dir, width = 5, height = 8, dpi = 1000)
-
-
-
-## Summarize the average correlation at each step
-environment_rank_avg_cor <- environment_rank_df1 %>%
-  unnest(rank2_summ) %>%
-  mutate(model = ifelse(str_detect(model, "sample"), "sample", model),
-         model = str_replace_all(model, dist_method_abbr_use)) %>%
-  group_by(trait, set, model, step) %>%
-  summarize_at(vars(mean_cor), list(~mean, ~sd)) %>%
-  ungroup() %>%
-  mutate(model = factor(model, levels = dist_method_abbr_use))
-
-
-## Plot
-environment_rank_avg_cor %>%
-  ggplot(aes(x = step, y = mean, color = model)) +
-  # geom_line(data = filter(environment_rank_avg_cor, model == "Random"), lwd = 1.5) +
-  geom_line(lwd = ifelse(environment_rank_avg_cor$model == "Random", 1.25, 0.5)) +
-  scale_color_manual(values = dist_colors, guide = guide_legend(override.aes = list(lwd = 1))) +
-  facet_grid(trait ~ set, switch = "y", scales = "free_x", space = "free_x", 
-             labeller = labeller(trait = str_add_space, set = ~str_replace_all(., set_replace))) +
-  scale_x_continuous(name = "Number of training environments", breaks = pretty) +
-  scale_y_continuous(name = "Correlation with testing environment", breaks = pretty) +
-  labs(subtitle = "Average correlation of training environments\nwith testing environment") +
-  theme_presentation2(12) +
-  theme(legend.position = "bottom")
-# Save
-ggsave(filename = "environment_correlation_all.jpg", path = fig_dir, width = 5, height = 8, dpi = 1000)
 
 
 

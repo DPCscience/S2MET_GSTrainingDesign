@@ -3,6 +3,12 @@
 ## A script with useful functions used in the prediction analysis of the S2MET
 ## 
 
+## Calculate standard error
+se <- function(x, na.rm = FALSE) {
+  x1 <- if (na.rm) na.omit(x) else x
+  sd(x = x1) / sqrt(length(x = x1))
+}
+
 
 ## Phenotypic distance method
 dist_env <- function(x, gen.col = "gen", env.col = "env", pheno.col = "yield") {

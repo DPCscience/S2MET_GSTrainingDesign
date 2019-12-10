@@ -185,15 +185,24 @@ vp_only_env_trait <- S2_MET_BLUEs %>%
   map(~unique(.$environment))
 
 
-## Create two list of environments - for complete or realistic training
+
+
+
+## Create two list of environments - for complete or realistic training and validation
 complete_train_env <- tp_vp_env_trait
 
-realistic_train_env <- tp_vp_env_trait %>%
-  map(~str_subset(., "15|16"))
-
-realistic_test_env <- tp_vp_env_trait %>%
-  map(~str_subset(., "17"))
-
+## Create a df that contains trait, set, train environmnents, and validation environments
+train_val_environment_df <- tibble(trait = names(complete_train_env), trait_env = complete_train_env) %>%
+  filter(trait %in% traits) %>%
+  crossing(., set = c("complete", paste0("realistic", sort(unique(S2_MET_BLUEs$year))))) %>%
+  # Filter out testing envs
+  mutate(test_env = trait_env,
+         pattern = str_extract(set, "[0-9]{2}$") %>% ifelse(is.na(.), ".*", .),
+         test_env = map2(test_env, pattern, ~str_subset(string = .x, pattern = .y)),
+         train_env = map2(trait_env, test_env, setdiff),
+         train_env = map2(trait_env, train_env, ~if (length(.y) == 0) .x else .y)) %>%
+  select(trait, set, train_env, test_env)
+  
 
 ## Final filter of BLUEs
 S2_MET_BLUEs <- filter(S2_MET_BLUEs, environment %in% tp_vp_env)

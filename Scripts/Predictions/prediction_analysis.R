@@ -18,10 +18,12 @@ library(gridExtra)
 library(broom)
 library(car)
 library(cowplot)
+library(patchwork)
 library(grid)
 library(modelr)
 library(viridis)
 library(ggalt)
+library(slide)
 
 
 
@@ -74,6 +76,8 @@ scheme_color <- set_names(rev(wesanderson::wes_palette("Zissou1")[-3]), c("CV0",
 
 
 
+## Subset some silimarity measures for publication
+similarity_measure_subset <- c("AMMI", "LocPD", "GCD", "IPCA-EC")
 
 
 
@@ -134,12 +138,29 @@ separate_cv_pov_predictions_analysis %>%
 
 # Good
 
+## Plot histograms
+separate_cv_pov_predictions_analysis %>%
+  ggplot(aes(x = accuracy)) +
+  geom_histogram() +
+  facet_grid(scheme ~ set + trait, scales = "free_x")
+
+## Test for normality
+separate_cv_pov_predictions_analysis %>%
+  group_by(set, trait, scheme) %>%
+  do(test = ks.test(x = .$accuracy, y = "pnorm", mean = mean(.$accuracy), sd = sd(.$accuracy))) %>%
+  ungroup() %>%
+  mutate(p_value = map_dbl(test, "p.value")) %>%
+  arrange(p_value)
+
+## Looks good
+
+
 
 ## Group all years for LOYO
 ## Summarize prediction accuracy across sets, traits, and schemes
 separate_cv_pov_predictions_analysis1 <- separate_cv_pov_predictions_analysis %>%
   group_by(set, trait, scheme) %>%
-  summarize_at(vars(ability, accuracy), mean) %>%
+  summarize_at(vars(ability, accuracy), list(mean = mean, se = se)) %>%
   ungroup() 
 
 
@@ -189,7 +210,7 @@ separate_cv_pov_predictions_analysis1 %>%
   filter(scheme != "POCV00") %>%
   mutate(scheme = str_replace(scheme, "POCV", "POV"),
          scheme = factor(scheme, levels = c("CV0", "POV0", "CV00", "POV00"))) %>%
-  mutate(accuracy = round(accuracy, 2), annotation = accuracy) %>%
+  mutate(accuracy = round(accuracy_mean, 2), annotation = accuracy_mean) %>%
   # mutate_at(vars(accuracy, lower, upper), round, 2) %>%
   # mutate(annotation = paste0(accuracy, " (", lower, ", ", upper, ")")) %>%
   select(set, trait, scheme, annotation) %>%
@@ -216,9 +237,7 @@ separate_cv_pov_predictions_analysis1 %>%
 
 environment_rank_df <- pred_env_dist_rank %>%
   rename(val_environment = validation_environment) %>%
-  filter(!mat_set %in% c("Jarquin", "MalosettiStand")) %>%
   filter(model %in% names(dist_method_abbr_use)) %>%
-  select(-mat_set) %>%
   mutate(data = list(NULL)) %>%
   mutate(nTrainEnv = map(rank, seq)) %>%
   unnest(nTrainEnv)
@@ -633,7 +652,6 @@ g_rank_pred_0 <- cv0_pov0_predictions_analysis_toplot1 %>%
   filter(trait %in% traits) %>%
   mutate(group = paste0(set, " - ", scheme)) %>%
   ggplot(aes(x = nTrainEnv, y = fit, color = model, group = model)) +
-  geom_hline(aes(yintercept = accuracy, lty = "Accuracy using all data")) + 
   geom_line(aes(size = size)) +
   facet_grid(trait + scheme ~ set, labeller = labeller(trait = str_add_space), space = "free_x", scales = "free", switch = "y") +
   scale_color_manual(values = dist_colors_use, name = "Similarity\nmeasure",
@@ -665,35 +683,126 @@ cv_pov_rank_predictions1 <- bind_rows(cv0_pov0_predictions_analysis_toplot1,
 
 
 
-### Stats
+### Stats ###
 
-## What is the greatest decline in accuracy for CV and AMMI/PD?
-# First find the peak for each CV/distance measure, trait
-cv_pov_rank_predictions1 %>%
-  filter(set == "Leave-one-environment-out", scheme %in% c("CV0", "CV00"), model %in% c("AMMI", "PD")) %>% 
-  group_by(trait, set, model, scheme) %>% 
-  mutate(max = max(fit)) %>% 
-  filter(nTrainEnv == max(nTrainEnv)) %>% 
-  mutate(decline = max - fit, per_decline = decline / max) %>%
-  arrange(decline)
+acc_tol <- 0.01
+n_acc_tol <- 3
 
-# trait           set                       model nTrainEnv scheme   fit size  accuracy    min   max   decline per_decline
-# 1 HeadingDateAGDD Leave-one-environment-out AMMI         25 CV00   0.801 FALSE    0.802  0.763 0.801 0           0        
-# 2 HeadingDate     Leave-one-environment-out AMMI         25 CV00   0.799 FALSE    0.799  0.760 0.799 0.0000443   0.0000554
-# 3 HeadingDateAGDD Leave-one-environment-out AMMI         25 CV0    0.885 FALSE    0.885 NA     0.886 0.00109     0.00124  
-# 4 HeadingDate     Leave-one-environment-out AMMI         25 CV0    0.882 FALSE    0.882 NA     0.885 0.00252     0.00285  
-# 5 HeadingDate     Leave-one-environment-out PD           25 CV00   0.798 FALSE    0.799  0.760 0.804 0.00569     0.00708  
-# 6 HeadingDateAGDD Leave-one-environment-out PD           25 CV00   0.801 FALSE    0.802  0.763 0.807 0.00595     0.00737  
-# 7 HeadingDateAGDD Leave-one-environment-out PD           25 CV0    0.885 FALSE    0.885 NA     0.899 0.0144      0.0160   
-# 8 HeadingDate     Leave-one-environment-out PD           25 CV0    0.882 FALSE    0.882 NA     0.897 0.0147      0.0164   
-# 9 PlantHeight     Leave-one-environment-out AMMI         26 CV0    0.749 FALSE    0.749 NA     0.810 0.0606      0.0748   
-# 10 PlantHeight     Leave-one-environment-out AMMI         26 CV00   0.412 FALSE    0.410  0.239 0.495 0.0834      0.168    
-# 11 PlantHeight     Leave-one-environment-out PD           26 CV0    0.749 FALSE    0.749 NA     0.838 0.0883      0.105    
-# 12 GrainYield      Leave-one-environment-out AMMI         22 CV0    0.609 FALSE    0.609 NA     0.700 0.0908      0.130    
-# 13 PlantHeight     Leave-one-environment-out PD           26 CV00   0.409 FALSE    0.410  0.239 0.508 0.0992      0.195    
-# 14 GrainYield      Leave-one-environment-out AMMI         22 CV00   0.393 FALSE    0.393  0.195 0.514 0.121       0.236    
-# 15 GrainYield      Leave-one-environment-out PD           22 CV0    0.609 FALSE    0.609 NA     0.743 0.134       0.181    
-# 16 GrainYield      Leave-one-environment-out PD           22 CV00   0.392 FALSE    0.393  0.195 0.546 0.155       0.283
+## For each trait, scheme, and measure, find the initial accuracy, peak accuracy, and final accuracy
+cv_pov_rank_predictions_stat <- cv_pov_rank_predictions1 %>%
+  group_by(trait, set, model, scheme) %>%
+  do({
+    df <- .
+    
+    ## Define the plateau as the point when the change in accuracy is less than some 
+    ## threhold
+    plateau <- df %>% 
+      mutate(fit_diff = c(1, diff(fit)), 
+             tol = abs(fit_diff) < acc_tol,
+             # Slide performs sliding window functions
+             stable = slide_dbl(tol, sum, .after = 2),
+             stop = stable < n_acc_tol)
+    
+    ## Define the effective plateau as the point at which accuracy is not significantly different than using 
+    ## all data and is stable
+    separate_cv_pov_predictions_analysis1
+    
+    
+    bind_rows(
+      filter(df, nTrainEnv == 1) %>% mutate(case = "initial"),
+      filter(df, fit == max(fit)) %>% mutate(case = "peak"),
+      df[which.min(plateau$stop),] %>% mutate(case = "plateau"),
+      filter(df, nTrainEnv == max(nTrainEnv)) %>% mutate(case = "final")
+    ) %>%
+      select(-size:-max)
+  })  %>% 
+  ungroup() %>%
+  filter(!is.na(case), set == "Leave-one-environment-out") %>%
+  arrange(trait, desc(model), scheme, nTrainEnv)
+
+## 
+
+## Subset peak nTrainEnv and final nTrainEnv
+cv_pov_rank_predictions_stat1 <- cv_pov_rank_predictions_stat %>%
+  select(trait, set, model, nTrainEnv, scheme, case) %>%
+  spread(case, nTrainEnv) %>%
+  arrange(trait, set, scheme, desc(model))
+
+
+
+## Average number of environments to reach plateau
+cv_pov_rank_predictions_stat %>%
+  filter(case == "plateau") %>%
+  group_by(trait, set, scheme) %>%
+  summarize_at(vars(nTrainEnv), list(min = min, max = max, mean = mean))
+
+
+## Subset different models
+cv_pov_rank_predictions_stat1 %>%
+  filter(model %in% c("GCD", "All-EC", "IPCA-EC")) %>%
+  ## At what proportion of the total number of environments was the peak observed?
+  mutate_at(vars(initial, peak, final), ~. / final) %>%
+  group_by(model) %>%
+  summarize_at(vars(peak), mean)
+
+# model    peak
+# 1 IPCA-EC 0.753
+# 2 All-EC  0.886
+# 3 GCD     0.631
+
+cv_pov_rank_predictions_stat1 %>%
+  filter(model %in% c("AMMI", "PD", "LocPD")) %>%
+  filter(str_detect(scheme, "CV")) %>%
+  mutate_at(vars(initial, peak, final), ~. / final) %>%
+  group_by(model) %>%
+  summarize_at(vars(peak), mean)
+ 
+# model  peak
+# 1 LocPD 0.391
+# 2 PD    0.261
+# 3 AMMI  0.476
+
+
+## Calculate difference between peak and initial, and final and peak accuracy
+cv_pov_rank_predictions_stat2 <- cv_pov_rank_predictions_stat %>%
+  select(trait, set, model, scheme, case, fit) %>%
+  spread(case, fit) %>%
+  mutate(initial = initial, 
+         final_peak = final - peak,
+         final_peak_per = final_peak / peak,
+         peak_initial = peak - initial,
+         peak_initial_per = peak_initial / initial) %>%
+  as.data.frame() %>%
+  arrange(trait, set, scheme, desc(model))
+
+## Subset different models
+cv_pov_rank_predictions_stat2 %>%
+  filter(model %in% c("GCD", "All-EC", "IPCA-EC")) %>%
+  group_by(model) %>%
+  summarize_at(vars(initial, peak_initial, peak_initial_per, final_peak, final_peak_per), mean)
+
+# model   initial peak_initial peak_initial_per final_peak final_peak_per
+# 1 IPCA-EC   0.484       0.127             0.310   -0.00791       -0.0164 
+# 2 All-EC    0.512       0.0922            0.194   -0.00157       -0.00322
+# 3 GCD       0.487       0.120             0.291   -0.00420       -0.00906
+
+cv_pov_rank_predictions_stat2 %>%
+  filter(model %in% c("AMMI", "PD", "LocPD")) %>%
+  filter(str_detect(scheme, "CV")) %>%
+  group_by(model) %>%
+  summarize_at(vars(initial, peak_initial, peak_initial_per, final_peak, final_peak_per), mean)
+
+# model initial peak_initial peak_initial_per final_peak final_peak_per
+# 1 LocPD   0.526       0.146            0.368     -0.0325        -0.0600
+# 2 PD      0.674       0.0493           0.0744    -0.0834        -0.132 
+# 3 AMMI    0.631       0.0693           0.116     -0.0598        -0.102
+
+
+
+
+
+
+
 
 
 
@@ -983,13 +1092,13 @@ cv_pov_cluster_predictions_model_analysis1 <- cv_pov_cluster_predictions_model_a
          
 
 
-## Summarize the mean accuracy and 1 sd
-separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predictions_analysis %>%
-  group_by(trait, set, model, scheme) %>%
-  summarize_at(vars(fit, max_ability, max_accuracy), list(~mean, ~min, ~max)) %>%
-  ungroup() %>%
-  select(-matches("accuracy_max|ability_max|accuracy_min|ability_min")) %>%
-  rename_at(vars(contains("_mean")), ~str_remove(., "_mean"))
+# ## Summarize the mean accuracy and 1 sd
+# separate_cv_pov_cluster_predictions_analysis1 <- separate_cv_pov_cluster_predictions_analysis %>%
+#   group_by(trait, set, model, scheme) %>%
+#   summarize_at(vars(fit, max_ability, max_accuracy), list(~mean, ~min, ~max)) %>%
+#   ungroup() %>%
+#   select(-matches("accuracy_max|ability_max|accuracy_min|ability_min")) %>%
+#   rename_at(vars(contains("_mean")), ~str_remove(., "_mean"))
          
          
 
@@ -1124,6 +1233,31 @@ g_cv_pov_cluster_model1 <- plot_grid(g_cv_pov_cluster_model, get_legend(g_cv_pov
 ggsave(filename = "all_cv_pov_cluster_predictions_model_point.jpg", plot = g_cv_pov_cluster_model1, path = fig_dir, 
        width = 7.5, height = 4, dpi = 1000)
 
+
+
+
+
+
+## Calculate differences from using all data
+# LOEO
+cv_pov_cluster_predictions_model_analysis1 %>%
+  filter(model %in% similarity_measure_subset,
+         set == "Leave-one-environment-out") %>%
+  mutate(difference = (fit - max_accuracy),
+         per_diff = difference / max_accuracy,
+         annotation = paste0(round(difference, 2), " (", round(per_diff * 100, 2), "%)")) %>%
+  # arrange(desc(difference))
+  arrange((difference)) %>% filter(model %in% c("AMMI", "LocPD"), trait == "HeadingDate")
+
+# LOYO
+cv_pov_cluster_predictions_model_analysis1 %>%
+  filter(model %in% similarity_measure_subset,
+         set == "Leave-one-year-out") %>%
+  mutate(difference = (fit - max_accuracy),
+         per_diff = difference / max_accuracy,
+         annotation = paste0(round(difference, 2), " (", round(per_diff * 100, 2), "%)")) %>%
+  # arrange(desc(difference)) %>%
+  arrange((difference))
 
 
 
@@ -1484,14 +1618,22 @@ ggsave(filename = "all_cv_pov_cluster_predictions_advantage_model_point.jpg", pl
 ##############################
 
 
-## Subset some silimarity measures for publication
-similarity_measure_subset <- c("AMMI", "LocPD", "GCD", "IPCA-EC")
 
 # Create a new df for plotting
 cluster_prediction_analysis_model <- bind_rows(
   mutate(cv_pov_cluster_predictions_model_analysis1, analysis = "base"),
   mutate(random_cluster_predictions_analysis_model1, analysis = "random")
 ) %>% filter(model %in% similarity_measure_subset)
+
+
+## Calculate differences between similiarity measure-defined  and random clusters
+cluster_prediction_analysis_model %>% 
+  filter(analysis == "random") %>%
+  # aggregate(fit ~ set + trait, data = ., FUN = mean)
+  aggregate(fit ~ set + trait, data = ., FUN = range)
+  
+
+
 
 
 ## Plot modifier
@@ -1567,9 +1709,7 @@ ggsave(filename = "all_cv_pov_cluster_predictions_combined_model_point.jpg", plo
 ## Plot model marginal means of nominal prediction accuracy and
 ## random cluster prediction accuracy
 ##  
-## This time use dumbell graph
-## 
-g_cv_pov_cluster_model_combined_alt <- cluster_prediction_analysis_model %>%
+cluster_prediction_analysis_model1 <- cluster_prediction_analysis_model %>%
   ## Subtract random from based
   select(set, trait, model, scheme, analysis, fit) %>% 
   spread(analysis, fit) %>% 
@@ -1581,6 +1721,12 @@ g_cv_pov_cluster_model_combined_alt <- cluster_prediction_analysis_model %>%
   ## Set min/max based on trait
   group_by(trait) %>%
   mutate_at(vars(fit), list(~min, ~max)) %>%
+  ungroup()
+
+
+## This time use dumbell graph
+## 
+g_cv_pov_cluster_model_combined_alt <- cluster_prediction_analysis_model1 %>%
   split(.$set) %>%
   map(~{
     ## Spread fit by analysis
@@ -1593,29 +1739,60 @@ g_cv_pov_cluster_model_combined_alt <- cluster_prediction_analysis_model %>%
       geom_point(data = .x, aes(y = min), color = "white") + 
       geom_point(data = .x, aes(y = max), color = "white") + 
       ##
-      geom_hline(aes(yintercept = max_accuracy, lty = "Accuracy using\nall data"), color = "black") +
+      geom_hline(aes(yintercept = max_accuracy, lty = "Accuracy\nusing\nall data"), color = "black") +
       # Segment between points
       geom_segment(aes(y = random, yend = base, x = model, xend = model), color = "grey85") +
       ## Points for base and random
       geom_point(aes(y = random, shape = "Random"), color = "grey85", size = 1) +
       geom_point(aes(y = base, shape = "Similarity", color = model), alpha = 0.5, size = 1.75) +
       scale_y_continuous(breaks = pretty, name = expression("Prediction accuracy ("*italic(r[MG])*")")) +
-      scale_fill_manual(values = dist_colors_use, name = "Similarity\nmeasure", guide = guide_legend(nrow = 2)) +
-      scale_color_manual(values = dist_colors_use, name = "Similarity\nmeasure", guide = guide_legend(nrow = 2)) +
-      scale_shape_manual(name = "Cluster\ndesign", guide = guide_legend(nrow = 2), values = c("Similarity" = 16, "Random" = 15)) +
+      scale_fill_manual(values = dist_colors_use, name = "Similarity\nmeasure", guide = guide_legend(ncol = 1)) +
+      scale_color_manual(values = dist_colors_use, name = "Similarity\nmeasure", guide = guide_legend(ncol = 1)) +
+      scale_shape_manual(guide = FALSE, values = c("Similarity" = 16, "Random" = 15)) +
       scale_linetype_manual(values = 2, name = NULL, guide = guide_legend(order = 1)) +
       xlab("Similarity measure") +
       facet_grid(trait ~ scheme, scales = "free", space = "free_x", switch = "y",
                  labeller = labeller(set = str_to_title, trait = str_add_space)) +
       labs(subtitle = unique(.x$set)) +
       theme_presentation2(base_size = 8) +
-      theme(axis.text.x = element_blank(), strip.placement = "outside", legend.position = "bottom",
+      theme(axis.text.x = element_blank(), strip.placement = "outside", legend.position = "right",
             legend.margin = margin(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
             legend.key.height = unit(0.5, "lines"))
     
   })
     
- 
+
+## Create an example legend to demonstrate the similarity-random accuracy difference
+g_legend_example <- cluster_prediction_analysis_model1 %>%
+  filter(trait == "GrainYield", scheme == "CV0", set == "Leave-one-environment-out",
+         model == "AMMI") %>%
+  select(-model_rep:-max) %>%
+  spread(analysis, fit) %>%
+  ggplot(aes(x = 1)) +
+  geom_segment(aes(y = random, yend = base, x = 1, xend = 1), color = "grey85") +
+  ## Points for base and random
+  geom_point(aes(y = random, shape = "Random"), color = "grey85", size = 1) +
+  geom_point(aes(y = base, shape = "Similarity", color = model), alpha = 0.5, size = 1.75) +
+  ## annotate
+  geom_text(aes(x = 1, y = base, label = "Accuracy using\nsimilarity measure\ncluster"), 
+            hjust = 0, nudge_y = 0, nudge_x = 0.1, size = 2) +
+  geom_text(aes(x = 1, y = random, label = "Accuracy using\nrandom cluster"), hjust = 0, 
+            nudge_y = 0, nudge_x = 0.1, size = 2) +
+  scale_fill_manual(values = dist_colors_use, guide = FALSE) +
+  scale_color_manual(values = dist_colors_use, guide = FALSE) +
+  scale_shape_manual(guide = FALSE, values = c("Similarity" = 16, "Random" = 15)) +
+  scale_x_continuous(limits = c(0.9, 1.75)) +
+  scale_y_continuous(limits = c(0.3, 1)) +
+  theme_presentation2(base_size = 6) +
+  theme(axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank(),
+        axis.line = element_blank(), panel.border = element_blank())
+  
+
+## Combine this plot with the legend
+g_legend_use <- plot_grid(g_legend_example, get_legend(g_cv_pov_cluster_model_combined_alt[[1]]),
+                          ncol = 1, rel_heights = c(0.75, 1))
+
+
 
 ## Combine plots
 # Custom y_axis
@@ -1626,15 +1803,13 @@ g_cv_pov_cluster_combine_model_alt <- plot_grid(
 # Add y axis
 g_cv_pov_cluster_combine_model_alt1 <- plot_grid(
   grid::textGrob(label = expression("Prediction accuracy ("*italic(r[MG])*")"), rot = 90, gp = gpar(fontsize = 8)),
-  g_cv_pov_cluster_combine_model_alt, rel_widths = c(0.05, 1), nrow = 1
-)
-g_cv_pov_cluster_combine_model_alt2 <- plot_grid(
-  g_cv_pov_cluster_combine_model_alt1, get_legend(g_cv_pov_cluster_model_combined_alt[[1]]), 
-  ncol = 1, rel_heights = c(1, 0.1)
+  g_cv_pov_cluster_combine_model_alt, 
+  g_legend_use,
+  rel_widths = c(0.05, 1, 0.17), nrow = 1
 )
 
-ggsave(filename = "all_cv_pov_cluster_predictions_combined_model_paper.jpg", plot = g_cv_pov_cluster_combine_model_alt2,
-       path = fig_dir, width = 6, height = 3.5, dpi = 1000)
+ggsave(filename = "all_cv_pov_cluster_predictions_combined_model_paper.jpg", plot = g_cv_pov_cluster_combine_model_alt1,
+       path = fig_dir, width = 7.5, height = 3, dpi = 1000)
 
 
 

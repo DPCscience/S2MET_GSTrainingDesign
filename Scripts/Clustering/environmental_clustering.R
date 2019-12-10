@@ -30,6 +30,12 @@ load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
 
 
 
+  
+
+
+
+
+
 # # Create a new data.frame to hold the different datasets
 # S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
 #   group_by(trait) %>%
@@ -267,42 +273,36 @@ ge_mean_D <- S2_MET_BLUEs %>%
     dist1 })
 
 
-
-# ## Now calculate the line means in each location
-# control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
-# 
-# # Fit a mixed model with fixed G and L effects and random GY and GYL
-# temp <- S2_MET_BLUEs %>%
-#   filter(line_name %in% tp, trait %in% traits) %>%
-#   # Split by trait
-#   split(.$trait) %>%
-#   map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
-#   map(~mutate_at(., vars(line_name, location), as.factor))
-# 
-# 
-# fit <- lmer(formula = value ~ line_name + location + line_name:location + (1|year) + (1|line_name:year) + (1|line_name:year:location), data = temp$GrainYield,
-#             control = control)
-
+## Simple location means
 location_BLUEs <- S2_MET_BLUEs %>%
   filter(trait %in% traits) %>%
   group_by(trait, line_name, location) %>%
-  mutate(value = mean(value)) %>%
-  ungroup()
+  summarize(value = mean(value))
+
+
+
+## Add environment information
+location_BLUEs1 <- location_BLUEs %>%
+  left_join(., distinct(trial_info, location, environment)) %>%
+  group_by(trait) %>%
+  nest() %>%
+  # Subset training environments
+  left_join(., subset(train_val_environment_df, set == "complete", c(trait, train_env))) %>%
+  mutate(data = map2(data, train_env, ~filter(.x, environment %in% .y))) %>%
+  unnest(data)
+
 
 ## Correlations among locations
-loc_cor_complete <- location_BLUEs %>%
+loc_cor_complete <- location_BLUEs1 %>%
   split(.$trait) %>% 
-  map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
-  map(~distinct(., line_name, location, value) %>% spread(location, value) %>% as.data.frame() %>% 
+  map(~distinct(., line_name, environment, value) %>% spread(environment, value) %>% as.data.frame() %>% 
         column_to_rownames("line_name") %>% as.matrix() %>% cor(., use = "pairwise.complete.obs"))
 
 # Calculate the distance between locations using all data
-gl_mean_D_complete <- location_BLUEs %>%
+gl_mean_D_complete <- location_BLUEs1 %>%
   filter(line_name %in% tp) %>%
-  filter(trait %in% traits) %>%
   # Split by trait
   split(.$trait) %>%
-  map2(.x = ., .y = tp_vp_env_trait[names(.)], ~filter(.x, environment %in% .y)) %>%
   map(~distinct(., line_name, environment, value)) %>% 
   map(function(df){
     dist1 <- dist_env(x = df, gen.col = "line_name", env.col = "environment", pheno.col = "value")
@@ -315,41 +315,50 @@ gl_mean_D_complete <- location_BLUEs %>%
 
 
 ## Now calculate the line means in each location, excluding data from each dropped year
-location_BLUEs_realistic_df <- distinct(S2_MET_BLUEs, year, trait) %>%
-  filter(trait %in% traits) %>%
-  mutate(set = paste0("realistic", year), data = list(NULL), cor = list(NULL), dist = list(NULL))
+location_BLUEs_realistic_df <- S2_MET_BLUEs %>%
+  filter(trait %in% traits) %>% 
+  group_by(trait) %>% 
+  nest(.key = "all_data") %>%
+  left_join(., train_val_environment_df) %>%
+  mutate(all_data = map2(all_data, train_env, ~filter(.x, environment %in% .y)),
+         data = list(NULL), cor = list(NULL), dist = list(NULL))
+         
+## Iterate over rows
 
 for (i in seq(nrow(location_BLUEs_realistic_df))) {
 
-  location_BLUEs_realistic_df$data[[i]] <- S2_MET_BLUEs %>%
-    filter(year != location_BLUEs_realistic_df$year[i], trait %in% location_BLUEs_realistic_df$trait[i]) %>%
-    group_by(trait, line_name, location) %>%
+  row <- location_BLUEs_realistic_df[i,]
+  
+  ## First calculate location means
+  loc_blues_i <- row$all_data[[1]] %>%
+    group_by(line_name, location) %>%
     summarize(value = mean(value)) %>%
     ungroup() %>%
-    full_join(distinct(S2_MET_BLUEs, trait, environment, location, year), ., by = c("location", "trait")) %>%
-    filter(!is.na(line_name))
+    # Add environment
+    left_join(., distinct(trial_info, location, environment), by = "location") %>%
+    ## Filter for training and test environments
+    filter(environment %in% union(row$train_env[[1]], row$test_env[[1]]))
+    
   
-  location_BLUEs_realistic_df$cor[[i]] <- location_BLUEs_realistic_df$data[[i]] %>%
-    filter(environment %in% tp_vp_env_trait[[location_BLUEs_realistic_df$trait[i]]]) %>%
-    distinct(., line_name, location, value) %>%
-    select(., line_name, location, value) %>% 
-    spread(location, value) %>% 
-    as.data.frame() %>% 
+  ## Second calculate location correlation
+  loc_cor_i <- loc_blues_i %>%
+    select(line_name, environment, value) %>%
+    spread(environment, value) %>%
+    as.data.frame() %>%
     column_to_rownames("line_name") %>% 
     as.matrix() %>% 
     cor(., use = "pairwise.complete.obs")
   
-  location_BLUEs_realistic_df$dist[[i]] <- location_BLUEs_realistic_df$data[[i]] %>%
-    filter(line_name %in% tp) %>%
-    filter(environment %in% tp_vp_env_trait[[location_BLUEs_realistic_df$trait[i]]]) %>%
-    distinct(., line_name, environment, value) %>%
-    {
-      dist1 <- dist_env(x = ., gen.col = "line_name", env.col = "environment", pheno.col = "value")
-      # Replace missing with the mean
-      dist1[is.na(dist1)] <- mean(dist1, na.rm = T)
-      dist1
-    }
+  ## Third calculate phenotypic distance
+  loc_PD_i <- dist_env(x = loc_blues_i, gen.col = "line_name", env.col = "environment", pheno.col = "value")
+  loc_PD_i[is.na(loc_PD_i)] <- mean(loc_PD_i, na.rm = TRUE)
+    
 
+  ## Add these to the df
+  location_BLUEs_realistic_df$data[[i]] <- loc_blues_i
+  location_BLUEs_realistic_df$cor[[i]] <- loc_cor_i
+  location_BLUEs_realistic_df$dist[[i]] <- loc_PD_i
+  
 }
 
 
@@ -385,10 +394,10 @@ dist_method_df_realistic <- ec_sim_mat_df1 %>%
   
 
 ## Combine
-## Remove the distance matrices
 dist_method_df <- bind_rows(ammi_distance, dist_method_df_complete, dist_method_df_realistic) %>%
   # filter(set %in% c("complete", "realistic2017")) %>%
-  filter(trait %in% traits)
+  filter(trait %in% traits) %>%
+  arrange(set, trait, model)
 
 
 
@@ -536,68 +545,6 @@ cluster_df <- bind_rows(cluster_df_complete, cluster_df_realistic)
 
 
 
-### Are clusters defined more by location or environment?
-## Compare the proportion of each year/location in a cluster with the expectation of random
-## environment assignments and the cluster assignments 
-## What is the proportion of environments assigned to the same cluster across distance method
-cluster_grouping <- cluster_df %>% 
-  select(-data) %>% 
-  group_by(set, trait, model) %>% 
-  do({
-    row <- .
-    
-    clus <- row$cluster[[1]] %>%
-      mutate(location = str_extract(environment, "[A-Z]{3}"),
-             year = str_extract(environment, "[0-9]{2}"))
-    
-    # List of all locations/years
-    locs <- clus$location
-    yrs <- clus$year
-    
-    ## Calculate proportions of locations and year
-    clus_props <- clus %>% 
-      group_by(cluster) %>% 
-      summarize_at(vars(location, year), funs(list(as.data.frame(table(.))))) %>%
-      mutate(nEnv = map(location, "Freq") %>% map_dbl(sum),
-             nLoc = map_dbl(location, ~n_distinct(.$location)),
-             nYr = map_dbl(year, ~n_distinct(.$year))) %>%
-      # Calculate expectations
-      mutate(expLoc = map_dbl(nEnv, ~mean(replicate(1000, n_distinct(sample(locs, .))))),
-             expYr = map_dbl(nEnv, ~mean(replicate(1000, n_distinct(sample(yrs, .)))))) %>%
-      # Calculate p value from exact binomial test
-      mutate(LocTest = pmap_dbl(list(nLoc, nEnv, expLoc), ~binom.test(x = ..1, n = ..2, p = ..3 / ..2)$p.value),
-             YrTest = pmap_dbl(list(nYr, nEnv, expYr), ~binom.test(x = ..1, n = ..2, p = ..3 / ..2)$p.value))
-    
-
-    ## Calculate some summary
-    summarize_at(clus_props, vars(nEnv:expYr), mean) %>%
-      mutate(LocTest = prop.test(x = nLoc, n = nEnv, p = expLoc / nEnv )$p.value,
-             YrTest = prop.test(x = nYr, n = nEnv, p = expYr / nEnv)$p.value)
-    
-    
-  }) %>% ungroup()
-
-
-
-## Analyze tests
-cluster_grouping %>%
-  select(set:model, LocTest, YrTest) %>%
-  gather(test, p_value, LocTest, YrTest) %>%
-  # filter(p_value < alpha)
-  arrange(p_value)
-
-
-## Table
-cluster_grouping %>%
-  mutate(LocDev = nLoc - expLoc, YrDev = nYr - expYr) %>% 
-  select(set:model, LocDev, YrDev) %>% 
-  gather(term, deviation, LocDev, YrDev) %>% 
-  split(list(.$set, .$trait, .$term)) %>%
-  map_df(~arrange(., desc(abs(deviation)))) %>%
-  write_csv(x = ., path = file.path(fig_dir, "cluster_location_year_bias.csv"))
-  
-
-
 
 
 
@@ -612,11 +559,8 @@ cluster_df_tomodel <- cluster_df %>%
 ## Control for lmer
 control <- lmerControl(check.nobs.vs.nlev = "ignore", check.nobs.vs.nRE = "ignore")
 
-## Option for just ECs
-cluster_varcomp_ec <- cluster_df_tomodel %>% 
-  filter(str_detect(model, "MYEC")) %>%
 
-# cluster_varcomp <- cluster_df_tomodel %>% 
+cluster_varcomp <- cluster_df_tomodel %>%
   group_by(set, model, trait) %>%
   filter(n_distinct(cluster) > 1) %>% # Pass over trait/models that forced a single cluster
   do({
@@ -700,10 +644,10 @@ single_cluster_cases <- cluster_df_tomodel %>%
   filter(n_distinct(cluster) == 1) %>%
   distinct(set, model, trait)
 
-## Recombine varcomp
-cluster_varcomp <- cluster_varcomp %>% 
-  anti_join(., select(cluster_varcomp_ec, set:trait)) %>% 
-  bind_rows(., cluster_varcomp_ec)
+# ## Recombine varcomp
+# cluster_varcomp <- cluster_varcomp %>% 
+#   anti_join(., select(cluster_varcomp_ec, set:trait)) %>% 
+#   bind_rows(., cluster_varcomp_ec)
 
 
 ## Extract heritability
@@ -742,6 +686,10 @@ cluster_herit %>%
 
 
 
+
+
+
+
 ### Rank environments according to a test environment
 ### This will be used for prediction
 ### 
@@ -752,49 +700,34 @@ S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
   filter(trait %in% traits) %>%
   mutate_at(vars(environment:line_name), as.factor)
 
+# First make sure clusters within set/traits have the same environments
+dist_method_df1 <- dist_method_df %>% 
+  filter(!(str_detect(set, "realistic") & model == "AMMI")) %>%
+  # Filter out test/train environments
+  left_join(., train_val_environment_df) %>%
+  ## Group by set and trait and find the common envs in cov and dist
+  split(list(.$trait, .$set)) %>%
+  map_df(~{
+    df <- .x
+    
+    # Intersect row/col names from cov
+    env_in_cov <- df$cov %>% 
+      subset(., !map_lgl(., is.null)) %>%
+      map(row.names) %>% 
+      reduce(intersect)
+    
+    # Subset cov and dist, then return
+    df %>%
+      mutate(cov = map(cov, ~.[env_in_cov, env_in_cov]),
+             dist = map(dist, ~as.matrix(.) %>% .[env_in_cov, env_in_cov] %>% as.dist()))
 
-## For each prediction environment (the tp+vp envs and just the vp envs), rank the 
-## training environments by different distance metrics
-pred_envs <- c(tp_vp_env, vp_only_env)
-train_envs <- c(tp_vp_env, tp_only_env)
-
-
-# Summarize the traits available in those environments
-# # First for test environments
-val_envs_traits <- S2_MET_BLUEs_use %>%
-  filter(environment %in% pred_envs) %>% 
-  filter(trait %in% traits) %>%
-  group_by(environment) %>% 
-  distinct(trait) %>%
-  ungroup() %>%
-  nest(environment, .key = "val_environments") %>%
-  mutate(set = "complete") %>%
-  bind_rows(., cluster_df_realistic %>% filter(!map_lgl(test_env, is.null)) %>% 
-              subset(., model == "great_circle_dist", c(set, trait, test_env)) %>%
-              mutate(val_environments = map(test_env, ~data.frame(environment = .))) %>% 
-              select(-test_env))
-
-
-# Now for training environments
-train_envs_traits <- S2_MET_BLUEs_use %>%
-  filter(environment %in% train_envs) %>% 
-  group_by(environment) %>% 
-  distinct(trait) %>%
-  ungroup() %>%
-  nest(environment, .key = "train_environments") %>%
-  full_join(., val_envs_traits) %>%
-  mutate(train_environments = map2(train_environments, val_environments, ~dplyr::setdiff(.x, .y)),
-         train_environments = ifelse(set == "complete", val_environments, train_environments)) %>%
-  select(-val_environments)
+  })
   
 
 ## Rank the environments relative to each other
 # Do this for both population groups
-env_rank_df <- dist_method_df %>% 
-  filter(!(str_detect(set, "realistic") & model == "AMMI")) %>%
-  left_join(., val_envs_traits) %>%  ## Add validation and training environments
-  left_join(., train_envs_traits) %>%
-  mutate(env_rank = pmap(list(dist, val_environments, train_environments), ~{
+env_rank_df <- dist_method_df1 %>%
+  mutate(env_rank = pmap(list(dist, train_env, test_env), ~{
 
     dmat <- ..1
     val_env_use <- ..2
@@ -803,8 +736,8 @@ env_rank_df <- dist_method_df %>%
     
     ddf <- as.matrix(dmat) %>% 
       broom::fix_data_frame(newcol = "environment") %>%
-      filter(environment %in% val_env_use$environment) %>%
-      select(environment, which(names(.) %in% train_env_use$environment))
+      filter(environment %in% val_env_use) %>%
+      select(environment, which(names(.) %in% train_env_use))
     
     # Create a list of environment ranks
     ddf %>% 
@@ -814,17 +747,26 @@ env_rank_df <- dist_method_df %>%
       map(~.$validation_environment[order(.$distance, decreasing = F)]) %>% ## Decreasing = FALSE (add the most distant (largest) last)
       data_frame(environment = names(.), rank = .)
 
-  })) %>% select(-contains("environments"))
+  })) %>% 
+  select(-contains("environments")) %>%
+  arrange(set, trait, model)
+
 
 
 # Combine this data with the the trait information for the prediction environments
 # This will remove environment-trait combinations that were not observed.
 pred_env_dist_rank <- unnest(env_rank_df, env_rank) %>%
-  inner_join(unnest(val_envs_traits), .,  by = c("environment", "trait", "set")) %>%
   rename(validation_environment = environment)
 
 
+## Sanity check - for each set and trait, do all models contain the same environments?
+pred_env_dist_rank %>% 
+  mutate(nenv = map_dbl(rank, length)) %>% 
+  group_by(set, trait) %>% 
+  filter(n_distinct(nenv) > 1) %>%
+  distinct(trait, set)
 
+## The result should have zero rows - good
 
 
 

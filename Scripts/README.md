@@ -38,6 +38,8 @@ scripts.
     environments together. Analyzes data by calculating heritability
     with or without clustering. Ranks environments based on distance
     measures.
+2.  `cluster_and_rank_analysis.R`: Analyze the similarity measures,
+    environmental ranks, and clusters.
 
 ## Predictions
 
@@ -49,4 +51,9 @@ scripts.
 Note that scripts 1 and 2 are written to run on the Minnesota
 Supercomputing Insititute.
 
-3.  `prediction_analysis.R`:
+3.  `prediction_analysis.R`: Analyze the output from the prediction
+    scripts.
+
+## Other scripts
+
+1.  `figures.R`: Code to produce various other figures.

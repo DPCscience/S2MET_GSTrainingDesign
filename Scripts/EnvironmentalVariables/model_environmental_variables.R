@@ -1404,101 +1404,62 @@ save("ec_mats", "rel_mat_df", file = save_file)
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-##### Appendix
-
-
-## Comment-out the interval variables. We might revisit this.
-
-# ## What interval variables are highly correlated
-# one_year_env_interval_df1 <- one_year_daily_summary_interval %>% 
-#   map(unnest) %>%
-#   map(select, -variable) %>% 
-#   reduce(full_join) %>% 
-#   gather(variable, value, -begin:-environment) %>% 
-#   left_join(env_means_all, .) %>%
-#   # Remove NA
-#   filter(!is.na(value))
+# ################################
+# ## Phenotypic analysis
+# ################################
 # 
-# env_interval_cor <- one_year_env_interval_df1 %>% 
-#   group_by(population, trait, variable, begin, end) %>% 
-#   do(test = cor.test(.$h, .$value)) %>%
-#   ungroup() %>%
-#   mutate(cor = map_dbl(test, "estimate"),
-#          pvalue = map_dbl(test, "p.value"),
-#          df = map_dbl(test, "parameter")) %>%
-#   select(-test)
+# # Packages
+# library(sommer)
 # 
-# ## Plot
-# env_interval_cor_plot_list <- env_interval_cor %>% 
-#   filter(population == "all") %>%
-#   split(list(.$trait, .$variable)) %>% 
-#   map(~ggplot(data = ., aes(x = begin, y = end, fill = cor)) +
-#         geom_tile() +
-#         scale_fill_gradient2() + 
-#         facet_wrap(~ trait + variable) +
-#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
+# # Phenotype data to model
+# pheno_tomodel <- S2_MET_BLUEs %>%
+#   filter(trait %in% traits) %>%
+#   filter(line_name %in% tp) %>%
+#   group_by(trait) %>%
+#   nest() %>%
+#   left_join(., filter(rel_mat_df, set == "complete"))
+#   
 # 
-# # Cowplot
-# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
-# ggsave(filename = "one_year_interval_variable_correlation_space.jpg", plot = env_interval_cor_plot,
-#        path = fig_dir, width = 12, height = 12, dpi = 1000)
-# 
-# 
-# ## Plot
-# env_interval_cor_plot_list <- env_interval_cor %>% 
-#   filter(population == "tp") %>%
-#   split(list(.$trait, .$variable)) %>% 
-#   map(~qplot(x = begin, y = end, fill = cor, geom = "tile", data = .) +
-#         scale_fill_gradient2() + facet_wrap(~ trait + variable) +
-#         theme_acs() + theme(legend.position = c(0.85, 0.35)))
-# 
-# # Cowplot
-# env_interval_cor_plot <- plot_grid(plotlist = env_interval_cor_plot_list, ncol = n_distinct(env_interval_cor$trait))
-# ggsave(filename = "one_year_interval_variable_correlation_space_tp.jpg", plot = env_interval_cor_plot,
-#        path = fig_dir, width = 12, height = 12, dpi = 1000)
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# 
-# ## Find the intervals most correlated with the environmental mean
-# ## Weigh the expected direction of the correlation appropriately
-# env_interval_cor_best <- env_interval_cor %>% 
-#   mutate(wt_cor = ifelse(str_detect(trait, "HeadingDate"), cor * -1, cor)) %>%
-#   # Filter for appropriate correlations
-#   filter(sign(wt_cor) == 1) %>%
-#   group_by(population, trait, variable) %>%
-#   # filter(variable %in% c("AGDD", "GDD")) %>%
-#   # filter(pvalue <= 0.05) %>%
-#   top_n(n = 10, wt = wt_cor) # Take the top 25
-# 
-# 
-# 
-# 
-# ## Create extra variables to use
-# env_interval_use <- env_interval_cor_best %>% 
-#   left_join(one_year_env_interval_df1) %>%
-#   unite(variable, variable, begin, end, sep = "_")
+# # Use the covariates to model GxE
+# ec_gxe_modeling <- pheno_tomodel %>%
+#   group_by(trait, set, ec_group, timeframe, group) %>%
+#   do({
+#     row <- .
+#     df <- row$data[[1]] %>%
+#       mutate_at(vars(line_name, environment), as.factor) %>%
+#       mutate(ge = interaction(line_name, environment, drop = TRUE, sep = ":"))
+#     
+#     # Environment relationship
+#     Emat <- row$sim_mat[[1]]
+#     # Genomic relationship
+#     K <- diag(nlevels(df$line_name)) %>%
+#       `dimnames<-`(., list(levels(df$line_name), levels(df$line_name)))
+#     KE <- kronecker(X = K, Y = Emat, make.dimnames = TRUE)
+#     KE <- KE[levels(df$ge), levels(df$ge)]
+#     
+#     ## Fit a model - use sommer
+#     fit <- mmer(fixed = value ~ 1, random = ~ line_name + environment +
+#                   vs(ge, Gu = KE), data = df)
+#     
+#     
+#     
+#     fit <- relmatLmer(value ~ (1|line_name) + (1|environment) + (1|ge) +,
+#                       data = df, relmat = list(ge = KE))
+#     
+#     # Calculate variance explained
+#     
+#     
+#     
+#   })
 
-##
+
+
+
+
+
+
+
+
+
+
+

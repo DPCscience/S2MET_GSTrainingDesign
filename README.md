@@ -11,37 +11,21 @@ impact of genotype-by-environment interaction when performing genomewide
 prediction. The project includes a panel of 183 training population
 lines, 50 validation population lines, and 9 repeated checks.
 
-## Script Order
+## Data
 
-This is the order in which scripts should be executed to replicate the
-results. All scripts are located in the
-[Scripts](https://github.com/neyhartj/S2MET_Predictions/tree/master/Scripts)
-directory.
+Data used in this study are available from the [Triticeae
+Toolbox](https://triticeaetoolbox.org/barley). See [this
+README](https://github.com/neyhartj/S2MET_Predictions/tree/master/Data)
+for instructions on accessing this data.
 
-Phenotypic data  
-1\. `phenotype_data_adjustment.R` - Calculate genotypic means and
-calculate heritability in each environment.  
-2\. `phenotype_data_summary.R` - Summarize phenotypic data across all
-environments, including distributions and heritability.
+## Scripts
 
-Environmental variables  
-1\. `collect_environmental_variables.R` - Collect environmental
-covariate data from NOAA and Soil Survey databases.  
-2\. `manipulate_analyze_environmental_variables.R` - Calculate summary
-variables, including growing degree days (GDD), accumulated GDD (AGDD),
-and photothermality.  
-3\. `model_environmental_variables.R` - Find the variables that are
-highly correlated with the environmental mean and create covariance and
-distance matrices.
+Scripts used to complete the analysis and generate figures are available
+in the “Scripts” subfolder. See [this
+README](https://github.com/neyhartj/S2MET_Predictions/tree/master/Scripts)
+for information on the scripts and their intended execution order.
 
-Clustering  
-1\. `environmental_clustering.R` - Calculate great circle distance and
-phenotypic distance, then create hierarchical clusters based on the
-distance objects.
-
-Prediction 1.
-
-## Software version
+## Software/package versions
 
 *R* version 3.5.3 was used to complete analyses in this project.
 
@@ -99,6 +83,54 @@ neyhart
 <td style="text-align:left;">
 
 0.0.0.9000
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+ggalt
+
+</td>
+
+<td style="text-align:left;">
+
+0.4.0
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+viridis
+
+</td>
+
+<td style="text-align:left;">
+
+0.5.1
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+viridisLite
+
+</td>
+
+<td style="text-align:left;">
+
+0.3.0
 
 </td>
 
@@ -194,7 +226,7 @@ lme4qtl
 
 <td style="text-align:left;">
 
-0.1.10
+0.2.2
 
 </td>
 
@@ -268,6 +300,70 @@ gridExtra
 
 <td style="text-align:left;">
 
+sommer
+
+</td>
+
+<td style="text-align:left;">
+
+4.0.8
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+crayon
+
+</td>
+
+<td style="text-align:left;">
+
+1.3.4
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+lattice
+
+</td>
+
+<td style="text-align:left;">
+
+0.20-38
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+MASS
+
+</td>
+
+<td style="text-align:left;">
+
+7.3-51.1
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
 flextable
 
 </td>
@@ -316,22 +412,6 @@ kableExtra
 
 <td style="text-align:left;">
 
-pls
-
-</td>
-
-<td style="text-align:left;">
-
-2.7-1
-
-</td>
-
-</tr>
-
-<tr>
-
-<td style="text-align:left;">
-
 optimx
 
 </td>
@@ -355,22 +435,6 @@ lmerTest
 <td style="text-align:left;">
 
 3.1-0
-
-</td>
-
-</tr>
-
-<tr>
-
-<td style="text-align:left;">
-
-measurements
-
-</td>
-
-<td style="text-align:left;">
-
-1.3.0
 
 </td>
 
@@ -540,22 +604,6 @@ modelr
 
 <td style="text-align:left;">
 
-cowplot
-
-</td>
-
-<td style="text-align:left;">
-
-0.9.4
-
-</td>
-
-</tr>
-
-<tr>
-
-<td style="text-align:left;">
-
 ggdendro
 
 </td>
@@ -610,7 +658,7 @@ cluster
 
 <td style="text-align:left;">
 
-2.0.8
+2.0.7-1
 
 </td>
 
@@ -627,6 +675,38 @@ mclust
 <td style="text-align:left;">
 
 5.4.3
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+patchwork
+
+</td>
+
+<td style="text-align:left;">
+
+0.0.1.9000
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+cowplot
+
+</td>
+
+<td style="text-align:left;">
+
+0.9.4
 
 </td>
 
@@ -690,7 +770,7 @@ Matrix
 
 <td style="text-align:left;">
 
-1.2-17
+1.2-15
 
 </td>
 
@@ -818,7 +898,7 @@ ggplot2
 
 <td style="text-align:left;">
 
-3.1.1
+3.2.1
 
 </td>
 
