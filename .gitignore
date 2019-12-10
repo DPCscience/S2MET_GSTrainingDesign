@@ -8,6 +8,8 @@ Summaries/*
 Results/*
 Scripts/Other/*
 *README.Rmd
+*_use.R
+*_use.sh
 Data/RData
 Data/*RData
 Data/environmental_data_compiled.RData

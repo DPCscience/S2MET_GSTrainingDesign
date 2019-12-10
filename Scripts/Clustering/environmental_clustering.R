@@ -33,16 +33,6 @@ load(file.path(result_dir, "genotype_environment_phenotypic_analysis.RData"))
   
 
 
-
-
-
-# # Create a new data.frame to hold the different datasets
-# S2_MET_BLUEs_use <- S2_MET_BLUEs %>%
-#   group_by(trait) %>%
-#   nest() %>%
-#   mutate(data = map(data, droplevels))
-
-
 ## How many of the top genotypes should be used for clustering?
 top_geno <- 1
 
@@ -454,19 +444,6 @@ ec_mat_complete <- ec_mats_data %>%
 ## Use hierarchical clustering instead
 ############################
 
-# cluster_df_complete <- dist_method_df_complete %>%
-#   # filter(model == "pheno_dist", trait == trait[1]) %%>
-#   mutate(clust = map(dist, ~agnes(., method = "ward")),
-#          K_poss = map(clust, ~seq(2, length(.x$order) - 1)),
-#          tree = map2(clust, K_poss, function(c, k) map(k, ~cutree(c, k = .x))),
-#          silhouette = map2(tree, dist, function(t, d) map(t, ~silhouette(x = .x, dist = d))),
-#          sil_width = map(silhouette, ~map_dbl(., ~mean(.[,"sil_width"]))),
-#          # Which trees have clusters with at least 2 environments?
-#          good_trees = map(tree, ~map_lgl(.x, ~all(table(.) >= 2))),
-#          k = pmap_dbl(list(K_poss, sil_width, good_trees), function(x, y, z) x[which(y == max(y[z]))] ))
-
-
-
 
 # Combine
 cluster_df_complete <- bind_rows(gcd_mat_complete, pd_mat_complete, pld_mat_complete, ec_mat_complete, 
@@ -570,17 +547,6 @@ cluster_varcomp <- cluster_df_tomodel %>%
     # Print message
     print(paste(unique(df$trait), unique(df$model)))
     
-    # # Fit a model
-    # # Random effects of genotype, cluster, environment in cluster, G x cluster, and g x environment in cluster
-    # fit <- lmer(value ~ (1|line_name) + (1|cluster) + (1|cluster:environment) + (1|line_name:cluster) + (1|line_name:cluster:environment), 
-    #             data = df, control = control)
-    
-    # ## Alternative model
-    # fit <- lmer(value ~ (1|line_name) + (1|cluster) + (1|cluster:location) + (1|cluster:year) + (1|cluster:location:year) + 
-    #               (1|line_name:cluster) + (1|line_name:cluster:location) + (1|line_name:cluster:year) + (1|line_name:year) +
-    #               (1|line_name:cluster:location:year), 
-    #             data = df, control = control)
-    
     ## Model as in Atlin2000
     formula <- value ~ 1 + (1|year) + (1|cluster) + (1|cluster:location) + (1|cluster:year) +  (1|cluster:location:year) +
       (1|line_name) + (1|line_name:year) + (1|line_name:cluster) + (1|line_name:cluster:location) + (1|line_name:cluster:year) +
@@ -623,14 +589,7 @@ cluster_varcomp <- cluster_df_tomodel %>%
 (line_name:cluster:location:year / (n_l * n_y)) + (Residual / (n_r * n_l * n_y))) + (line_name:year / (n_y)) + 
 (line_name:cluster:year / (n_c * n_y)))"
     H1 <- herit(object = fit, exp = exp, n_c = harm_clust, n_y = harm_year, n_r = harm_rep, n_l = harm_loc)
-    
 
-    
-    # # Random anova
-    # fit_ranova <- ranova(model = fit) %>%
-    #   broom::tidy() %>% 
-    #   filter(!str_detect(term, "none")) %>% 
-    #   mutate(term = str_remove_all(term, "\\(1 \\| |\\)"))
 
     
     ## Return a DF
@@ -643,12 +602,6 @@ single_cluster_cases <- cluster_df_tomodel %>%
   group_by(set, model, trait) %>%
   filter(n_distinct(cluster) == 1) %>%
   distinct(set, model, trait)
-
-# ## Recombine varcomp
-# cluster_varcomp <- cluster_varcomp %>% 
-#   anti_join(., select(cluster_varcomp_ec, set:trait)) %>% 
-#   bind_rows(., cluster_varcomp_ec)
-
 
 ## Extract heritability
 cluster_herit <- cluster_varcomp %>%

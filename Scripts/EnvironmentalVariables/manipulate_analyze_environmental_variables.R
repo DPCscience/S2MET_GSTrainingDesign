@@ -42,6 +42,8 @@ range_overlap <- function(x, y) {
     return(0)
   }}
 
+
+
 # Calculate the proportion of each layer within the topsoil
 # Use a weighted mean of the proportion of each horizon within topsoil vs subsoil
 # to calculate the value in each layer
@@ -280,52 +282,6 @@ phototherm_stats <- one_year_growth_staging %>%
 oneyear_summary_df_interval <- map_df(c("coord_clim_summ", "interval_summ_stats", ls(pattern = "(annual|isotherm)[_a-zA-Z]*interval$")), get)
 
 oneyear_summary_df_stage <- map_df(c("coord_clim_summ", "stage_summ_stats", ls(pattern = "(annual|isotherm)[_a-zA-Z]*stage$")), get)
-
-
-
-
-# # Create a daily summary
-# one_year_daily_summary <- list(
-#   agdd = agdd_stats_adj1,
-#   phototherm = phototherm_stats1,
-#   gdd = gdd_stats1,
-#   phototherm_gdd = phototherm_stats_gdd1
-# )
-
-
-# # Set the maximum number of days in the interval length
-# max_days <- 90
-# 
-# ## For each environment and daily covariable, build intervals of the average variable
-# one_year_daily_summary_interval <- one_year_daily_summary %>%
-#   map(~{
-#     df <- .
-#     
-#     # Find the minimum day among environments.
-#     min_day <- group_by(df, environment) %>% 
-#       summarize_at(vars(contains("dap")), min) %>% 
-#       pull() %>% 
-#       max()
-#     
-#     # Build the intervals
-#     intervals_df <- crossing(begin = seq(min_day, min_day + max_days), end = seq(min_day + max_days)) %>% 
-#       filter(begin <= end)
-#     
-#     # For each environment, convert the day to starting from 1 (planting day)
-#     df1 <- df %>% 
-#       group_by(environment)
-#     
-#     # Iterate over the intervals
-#     intervals_summ <- pmap(intervals_df, ~filter(df1, between(dap, .x, .y)) %>% 
-#                              summarize_at(vars(-environment, -dap), mean))
-#     
-#     
-#     mutate(intervals_df, variable = tail(names(df), 1), out = intervals_summ)
-#     
-#   })
-
-
-
 
 
 
@@ -574,105 +530,6 @@ multiyear_summary_df_stage <- c("coord_clim_summ", "stage_summ_stats", ls(patter
   group_by(environment, variable) %>%
   summarize(value = mean(value, na.rm = TRUE)) %>%
   ungroup()
-
-
-
-
-  
-# # Combine the monthly and annual data
-# multi_year_summary_df <- bind_rows(interval_summ_stats, 
-#                                    annual_TAVG, 
-#                                    annual_means, 
-#                                    annual_range_min_max, 
-#                                    isotherm, 
-#                                    annual_prcp) %>%
-#   # Summarize over the 10-year average
-#   ungroup() %>% 
-#   filter(year >= env_year - 10, year <= env_year - 1) %>% 
-#   mutate(value = ifelse(is.infinite(value), NA, value)) %>% # Convert infinites to NA
-#   group_by(environment, variable) %>%
-#   summarize(value = mean(value, na.rm = TRUE)) %>%
-#   ungroup() %>%
-#   bind_rows(., filter(coord_clim_summ, !is.na(value)))
-# 
-# ## Average GDD and photothermality for each day over years
-# gdd_stats_avg <- gdd_stats1 %>% 
-#   filter(year >= env_year - 10, year <= env_year - 1) %>% 
-#   group_by(environment, dap) %>% 
-#   summarize(GDD = mean(GDD, na.rm = TRUE)) %>%
-#   ungroup()
-# 
-# agdd_stats_avg <- agdd_stats_adj1 %>% 
-#   filter(year >= env_year - 10, year <= env_year - 1) %>% 
-#   group_by(environment, dap) %>% 
-#   summarize(AGDD = mean(AGDD, na.rm = TRUE)) %>%
-#   ungroup()
-# 
-# phototherm_daily_stats_avg <- phototherm_stats_gdd1 %>% 
-#   filter(year >= env_year - 10, year <= env_year - 1) %>% 
-#   group_by(environment, dap) %>% 
-#   summarize(daily_phototherm = mean(daily_phototherm, na.rm = TRUE)) %>%
-#   ungroup()
-# 
-# phototherm_stats_avg <- phototherm_stats1 %>% 
-#   filter(year >= env_year - 10, year <= env_year - 1) %>% 
-#   group_by(environment, dap) %>% 
-#   summarize(phototherm = mean(phototherm, na.rm = TRUE)) %>%
-#   ungroup()
-# 
-# 
-# multi_year_daily_summary <- list(
-#   gdd = gdd_stats_avg,
-#   agdd = agdd_stats_avg,
-#   phototherm_gdd = phototherm_daily_stats_avg,
-#   phototherm = phototherm_stats_avg
-# )
-# 
-# 
-# 
-# 
-# # Set the maximum number of days in the interval length
-# max_days <- 90
-# 
-# ## For each environment and daily covariable, build intervals of the average variable
-# multi_year_daily_summary_interval <- multi_year_daily_summary %>%
-#   map(~{
-#     df <- .
-#     
-#     # Find the minimum day among environments.
-#     min_day <- group_by(df, environment) %>% 
-#       summarize_at(vars(contains("dap")), min) %>% 
-#       pull() %>% 
-#       max()
-#     
-#     # Build the intervals
-#     intervals_df <- crossing(begin = seq(min_day, min_day + max_days), end = seq(min_day + max_days)) %>% 
-#       filter(begin <= end)
-#     
-#     # For each environment, convert the day to starting from 1 (planting day)
-#     df1 <- df %>% 
-#       group_by(environment)
-#     
-#     
-#     # Iterate over the intervals
-#     intervals_summ <- pmap(intervals_df, ~filter(df1, between( dap, .x, .y)) %>% 
-#                              summarize_at(vars(-environment, -dap), mean))
-#     
-#     
-#     mutate(intervals_df, variable = tail(names(df), 1), out = intervals_summ)
-#     
-#   })
-
-
-
-
-
-
-
-
-
-
-
 
 
   

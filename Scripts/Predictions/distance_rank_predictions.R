@@ -7,7 +7,8 @@
 
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/"
+repo_dir <- "/path/to/project/directory/on/supercomputer"
+
 source(file.path(repo_dir, "source_MSI.R"))
 library(data.table)
 

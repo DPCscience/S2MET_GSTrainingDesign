@@ -59,12 +59,6 @@ ec_date_replace <- c("annual_" = "Anno", "max_" = "Max", "min_" = "Min", "interv
 ## 
 
 
-# # First create a list of data split by whether all lines are used or just the TP
-# data_to_model <- list(tp = tp, all = c(tp, vp)) %>% 
-#   map(~filter(S2_MET_BLUEs, line_name %in% .)) %>%
-#   list(., names(.)) %>%
-#   pmap_df(~mutate(.x, population = .y))
-
 data_to_model <- training_sets_twoway %>%
   filter(trait %in% traits) %>%
   select(-varE) %>% 
@@ -434,17 +428,7 @@ for (i in seq(nrow(env_mean_mr))) {
     base_fit2 <- lm(base_formula2, pheno_df)
     full_fit2 <- NULL
   }
-  
-  
-  # ## Mixed model version
-  # # Formula
-  # base_formula2 <- value ~ (1|line_name) + environment
-  # full_formula2 <- add_predictors(base_formula2, as.formula(paste0("~", paste0("(0 + ", sig_ecs, "|line_name)", collapse = " + "))))
-  # 
-  # # Fit just the base model
-  # base_fit2 <- lmer(base_formula2, pheno_df)
-  # # Fit the full model with interactions
-  # full_fit2 <- lmer(full_formula2, pheno_df)
+
   
 
   ## Return a tidy df of the model
@@ -567,11 +551,6 @@ env_mean_mr2 %>%
 
 ## For each set, trait, and ec_group, determine the overlap in ECs that were determined
 ## to be significant
-
-# (overlap <- env_mean_mr2 %>% 
-#   select(set:timeframe, ecs) %>% 
-#   spread(timeframe, ecs) %>%
-#   mutate(ec_overlap = map2(.x = growth_stage, .y = interval, intersect)))
 
 
 ## Determine EC overlap between LOYO years
@@ -848,17 +827,6 @@ for (i in seq(nrow(env_ipca_mr))) {
     base_fit2 <- lm(base_formula2, pheno_df)
     full_fit2 <- NULL
   }
-  
-  
-  # ## Mixed model version
-  # # Formula
-  # base_formula2 <- value ~ (1|line_name) + environment
-  # full_formula2 <- add_predictors(base_formula2, as.formula(paste0("~", paste0("(0 + ", sig_ecs, "|line_name)", collapse = " + "))))
-  # 
-  # # Fit just the base model
-  # base_fit2 <- lmer(base_formula2, pheno_df)
-  # # Fit the full model with interactions
-  # full_fit2 <- lmer(full_formula2, pheno_df)
   
   
   ## Return a tidy df of the model
@@ -1251,77 +1219,6 @@ bind_rows(env_mean_topn_cor1, env_ipca_topn_cor) %>%
 
 
 
-# ### Poster figures
-# 
-# 
-# ## For each trait, plot the ECs most correlated with the mean or the IPCA score
-# env_mean_cor_top <- env_mean_cor_sig %>%
-#   filter(set == "complete", ec_group == "multi_year", variable != "ph1to1h2o_r_subsoil") %>%
-#   left_join(., ec_env_df3) %>%
-#   mutate(variable1 = case_when(
-#     variable == "interval_2_PPT" ~ "Month 2 Precipitation",
-#     variable == "interval_2_TMIN" ~ "Month 2 Average Min. Temp.",
-#     variable == "annual_TSEASON" ~ "Annual Temperature Seasonality (Max. - Min.)"
-#   )) %>%
-#   group_by(trait) %>% 
-#   top_n(n = 1, wt = -p_value) %>%
-#   ggplot(aes(x = value, y = h)) + 
-#   geom_smooth(method = "lm", se = FALSE) + 
-#   geom_point() + 
-#   facet_wrap( ~ trait + variable, scale = "free", labeller = labeller(trait = str_add_space), ncol = 1) + 
-#   ylab(expression("Environmental effect (deviation from"~mu*")")) +
-#   xlab("Covariate value") +
-#   scale_x_continuous(breaks = pretty) +
-#   scale_y_continuous(breaks = pretty) +
-#   labs(title = expression(Example~italic(Mean-EC)~covariables)) +
-#   theme_presentation2()
-# 
-# ggsave(filename = "env_mean_cor_top_poster.jpg", plot = env_mean_cor_top, path = fig_dir, width = 5, height = 10, dpi = 1000)
-# 
-# 
-# ## Subset the most important covariates
-# env_ipca_cor_sig_plot <-  env_ipca_cor_sig %>%
-#   filter(set == "complete", ec_group == "multi_year") %>%
-#   group_by(trait) %>% 
-#   top_n(n = 1, wt = -p_value) %>%
-#   ungroup() %>%
-#   left_join(., filter(ec_score_df, PC == "PC1")) %>%
-#   left_join(., unnest(env_ipca_mr1, cors)) %>%
-#   mutate(variable1 = case_when(
-#     # variable == "max_PPT" ~ "Max. Monthly Precipitation",
-#     variable == "interval_2_PPT" ~ "Month 2 Precip.",
-#     variable == "interval_1_TMAX" ~ "Month 1 Average Max. Temp.",
-#     variable == "isothermality" ~ "Annual Isothermality"
-#   )) 
-# 
-# 
-# 
-# 
-# env_ipca_cor_top <-env_ipca_cor_sig_plot %>%
-#   ggplot(aes(x = value, y = score)) + 
-#   geom_smooth(method = "lm", se = FALSE) + 
-#   geom_point() + 
-#   # geom_text(aes(x = Inf, y = -Inf, label = paste0("r = ", formatC(correlation, 2))), hjust = 1, vjust = -1) + 
-#   facet_wrap( ~ trait + variable, scale = "free", labeller = labeller(trait = str_add_space), ncol = 1) + 
-#   ylab("Environmental IPCA score") +
-#   xlab("Covariate value") +
-#   scale_x_continuous(breaks = pretty) +
-#   scale_y_continuous(breaks = pretty) +
-#   labs(title = expression(Example~italic(IPCA-EC)~covariables)) +
-#   theme_presentation2()
-# 
-# ggsave(filename = "env_ipca_cor_top_poster.jpg", plot = env_ipca_cor_top, path = fig_dir, width = 5, height = 10, dpi = 1000)
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1400,66 +1297,4 @@ rel_mat_df <- ec_mats %>%
 ## Save the distance matrices
 save_file <- file.path(result_dir, "environmental_covariable_distance_mat.RData")
 save("ec_mats", "rel_mat_df", file = save_file)
-
-
-
-
-# ################################
-# ## Phenotypic analysis
-# ################################
-# 
-# # Packages
-# library(sommer)
-# 
-# # Phenotype data to model
-# pheno_tomodel <- S2_MET_BLUEs %>%
-#   filter(trait %in% traits) %>%
-#   filter(line_name %in% tp) %>%
-#   group_by(trait) %>%
-#   nest() %>%
-#   left_join(., filter(rel_mat_df, set == "complete"))
-#   
-# 
-# # Use the covariates to model GxE
-# ec_gxe_modeling <- pheno_tomodel %>%
-#   group_by(trait, set, ec_group, timeframe, group) %>%
-#   do({
-#     row <- .
-#     df <- row$data[[1]] %>%
-#       mutate_at(vars(line_name, environment), as.factor) %>%
-#       mutate(ge = interaction(line_name, environment, drop = TRUE, sep = ":"))
-#     
-#     # Environment relationship
-#     Emat <- row$sim_mat[[1]]
-#     # Genomic relationship
-#     K <- diag(nlevels(df$line_name)) %>%
-#       `dimnames<-`(., list(levels(df$line_name), levels(df$line_name)))
-#     KE <- kronecker(X = K, Y = Emat, make.dimnames = TRUE)
-#     KE <- KE[levels(df$ge), levels(df$ge)]
-#     
-#     ## Fit a model - use sommer
-#     fit <- mmer(fixed = value ~ 1, random = ~ line_name + environment +
-#                   vs(ge, Gu = KE), data = df)
-#     
-#     
-#     
-#     fit <- relmatLmer(value ~ (1|line_name) + (1|environment) + (1|ge) +,
-#                       data = df, relmat = list(ge = KE))
-#     
-#     # Calculate variance explained
-#     
-#     
-#     
-#   })
-
-
-
-
-
-
-
-
-
-
-
 

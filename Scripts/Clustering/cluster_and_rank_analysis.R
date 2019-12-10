@@ -516,43 +516,6 @@ ggsave(filename = "cluster_compare_heatmap_combined.jpg", plot = cluster_compare
 
 
 
-# #### Greyscale version
-# cluster_compare_hm_list <- cluster_compare1 %>% 
-#   filter(!(str_detect(set,"realistic") & model == "AMMI")) %>%
-#   filter(set %in% c("complete", "realistic2017")) %>%
-#   filter(trait %in% traits) %>% 
-#   mutate(set = str_replace_all(set, set_replace),
-#          # set = str_replace_all(set, "Time-forward", "Leave-one-year-out "),
-#          set = str_replace_all(set, "2017", ""),
-#          prop_common = ifelse(model == model1, NA, prop_common),
-#          annotation_use = ifelse(model == model1, annotation1, round(prop_common, 2))) %>%
-#   filter(!lower_triangle) %>%
-#   split(.$set) %>%
-#   map(~ggplot(data = ., aes(x = model, y = model1, fill = prop_common)) + 
-#         geom_tile() +  
-#         geom_text(aes(label = annotation_use), size = 2) + 
-#         scale_fill_gradient2(low = grey.colors(11)[11], mid = grey.colors(11)[5], high = grey.colors(10)[1], 
-#                              midpoint = 0.5, limits = c(0, 1), na.value = "grey95",
-#                              name = "Proportion of\noverlap") +
-#         facet_wrap(~ trait, labeller = labeller(trait = str_add_space)) +
-#         labs(subtitle = unique(.$set)) +
-#         theme_presentation2(base_size = 10) +
-#         theme(axis.title = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "bottom") )
-# 
-# g_cluster_compare <- plot_grid(plotlist = map(cluster_compare_hm_list, ~. + theme(legend.position = "none")), ncol = 1, 
-#                                labels = LETTERS[seq_along(cluster_compare_hm_list)], align = "hv")
-# # g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]]), ncol = 1, rel_heights = c(1, 0.1))
-# g_cluster_compare1 <- plot_grid(g_cluster_compare, get_legend(cluster_compare_hm_list[[1]] + theme(legend.position = "right")), 
-#                                 nrow = 1, rel_widths = c(1, 0.15))
-# 
-# 
-# ggsave(filename = "cluster_compare_heatmap_greyscale.jpg", plot = g_cluster_compare1, path = fig_dir, width = 6.5, height = 5, dpi = 1000)
-
-
-
-
-
-
 
 
 
@@ -665,31 +628,5 @@ write_csv(x = cluster_varcomp_table, path = file.path(fig_dir, "cluster_varcomp_
 # 22 pheno_location_dist  GrainYield line_name:cluster 2.789433e+04  40.461515  1 2.005272e-10
 # 23 pheno_location_dist HeadingDate line_name:cluster 1.871909e+00 169.755848  1 8.365500e-39
 # 24 pheno_location_dist PlantHeight line_name:cluster 9.410029e-01  17.598128  1 2.728568e-05
-
-## Line_name:cluster:
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

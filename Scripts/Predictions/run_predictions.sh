@@ -6,21 +6,18 @@
 #PBS -N environmental_distance_pred
 # # #PBS -N environmental_covariance_predictions
 # #PBS -N cluster_preds
-#PBS -M neyha001@umn.edu
+#PBS -M username@emaildomain.com
 #PBS -m abe
 #PBS -r n
 
 # Change the working directory
-cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/S2MET_Predictions/Scripts/Predictions/
+cd /path/to/directory/containing/folder/Scripts
 
 module load R/3.5.0
-# module load R/3.5.2_mkl
 
 # Predictions by environmental rank
 Rscript distance_rank_predictions.R
 
-# # Predictions 
-# Rscript environment_covariance_matrix_predictions.R
 
 # Cluster predictions
 # Rscript all_data_cluster_predictions.R

@@ -32,7 +32,9 @@ K <- A.mat(X = s2_imputed_mat, min.MAF = 0, max.missing = 1)
 
 
 # Load the tidy S2 data
-load("C:/Users/jln54/GoogleDrive/BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_pheno.RData")
+load("path/to/S2_tidy_pheno.RData")
+
+
 
 # Subset the traits and relevant trials
 S2_MET_tidy <- s2_tidy_pheno %>%
@@ -57,6 +59,10 @@ data_to_model <- S2_MET_tidy %>%
          line = ifelse(!line_name %in% checks, line_name, "00check"),
          check = ifelse(line_name %in% checks, line_name, "00line")) %>%
   mutate_at(vars(rep, line, check, row, column, blk), as.factor)
+
+
+
+
 
 
 ## Add heading date as AGDD
@@ -164,13 +170,7 @@ for (i in seq(nrow(stage_one_results))) {
     as.formula()
   
   fit_ran <- lmer(formula = ran_form, data = df)
-  
-  # ## List of line names in both the pheno and the K
-  # K_lines <- intersect(levels(df$line), colnames(K))
-  # K_use <- K[K_lines, K_lines]
-  # K_use <- rbind(cbind(K_use, `00check` = 0), `00check` = 0); K_use["00check", "00check"] <- 2
-  # fit_ran1 <- lme4qtl::relmatLmer(formula = ran_form, data = df, relmat = list(line = K_use), 
-  #                                 subset = line %in% K_lines | line == "00check")
+
   
   
   # Find the harmonic mean of the number of replicates
@@ -269,12 +269,6 @@ g_herit_se <- stage_one_data %>%
 # Save
 save_file <- file.path(data_dir, "S2_MET_BLUEs.RData")
 save("S2_MET_BLUEs_all", "S2_MET_BLUEs", "stage_one_data", file = save_file)
-
-
-# # Save
-# save_file <- file.path(data_dir, "S2_MET_BLUEs_malt_quality.RData") 
-# save("S2_MET_BLUEs_all", "S2_MET_BLUEs", "stage_one_data", file = save_file)
-# 
 
 
 
