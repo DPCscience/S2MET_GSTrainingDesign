@@ -7,7 +7,7 @@ Below are descriptions of each script (organized under the subfolders
 within this folder). This is the intended order of executing these
 scripts.
 
-## PhenoypeData
+## PhenotypeData
 
 1.  `phenotype_data_adjustment.R`: Calculate adjusted genotype means
     within each experimental trial according to the specific
