@@ -8,8 +8,8 @@
 This repository contains information and code for replicating the
 analyses performed in the article below:
 
-Article Title: *Multi-Trait Improvement by Predicting Genetic
-Correlations in Breeding Crosses*  
+Article Title: *Using Environmental Similarities to Design Training Sets
+for Genomewide Selection*  
 Journal: *Crop Science* (under review)  
 Authors: Jeffrey L. Neyhart, Lucía Gutiérrez, and Kevin P. Smith  
 Link to article
@@ -34,8 +34,8 @@ Three scripts in this directory are used by all other scripts:
 
 1.  `source.R` - loads packages, creates directory links, and loads
     data.
-2.  `source_MSI.R` - runs script \#1 with modifications for
-    the[Minnesota Supercomputing Institute](https://www.msi.umn.edu/).
+2.  `source_MSI.R` - runs script \#1 with modifications for the
+    [Minnesota Supercomputing Institute](https://www.msi.umn.edu/).
 3.  `source_functions.R` - loads additional functions into the
     environment.
 
@@ -176,7 +176,7 @@ cluster
 
 <td style="text-align:left;">
 
-2.0.7-1
+2.0.8
 
 </td>
 
@@ -336,7 +336,7 @@ ggalt
 
 <td style="text-align:left;">
 
-0.4.0
+0.6.2
 
 </td>
 
@@ -480,7 +480,7 @@ lme4qtl
 
 <td style="text-align:left;">
 
-0.2.2
+0.1.10
 
 </td>
 
@@ -528,7 +528,7 @@ MASS
 
 <td style="text-align:left;">
 
-7.3-51.1
+7.3-51.3
 
 </td>
 
@@ -544,7 +544,7 @@ Matrix
 
 <td style="text-align:left;">
 
-1.2-15
+1.2-17
 
 </td>
 
@@ -656,7 +656,7 @@ patchwork
 
 <td style="text-align:left;">
 
-0.0.1.9000
+0.0.1
 
 </td>
 
@@ -826,6 +826,22 @@ rvest
 
 <td style="text-align:left;">
 
+slide
+
+</td>
+
+<td style="text-align:left;">
+
+0.0.0.9002
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
 soilDB
 
 </td>
@@ -848,7 +864,7 @@ sommer
 
 <td style="text-align:left;">
 
-4.0.8
+3.9.3
 
 </td>
 
