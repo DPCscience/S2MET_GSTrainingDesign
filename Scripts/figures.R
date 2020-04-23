@@ -12,6 +12,8 @@
 library(broom)
 library(cowplot)
 library(patchwork)
+library(ggrepel)
+library(ggsn)
 
 # The head directory
 repo_dir <- getwd()
@@ -221,19 +223,8 @@ ggsave(filename = "tp_vp_relatedness_greyscale.jpg", plot = g_relatedness, path 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 ## Plot the trial locations
+
 
 # Get the map data for canada
 canada <- map_data("world", "Canada")
@@ -254,30 +245,144 @@ usa_county <- usa_county %>%
 # Tidy and combine
 north_america <- bind_rows(usa_state, usa_county, canada)
 
-# Edit the trial information
-trial_info_toplot <- trial_info %>%
-  filter(is.na(notes)) %>%
-  group_by(location) %>%
-  mutate(n_year = as.factor(n_distinct(year))) %>%
-  select(location, lat = latitude, long = longitude, n_year) %>%
-  distinct()
 
-# Map
-g_map <- ggplot(data = north_america, aes(x = long, y = lat)) +
-  geom_polygon(fill = "white") +
-  geom_polygon(data = canada, aes(group = group), fill = "grey85", color = "grey50", lwd = 0.75) + # Add canada
-  geom_polygon(data = usa_state, aes(group = group), fill = "grey85", color = "grey50", lwd = 0.75) +
-  geom_point(data = trial_info_toplot, aes(size = n_year)) +
-  coord_map(projection = "mercator", xlim = c(-125, -60), ylim = c(25, 50)) +
-  scale_size_manual(values = seq(3,7, length.out = 3), name = "Years in\nExperiment") +
-  theme_void(base_size = 14) +
-  theme(legend.position = c(0.85, 0.15))
+## Now create labels for each location (as a combination of all environments)
+use_loc_info_toplot <-  trial_info %>% 
+  filter(environment %in% tp_vp_env) %>%
+  filter(is.na(notes)) %>%
+  group_by(location, latitude, longitude) %>%
+  summarize(n_years = n_distinct(year)) %>%
+  ungroup() %>%
+  mutate(n_years = factor(n_years, levels = sort(unique(n_years))),
+         location = str_to_title(str_replace_all(location, "_", " ")))
+
+
+## Collapse Ithaca
+use_loc_info_toplot1 <- use_loc_info_toplot %>% 
+  mutate(location = str_remove(location, "[0-9]{1}"), 
+         n_years = parse_number(as.character(n_years))) %>% 
+  group_by(location) %>% 
+  mutate(n_trials = sum(n_years)) %>% 
+  slice(1) %>%
+  ungroup()
+
+
+# Coordinate limits
+long_limit <- c(-115, -70)
+lat_limit <- c(37, 50)
+
+## Different version of the map - grey
+g_map_alt <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "grey85") +
+  geom_polygon(data = canada, fill = NA, color = "white", lwd = 0.3) + # Add canada
+  geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "white", lwd = 0.3) +
+  # geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, group = location, color = location, size = n_years), alpha = 0.70) +
+  geom_point(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location), size = 3.5) +
+  geom_text_repel(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location, label = location), 
+                  size = 2, hjust = 0.5, nudge_x = -1, segment.size = 0.2, point.padding = unit(2, "pt"),
+                  min.segment.length = 1) +
+  geom_text(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location, label = n_trials), size = 2, 
+            color = ifelse(use_loc_info_toplot1$location == "Arlington", "black", "white")) +
+  coord_fixed(ratio = 1.5, xlim = long_limit, ylim = lat_limit) +
+  scale_color_manual(guide = FALSE, values = colors_use) + 
+  scale_x_continuous(breaks = NULL, name = NULL, labels = NULL) + 
+  scale_y_continuous(breaks = NULL, name = NULL, labels = NULL) +
+  theme_classic() +
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        panel.border = element_rect(colour = "black", fill = alpha("white", 0)), axis.line = element_blank()) +
+  north(location = "bottomleft", symbol = 12, x.min = min(long_limit) - 2, x.max = max(long_limit), 
+              y.min = min(lat_limit) + 2, y.max = max(lat_limit)) +
+  # Add an example point
+  geom_point(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1), size = 3, inherit.aes = FALSE) +
+  geom_text(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1, label = "2"), color = "white", 
+            size = 2, inherit.aes = FALSE) +
+  geom_text(aes(x = min(long_limit) + 1.2, y = min(lat_limit) + 1, label = "No. years at location"), 
+            size = 2, inherit.aes = FALSE, hjust = 0, nudge_x = 0.1)
 
 
 # Save the figure
-ggsave(filename = "trial_location_map.jpg", plot = g_map, path = fig_dir,
-       width = 8, height = 5, dpi = 1000)
-  
+ggsave(filename = "site_map_paper_alt.jpg", plot = g_map_alt, path = fig_dir, width = 3.5, height = 1.75, dpi = 1000)
+
+
+
+
+
+## Now create labels for each location (as a combination of all environments)
+loc_info_toplot <-  trial_info %>% 
+  filter(is.na(notes)) %>%
+  group_by(location, latitude, longitude) %>%
+  summarize(n_years = n_distinct(year)) %>%
+  ungroup() %>%
+  mutate(n_years = factor(n_years, levels = sort(unique(n_years))))
+
+
+
+# Map
+g_map1 <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "white") +
+  geom_polygon(data = canada, fill = NA, color = "grey50", lwd = 0.5) + # Add canada
+  geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "grey50", lwd = 0.5) +
+  geom_point(data = loc_info_toplot, aes(x = longitude, y = latitude, group = location, color = location, size = n_years), alpha = 0.70) +
+  coord_map(projection = "albers", lat0 = 35, lat1 = 50,  xlim = c(-125, -65), ylim = c(35, 50)) +
+  scale_color_manual(guide = FALSE, values = colors_use) + 
+  scale_size_discrete(name = "Number of years observed\nat location", guide = guide_legend(title.position = "left", order = 1, title.hjust = 1)) +
+  scale_x_continuous(breaks = pretty) + 
+  scale_y_continuous(breaks = pretty) +
+  xlab("Longitude") +
+  ylab("Latitude") + 
+  theme_presentation2(base_size = 10) + 
+  theme(panel.background = element_blank(), panel.grid = element_blank(), panel.border = element_blank(), axis.line = element_blank(),
+        legend.position = "bottom", legend.direction = "horizontal", legend.justification = "center", plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank())
+
+
+# Save the figure
+ggsave(filename = "site_map1.jpg", plot = g_map1, path = fig_dir,
+       width = 4, height = 3, dpi = 1000)
+
+
+## Project map - no color
+g_map_nocolor_base <- ggplot(data = north_america, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "white") +
+  geom_polygon(data = canada, fill = NA, color = "grey50", lwd = 0.3) + # Add canada
+  geom_polygon(data = usa_state, aes(x = long, y = lat, group = group), fill = NA, color = "grey50", lwd = 0.3) +
+  coord_map(projection = "albers", lat0 = 35, lat1 = 50,  xlim = c(-125, -65), ylim = c(35, 48.1)) +
+  # scale_color_manual(guide = FALSE, values = colors_use) + 
+  scale_size_discrete(name = "Number of trial years at a location", guide = guide_legend(title.position = "left", order = 1, title.hjust = 1)) +
+  scale_x_continuous(breaks = pretty) + 
+  scale_y_continuous(breaks = pretty) +
+  xlab("Longitude") +
+  ylab("Latitude") + 
+  theme_presentation2(base_size = 10) + 
+  theme(panel.background = element_blank(), panel.grid = element_blank(), panel.border = element_blank(), axis.line = element_blank(),
+        legend.position = "bottom", legend.direction = "horizontal", legend.justification = "center", plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank())
+
+# Save the figure
+ggsave(filename = "site_map_nocolor_blank.jpg", plot = g_map_nocolor_base, path = fig_dir,
+       width = 5, height = 2.5, dpi = 1000)
+
+g_map_nocolor <- g_map_nocolor_base +
+  geom_point(data = loc_info_toplot, aes(x = longitude, y = latitude, group = location, size = n_years), 
+             color = neyhart_palette("barley")[1], alpha = 0.70)
+
+# Save the figure
+ggsave(filename = "site_map_nocolor.jpg", plot = g_map_nocolor, path = fig_dir,
+       width = 5, height = 4, dpi = 1000)
+
+
+g_map_nocolor1 <- g_map_nocolor_base + 
+  geom_point(data = use_loc_info_toplot, aes(x = longitude, y = latitude, group = location, size = n_years), 
+             color = neyhart_palette("barley")[1], alpha = 0.70)
+
+# Save the figure
+ggsave(filename = "site_map_nocolor_filter.jpg", plot = g_map_nocolor1, path = fig_dir,
+       width = 5, height = 4, dpi = 1000)
+
+
+
+
+
 
 
 

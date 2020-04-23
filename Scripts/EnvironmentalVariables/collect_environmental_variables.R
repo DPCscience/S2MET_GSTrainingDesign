@@ -150,7 +150,7 @@ save("daylength_loc_df", file = save_file)
 
 
 # API token
-token <- 'ubmUkwrtxZOQLeyXZdtCMjkKcCTpPDcK'
+token <- '' # Add NOAA token here
 
 # Set a threshold for missing data on a station-datatype-year basis
 max_missing <- 0.20
