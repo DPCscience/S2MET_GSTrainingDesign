@@ -17,7 +17,7 @@ library(ggsn)
 
 # The head directory
 repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
+source(file.path(repo_dir, "source_use.R"))
 
 ## Calculate genomic relationship
 genom_rel <- matrix(data = 0, nrow = nrow(K), ncol = ncol(K), dimnames = dimnames(K))
@@ -226,8 +226,10 @@ ggsave(filename = "tp_vp_relatedness_greyscale.jpg", plot = g_relatedness, path 
 ## Plot the trial locations
 
 
-# Get the map data for canada
-canada <- map_data("world", "Canada")
+# Provinces
+canada <- rnaturalearth::ne_states(country = "canada") %>%
+  tidy(x = ., region = "name_en") %>%
+  mutate(group = as.numeric(as.factor(group)))
 
 # Download map data for US by county
 usa_county <- map_data(map = "county")
@@ -284,24 +286,26 @@ g_map_alt <- ggplot(data = north_america, aes(x = long, y = lat, group = group))
   geom_text(data = use_loc_info_toplot1, aes(x = longitude, y = latitude, group = location, label = n_trials), size = 2, 
             color = ifelse(use_loc_info_toplot1$location == "Arlington", "black", "white")) +
   coord_fixed(ratio = 1.5, xlim = long_limit, ylim = lat_limit) +
-  scale_color_manual(guide = FALSE, values = colors_use) + 
+  # scale_color_manual(guide = FALSE, values = colors_use) + 
   scale_x_continuous(breaks = NULL, name = NULL, labels = NULL) + 
   scale_y_continuous(breaks = NULL, name = NULL, labels = NULL) +
   theme_classic() +
   theme(panel.background = element_blank(), panel.grid = element_blank(), 
-        panel.border = element_rect(colour = "black", fill = alpha("white", 0)), axis.line = element_blank()) +
-  north(location = "bottomleft", symbol = 12, x.min = min(long_limit) - 2, x.max = max(long_limit), 
-              y.min = min(lat_limit) + 2, y.max = max(lat_limit)) +
-  # Add an example point
-  geom_point(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1), size = 3, inherit.aes = FALSE) +
-  geom_text(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1, label = "2"), color = "white", 
-            size = 2, inherit.aes = FALSE) +
-  geom_text(aes(x = min(long_limit) + 1.2, y = min(lat_limit) + 1, label = "No. years at location"), 
-            size = 2, inherit.aes = FALSE, hjust = 0, nudge_x = 0.1)
+        panel.border = element_rect(colour = "black", fill = alpha("white", 0)), axis.line = element_blank())
+  
+  # # Add an example point
+  # geom_point(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1), size = 3, inherit.aes = FALSE) +
+  # geom_text(aes(x = min(long_limit) + 0.3, y = min(lat_limit) + 1, label = "2"), color = "white", 
+  #           size = 2, inherit.aes = FALSE) +
+  # geom_text(aes(x = min(long_limit) + 1.2, y = min(lat_limit) + 1, label = "No. years at location"), 
+  #           size = 2, inherit.aes = FALSE, hjust = 0, nudge_x = 0.1)
 
 
 # Save the figure
 ggsave(filename = "site_map_paper_alt.jpg", plot = g_map_alt, path = fig_dir, width = 3.5, height = 1.75, dpi = 1000)
+
+# Tiff version
+ggsave(filename = "figure1.pdf", plot = g_map_alt, path = fig_dir, width = 3.5, height = 1.75, dpi = 2000)
 
 
 

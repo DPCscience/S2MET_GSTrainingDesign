@@ -137,9 +137,7 @@ fwr <- function(formula, data, gen = "line_name", env = "environment") {
 
 ## Write a function to subset a distance matrix using a set of environments
 subset_env <- function(dist, envs) {
-  as.matrix(dist) %>%
-    .[envs, envs] %>%
-    as.dist()
+  as.matrix(dist) %>% .[envs, envs, drop = FALSE] %>% as.dist()
 }
 
 
@@ -293,40 +291,187 @@ gblup <- function(formula, random, K, train, test, fun = c("rrblup", "sommer"), 
 }
 
 
-
-## Calculate fixed effects
-geno_means <- function(formula = value ~ -1 + line_name + environment, data) {
+## A slightly different gblup function
+gblup2 <- function(train, test, K, weightedR = TRUE, method = c("sommer", "rrBLUP")) {
   
-  ## Get the terms in the model
-  terms <- terms(formula)
-  term_labels <- attr(terms, "term.labels")
+  # Adjust the standard error
+  method <- match.arg(method)
   
-  # Check the levels of these terms
-  terms_levels <- sapply(data[term_labels], n_distinct)
-  ## Drop terms that only have 1 level
-  terms_drop <- which(terms_levels <= 1)
+  if (method == "sommer") {
+    
+    train$weights <- 1 / (train$std_error^2)
+    
   
-  if (length(terms_drop) > 0) {
-    formula_use <- formula(drop.terms(terms, terms_drop, keep.response = TRUE))
+    # Adjust fixed effect formula based on number of envs
+    if (length(unique(train$environment)) == 1) {
+      fixed <- value ~ 1
+    } else {
+      fixed <- value ~ 1 + environment
+    }
+    
+    if (weightedR) {
+      
+      # Fit a model using sommer
+      # Fixed effect of environment and random genotype
+      # Include residual weights
+      fit <- mmer(fixed = fixed,
+                  random = ~ vs(line_name, Gu = K),
+                  rcov = ~ units,
+                  weights = weights,
+                  # verbose = FALSE,
+                  data = train)
+      
+    } else {
+      
+      # Fit a model using sommer
+      # Fixed effect of environment and random genotype
+      # Include residual weights
+      fit <- mmer(fixed = fixed,
+                  random = ~ vs(line_name, Gu = K),
+                  rcov = ~ units,
+                  # weights = weights,
+                  # verbose = FALSE,
+                  data = train)
+      
+    }
+    
+    # Get the PGVs
+    pgv <- fit$U$`u:line_name`$value
+    pgv <- data.frame(line_name = names(pgv), pred_value = pgv, 
+                      row.names = NULL, stringsAsFactors = FALSE)
+    
   } else {
-    formula_use <- formula
+    
+    # Adjust fixed effect formula based on number of envs
+    if (length(unique(train$environment)) == 1) {
+      fit <- kin.blup(data = as.data.frame(train), geno = "line_name", pheno = "value", K = K)
+      
+    } else {
+      fit <- kin.blup(data = as.data.frame(train), geno = "line_name", pheno = "value", 
+                      K = K, fixed = "environment")
+    
+    }
+    
+    # Get the PGVs
+    pgv <- fit$g
+    pgv <- data.frame(line_name = names(pgv), pred_value = pgv, 
+                      row.names = NULL, stringsAsFactors = FALSE)
+
   }
   
-  ## Fit
-  # Contrasts list
-  term_labels <- attr(terms(formula_use), "term.labels")
-  contrasts <- setNames(object = replicate(length(term_labels), "contr.sum", simplify = FALSE), nm = term_labels)
+  # Combine predictions with test
+  comb <- left_join(test, pgv, by = "line_name")
+  acc <- cor(comb$value, comb$pred_value)
   
-  fit <- lm(formula = formula_use, data = data, contrasts = contrasts)
+  # Return a list
+  list(accuracy = acc, pgv = comb)
   
-  # Extract the blues
-  coef(fit) %>%
-    data.frame(line_name = names(.), value = ., row.names = NULL, stringsAsFactors = FALSE) %>%
-    filter(str_detect(line_name, "line_name")) %>%
-    mutate(line_name = factor(str_remove_all(line_name, "line_name"), levels = c(tp_geno, vp_geno)),
-           environment = "blue", std_error = 0)
   
 }
+
+
+
+
+
+
+## Calculate fixed effects
+geno_means <- function(object, term = "line_name") {
+  
+  # Get the number of levels in term
+  term_levels <- levels(model.frame(object)[[term]])
+  
+  # coefficient
+  coefs <- coef(object)
+  # mean
+  mu <- coefs[1]
+  # Effects
+  term_effs <- coefs[2:length(term_levels)]
+  term_effs1 <- c(term_effs, -sum(term_effs)) + mu
+
+  # Return the blues
+  term_effs_df <- data.frame(term = term_levels, mean = term_effs1, 
+                             stringsAsFactors = FALSE, row.names = NULL)
+  names(term_effs_df)[1] <- term
+  return(term_effs_df)
+  
+}
+
+
+
+## A function to make predictions give a list of training sets and a single testing set
+## 
+## The function:
+## 1. Calculates genotype means in the training set
+## 2. Makes predictions
+## 3. Returns predictions and the calculated predictive ability
+## 
+map_predict <- function(train.list, test, K) {
+  
+  ## Determine the number of environments in each element of train.list
+  train_list_nEnv <- map_dbl(train.list, ~n_distinct(.$environment))
+  
+  # Fit a pre-model
+  train_list1 <- train.list %>%
+    map(droplevels) %>%
+    map(~mutate(.x, weights = 1 / (std_error^2))) %>%
+    ## Modify only at elements with > 1 environment
+    modify_if(.x = ., .p = train_list_nEnv != 1, .f = ~mutate_at(., vars(line_name, environment), ~fct_contr_sum(as.factor(.))) %>%
+                lm(value ~ 1 + line_name + environment, data = ., weights = .$weights) %>%
+                geno_means(.) %>% 
+                mutate(environment = "blue") %>% 
+                rename(value = mean))
+  
+  # Empty vector to store prediction accuracy estimates
+  pred1 <- vector("numeric", length(train_list1))
+  
+  ## Predict
+  pred1 <- lapply(X = train_list1, FUN = gblup2, K = K, test = test, method = "rrBLUP")
+  
+  # Return the pred1 list
+  return(pred1)
+  
+}
+
+
+## A function to make predictions give a list of training sets and a list of testing sets
+## 
+## The function:
+## 1. Calculates genotype means in the training set
+## 2. Makes predictions
+## 3. Returns predictions and the calculated predictive ability
+## 
+map2_predict <- function(train.list, test.list, K) {
+  
+  ## Determine the number of environments in each element of train.list
+  train_list_nEnv <- map_dbl(train.list, ~n_distinct(.$environment))
+  
+  # Fit a pre-model
+  train_list1 <- train.list %>%
+    map(droplevels) %>%
+    map(~mutate(.x, weights = 1 / (std_error^2))) %>%
+    ## Modify only at elements with > 1 environment
+    modify_if(.x = ., .p = train_list_nEnv != 1, .f = ~mutate_at(., vars(line_name, environment), ~fct_contr_sum(as.factor(.))) %>%
+                lm(value ~ 1 + line_name + environment, data = ., weights = .$weights) %>%
+                geno_means(.) %>% 
+                mutate(environment = "blue") %>% 
+                rename(value = mean))
+  
+  # Empty vector to store prediction accuracy estimates
+  pred1 <- vector("numeric", length(train_list1))
+  
+  ## Predict
+  pred1 <- mapply(train_list1, test.list, FUN = function(.x, .y) gblup2(train = .x, test = .y, K = K, method = "rrBLUP"),
+                  SIMPLIFY = FALSE)
+  
+  # Return the pred1 list
+  return(pred1)
+  
+}
+
+
+
+
+
 
 
 
@@ -492,242 +637,6 @@ env_mclust <- function(data, min_env = 2, test.env, method = c("mclust", "pam"),
   
 }
   
-
-
-  
-## Prediction functions for cross-validation
-## Functions for each model
-model1 <- function(train, test) {
-  fit_m1 <- lmer(value ~ 1 + (1|line_name) + (1|environment), data = train)
-  pred <- test %>% 
-    mutate(pred_value = predict(object = fit_m1, newdata = ., allow.new.levels = TRUE)) %>%
-    select(environment, line_name, value, pred_value)
-  
-  return(pred)
-}
-
-model2 <- function(train, test, Kg, Ke) {
-  mf <- train %>% 
-    mutate(LineName = line_name,
-           line_name = factor(line_name, levels = colnames(Kg))) %>%
-    model.frame(value ~ line_name + LineName + environment, data = .)
-  
-  # Matrices
-  y <- model.response(mf)
-  X <- model.matrix(~ 1, data = mf)
-  Zg <- model.matrix(~ -1 + line_name, mf)
-  colnames(Zg) <- colnames(Kg)
-  ZE <- model.matrix(~ -1 + environment, mf)
-  colnames(ZE) <- unique(mf$environment)
-  
-  
-  
-  # If Ke is missing, use diagonal
-  if (missing(Ke)) Ke <- diag(ncol(ZE))
-  
-  # Fit
-  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = Kg), E = list(Z = ZE, K = Ke)), silent = TRUE)
-  
-  # Predictions
-  pred_g <- fit$u.hat$g %>%
-    as.data.frame() %>%
-    rownames_to_column("line_name") %>%
-    rename(g = T1)
-  pred_E <- fit$u.hat$E %>%
-    as.data.frame() %>%
-    rownames_to_column("environment") %>%
-    rename(E = T1)
-  
-  pred <- left_join(test, pred_g, by = "line_name") %>%
-    left_join(., pred_E, by = "environment") %>%
-    mutate(pred_value = rowSums(select(., g, E), na.rm = TRUE)) %>%
-    select(environment, line_name, value, pred_value)
-  
-  
-  # ZE <- model.matrix(~ 1 + environment, mf, contrasts.arg = list(environment = "contr.sum"))
-  # colnames(ZE) <- c("mean", head(unique(mf$environment), -1))
-  # 
-  # fit_alt <- mixed.solve(y = y, Z = Zg, K = Kg, X = ZE)
-  # 
-  # 
-  # pred_g <- fit_alt$u %>% 
-  #   as.data.frame() %>%
-  #   rownames_to_column("line_name") %>%
-  #   rename_at(vars(-line_name), ~"g")
-  # pred_E <- fit_alt$beta[-1] %>% 
-  #   as.data.frame() %>% 
-  #   rownames_to_column("environment") %>%
-  #   rename_at(vars(-environment), ~"E") %>% 
-  #   add_row(environment = tail(unique(mf$environment), 1), E = -sum(.$E))
-  # 
-  # pred_alt <- left_join(test, pred_g, by = "line_name") %>%
-  #   left_join(., pred_E, by = "environment") %>%
-  #   mutate(pred_value = g + E) %>%
-  #   select(environment, line_name, value, pred_value)
-  
-  return(pred)
-  
-}
-
-
-
-model3 <- function(train, test, Kg, Ke) {
-  mf <- train %>% 
-    mutate(LineName = line_name,
-           line_name = factor(line_name, levels = colnames(Kg)),
-           interaction = interaction(line_name, environment, sep = ":")) %>%
-    model.frame(value ~ line_name + LineName + environment + interaction, data = .)
-  
-  # Matrices
-  y <- model.response(mf)
-  X <- model.matrix(~ 1, data = mf)
-  Zg <- model.matrix(~ -1 + line_name, mf)
-  colnames(Zg) <- colnames(Kg)
-  ZG <- model.matrix(~ -1 + LineName, mf)
-  ZE <- model.matrix(~ -1 + environment, mf)
-  colnames(ZE) <- unique(mf$environment)
-  ZgE <- model.matrix(~ -1 + interaction, mf)
-  colnames(ZgE) <- levels(mf$interaction)
-  
-  # If Ke is missing, use diagonal
-  if (missing(Ke)) Ke <- diag(ncol(ZE))
-  
-  # K_gE <- (Zg %*% Kg %*% t(Zg)) * (ZE %*% Ke %*% t(ZE))
-  K_gE <- kronecker(X = Ke, Y = Kg, make.dimnames = TRUE)
-  dimnames(K_gE) <- replicate(2, colnames(ZgE), simplify = FALSE)
-  
-  # Fit
-  fit <- sommer::mmer(Y = y, X = X, Z = list(g = list(Z = Zg, K = Kg), E = list(Z = ZE, K = Ke), gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
-  # fit <- sommer::mmer(Y = y, X = X, Z = list(gE = list(Z = ZgE, K = K_gE)), silent = TRUE)
-  
-  
-  # Predictions
-  pred_g <- fit$u.hat$g %>%
-    as.data.frame() %>%
-    rownames_to_column("line_name") %>%
-    rename(g = T1)
-  pred_E <- fit$u.hat$E %>%
-    as.data.frame() %>%
-    rownames_to_column("environment") %>%
-    rename(E = T1)
-  pred_gE <- fit$u.hat$gE %>%
-    as.data.frame() %>%
-    rownames_to_column("term") %>%
-    separate(term, c("line_name", "environment"), sep = ":") %>%
-    rename(gE = T1)
-  
-  pred <- left_join(test, pred_g, by = "line_name") %>%
-    left_join(., pred_E, by = "environment") %>%
-    left_join(., pred_gE, by = c("line_name", "environment")) %>%
-    mutate(pred_value = rowSums(select(., g, E, gE), na.rm = TRUE)) %>%
-    select(environment, line_name, value, pred_value)
-    
-  # pred <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
-  #   mutate(pred_value = rowSums(select(., gE), na.rm = TRUE)) %>%
-  #   select(environment, line_name, value, pred_value)
-
-  
-  return(pred)
-  
-}
-
-
-
-## Model 4 has a single random effect (main effect of G)
-model4 <- function(train, test, Kg) {
-  
-  mf <- train %>% 
-    mutate(line_name = factor(line_name, levels = colnames(Kg)),
-           environment = as.factor(environment),
-           interaction = interaction(line_name, environment, sep = ":")) %>%
-    model.frame(value ~ line_name  + environment + interaction, data = .)
-  
-  ## First fit model accounting for G and E (no GxE)
-  fit <- lm(value ~ line_name + environment, data = mf)
-  # Get the marginal means
-  means <- effects::Effect("line_name", fit) %>%
-    as.data.frame()
-  
-  mf1 <- means %>%
-    select(line_name, value = fit) %>%
-    mutate(line_name = factor(line_name, levels = colnames(Kg))) %>%
-    model.frame(value ~ line_name, data = .)
-  
-  # Matrices
-  y <- model.response(mf1)
-  X <- model.matrix(~ 1, data = mf1)
-  Zg <- model.matrix(~ -1 + line_name, mf1)
-  colnames(Zg) <- colnames(Kg)
-
-
-  ## Prediction
-  fit_alt <- mixed.solve(y = y, Z = Zg, K = Kg, X = X)
-
-  # Extract the predictions
-  pred_g <- fit_alt$u %>%
-    as.data.frame() %>%
-    rownames_to_column("line_name") %>%
-    rename_at(vars(-line_name), ~"g")
-
-  # Add test data
-  pred_alt <- left_join(test, pred_g, by = c("line_name")) %>%
-    mutate(pred_value = g) %>%
-    select(environment, line_name, value, pred_value)
-  
-  
-  return(pred_alt)
-  
-}
-
-
-## Model 5 has a single random effect (GxE)
-model5 <- function(train, test, Kg, Ke) {
-  
-  mf <- train %>% 
-    mutate(line_name = factor(line_name, levels = colnames(Kg)),
-           environment = as.factor(environment),
-           interaction = interaction(line_name, environment, sep = ":")) %>%
-    model.frame(value ~ line_name  + environment + interaction, data = .)
-  
-  # Matrices
-  y <- model.response(mf)
-  X <- model.matrix(~ 1, data = mf)
-  Zg <- model.matrix(~ -1 + line_name, mf)
-  colnames(Zg) <- colnames(Kg)
-  ZE <- model.matrix(~ -1 + environment, mf)
-  colnames(ZE) <- levels(mf$environment)
-  # Interaction
-  ZgE <- model.matrix(~ -1 + line_name:environment, mf)
-  colnames(ZgE) <- levels(mf$interaction)
-  
-  # GxE covariance matrix
-  # If Ke is missing, use diagonal
-  if (missing(Ke)) Ke <- diag(ncol(ZE))
-  
-  # K_gE <- (Zg %*% Kg %*% t(Zg)) * (ZE %*% Ke %*% t(ZE))
-  KgE <- kronecker(X = Ke, Y = Kg, make.dimnames = TRUE)
-  dimnames(KgE) <- replicate(2, colnames(ZgE), simplify = FALSE)
-  
-  
-  ## Prediction
-  fit_alt <- mixed.solve(y = y, Z = ZgE, K = KgE, X = X)
-  
-  # Extract the predictions
-  pred_gE <- fit_alt$u %>%
-    as.data.frame() %>%
-    rownames_to_column("term") %>%
-    separate(term, c("line_name", "environment"), sep = ":") %>%
-    rename_at(vars(-line_name, -environment), ~"gE")
-  
-  # Add test data
-  pred_alt <- left_join(test, pred_gE, by = c("line_name", "environment")) %>%
-    mutate(pred_value = gE) %>%
-    select(environment, line_name, value, pred_value)
-  
-  return(pred_alt)
-  
-}
-
 
 
 

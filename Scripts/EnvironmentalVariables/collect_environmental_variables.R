@@ -10,7 +10,7 @@
 
 # Run the source script
 repo_dir <- getwd()
-source(file.path(repo_dir, "source.R"))
+source(file.path(repo_dir, "source_use.R"))
 
 
 # Load packages and set directories

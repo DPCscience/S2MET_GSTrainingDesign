@@ -13,8 +13,7 @@ scripts.
     within each experimental trial according to the specific
     experimental design of that trial.
 2.  `phenotype_data_summary.R`: Calculates summary statistics and fits
-    linear mixed models to analyze the phenotypic data. Also included
-    scripts for producing geographic maps of the trial locations.
+    linear mixed models to analyze the phenotypic data.
 
 ## EnvironmentalVariables
 
@@ -56,4 +55,5 @@ Supercomputing Insititute.
 
 ## Other scripts
 
-1.  `figures.R`: Code to produce various other figures.
+1.  `figures.R`: Code to produce various other figures.  Also included
+    scripts for producing geographic maps of the trial locations.

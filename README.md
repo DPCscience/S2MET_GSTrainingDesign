@@ -1,18 +1,19 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# S2MET Training Design
+# S2MET Predictions
 
 ## Description
 
 This repository contains information and code for replicating the
 analyses performed in the article below:
 
-Article Title: *Using Environmental Similarities to Design Training Sets
-for Genomewide Selection*  
-Journal: *Crop Science* (under review)  
+Article Title: *Using environmental similarities to design training sets
+for genomewide selection*  
+Journal: *Crop Science*  
 Authors: Jeffrey L. Neyhart, Lucía Gutiérrez, and Kevin P. Smith  
-Link to article
+[Link to
+article](https://acsess.onlinelibrary.wiley.com/doi/abs/10.1002/csc2.20303)
 
 ## Navigation
 
@@ -34,8 +35,8 @@ Three scripts in this directory are used by all other scripts:
 
 1.  `source.R` - loads packages, creates directory links, and loads
     data.
-2.  `source_MSI.R` - runs script \#1 with modifications for the
-    [Minnesota Supercomputing Institute](https://www.msi.umn.edu/).
+2.  `source_MSI.R` - runs script \#1 with modifications for
+    the[Minnesota Supercomputing Institute](https://www.msi.umn.edu/).
 3.  `source_functions.R` - loads additional functions into the
     environment.
 
@@ -192,7 +193,7 @@ cowplot
 
 <td style="text-align:left;">
 
-0.9.4
+1.0.0
 
 </td>
 
@@ -368,7 +369,7 @@ ggplot2
 
 <td style="text-align:left;">
 
-3.2.1
+3.3.2
 
 </td>
 
@@ -401,6 +402,22 @@ ggridges
 <td style="text-align:left;">
 
 0.5.1
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+ggsn
+
+</td>
+
+<td style="text-align:left;">
+
+0.5.0
 
 </td>
 
@@ -608,7 +625,7 @@ neyhart
 
 <td style="text-align:left;">
 
-0.0.0.9000
+0.0.1
 
 </td>
 
@@ -656,7 +673,7 @@ patchwork
 
 <td style="text-align:left;">
 
-0.0.1
+1.0.1
 
 </td>
 
@@ -688,7 +705,7 @@ purrr
 
 <td style="text-align:left;">
 
-0.3.2
+0.3.4
 
 </td>
 
@@ -864,7 +881,7 @@ sommer
 
 <td style="text-align:left;">
 
-3.9.3
+4.1.0
 
 </td>
 
